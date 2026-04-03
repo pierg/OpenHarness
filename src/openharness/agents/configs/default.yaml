@@ -26,7 +26,9 @@ prompts:
   user: |
     {{ instruction }}
 
-    {% if payload is defined and payload %}
+    {% if payload %}
     # Additional Context
-    {{ payload }}
+    {% for key, value in payload.items() %}
+    - {{ key }}: {{ value }}
+    {% endfor %}
     {% endif %}

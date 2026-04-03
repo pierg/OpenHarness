@@ -19,6 +19,7 @@ from openharness.api.client import SupportsStreamingMessages
 from openharness.api.provider import detect_provider
 from openharness.config import load_settings
 from openharness.observability import create_trace_observer
+from openharness.permissions.modes import PermissionMode
 from openharness.runtime.session import AgentLogPaths, AgentRuntime
 from openharness.services.runs import save_run_manifest
 from openharness.tools.base import ToolRegistryFactory
@@ -56,6 +57,8 @@ class OpenHarnessHarborAgent(BaseAgent):
         api_client: SupportsStreamingMessages | None = None,
         extra_env: dict[str, str] | None = None,
         remote_cwd: str = "/app",
+        max_turns: int | None = None,
+        max_tokens: int | None = None,
         tool_registry_factory: ToolRegistryFactory | None = None,
         **kwargs: object,
     ) -> None:
@@ -70,6 +73,20 @@ class OpenHarnessHarborAgent(BaseAgent):
 
         self._agent_name = agent_name
         factory = AgentFactory.with_default_configs()
+        config = factory.get_config(agent_name)
+
+        overrides: dict[str, Any] = {}
+        if resolved_model_name:
+            overrides["model"] = resolved_model_name
+        if max_turns is not None:
+            overrides["max_turns"] = max_turns
+        if max_tokens is not None:
+            overrides["max_tokens"] = max_tokens
+
+        if overrides:
+            config = config.model_copy(update=overrides)
+            factory.register(config)
+
         self._agent = factory.create(agent_name)
 
         self._api_client = api_client
@@ -134,6 +151,7 @@ class OpenHarnessHarborAgent(BaseAgent):
             runtime = AgentRuntime(
                 workspace=workspace,
                 settings=resolved_settings,
+                permission_mode=PermissionMode.FULL_AUTO,
                 api_client=self._api_client,
                 log_paths=log_paths,
                 trace_observer=trace_observer,

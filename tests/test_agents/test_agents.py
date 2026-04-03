@@ -9,6 +9,7 @@ from pathlib import Path
 import pytest
 
 from openharness.agents import AgentConfig, SimpleAgent, TaskDefinition
+from openharness.permissions.modes import PermissionMode
 from openharness.runtime.session import AgentLogPaths, AgentRuntime
 from openharness.workspace import CommandResult, LocalWorkspace, Workspace
 from openharness.tools import WorkspaceToolRegistryFactory
@@ -149,6 +150,7 @@ async def test_simple_agent_writes_file_and_returns_result(tmp_path: Path):
     
     runtime = AgentRuntime(
         workspace=workspace,
+        permission_mode=PermissionMode.FULL_AUTO,
         api_client=api_client,
         log_paths=AgentLogPaths(
             messages_path=str(tmp_path / "messages.jsonl"),

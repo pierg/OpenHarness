@@ -238,8 +238,7 @@ async def _execute_tool_call(
             is_error=True,
         )
 
-    # Extract file_path and command for path-level permission checks
-    _file_path = str(tool_input.get("file_path", "")) or None
+    _file_path = str(tool_input.get("path") or tool_input.get("file_path") or "") or None
     _command = str(tool_input.get("command", "")) or None
     decision = context.permission_checker.evaluate(
         tool_name,

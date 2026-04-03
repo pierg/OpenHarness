@@ -16,7 +16,7 @@ from openharness.api.client import SupportsStreamingMessages
 from openharness.api.factory import create_api_client
 from openharness.api.provider import detect_provider
 from openharness.config import load_settings
-from openharness.config.settings import PermissionSettings, Settings
+from openharness.config.settings import Settings
 from openharness.engine.cost_tracker import CostTracker
 from openharness.engine.messages import ConversationMessage
 from openharness.engine.query import QueryContext
@@ -28,6 +28,7 @@ from openharness.engine.stream_events import (
     ToolExecutionStarted,
 )
 from openharness.observability import NullTraceObserver, TraceObserver
+from openharness.config.settings import PermissionSettings
 from openharness.permissions import PermissionChecker
 from openharness.permissions.modes import PermissionMode
 from openharness.prompts.context import build_runtime_system_prompt
@@ -67,6 +68,7 @@ class AgentRuntime:
         tool_registry: ToolRegistry | None = None,
         *,
         settings: Settings | None = None,
+        permission_mode: PermissionMode | None = None,
         api_client: SupportsStreamingMessages | None = None,
         log_paths: AgentLogPaths | None = None,
         trace_observer: TraceObserver | None = None,
@@ -82,9 +84,11 @@ class AgentRuntime:
         self._log_paths = log_paths
         self._trace_observer = trace_observer or NullTraceObserver()
         self._tracker = CostTracker()
-        self._permission_checker = PermissionChecker(
-            PermissionSettings(mode=PermissionMode.FULL_AUTO),
-        )
+
+        perm_settings = self.settings.permission
+        if permission_mode is not None:
+            perm_settings = perm_settings.model_copy(update={"mode": permission_mode})
+        self._permission_checker = PermissionChecker(perm_settings)
 
     @property
     def api_client(self) -> SupportsStreamingMessages:
@@ -279,7 +283,7 @@ class AgentRuntime:
         )
         system_prompt += schema_instruction
 
-        user_payload = {"instruction": task.instruction, **task.payload, **extra}
+        user_payload = {"instruction": task.instruction, "payload": task.payload, **task.payload, **extra}
         user_message = config.render_prompt("user", **user_payload)
 
         tool_registry = self._build_tool_registry(config.tools)

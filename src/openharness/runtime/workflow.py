@@ -10,6 +10,7 @@ from openharness.agents.contracts import AgentRunResult, TaskDefinition
 from openharness.agents.factory import AgentFactory
 from openharness.api.client import SupportsStreamingMessages
 from openharness.observability import TraceObserver
+from openharness.permissions.modes import PermissionMode
 from openharness.runtime.session import AgentLogPaths, AgentRuntime
 from openharness.workspace import Workspace
 
@@ -62,6 +63,7 @@ class Workflow:
 
         runtime = AgentRuntime(
             workspace=self.workspace,
+            permission_mode=PermissionMode.FULL_AUTO,
             api_client=api_client,
             log_paths=log_paths,
             trace_observer=trace_observer,
