@@ -16,10 +16,10 @@ from openharness.config.settings import Settings
 def create_api_client(settings: Settings) -> SupportsStreamingMessages:
     """Return the appropriate client for the model configured in *settings*.
 
-    - Gemini models (``gemini-*`` / ``*/gemini*``) → ``GeminiApiClient``.
+    - Gemini models (``gemini-*`` / ``*/gemini*``) -> ``GeminiApiClient``.
       Vertex AI is used when ``settings.vertex_project`` is set; otherwise
       the Google AI Studio key is resolved via ``settings.resolve_api_key()``.
-    - All other models → ``AnthropicApiClient``.
+    - All other models -> ``AnthropicApiClient``.
     """
     if _is_gemini(settings.model):
         from openharness.api.gemini_client import GeminiApiClient  # noqa: PLC0415
