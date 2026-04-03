@@ -1,0 +1,11 @@
+schema_version = "1.1"
+
+[task]
+name = "openharness/fix-sum-evens"
+description = "Fix a parity bug in a Python function so its tests pass."
+
+[environment]
+cpus = 1
+memory_mb = 512
+storage_mb = 2048
+allow_internet = false
