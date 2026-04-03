@@ -23,6 +23,7 @@ from openharness.engine.stream_events import (
     ToolExecutionStarted,
 )
 from openharness.hooks import HookEvent, HookExecutor
+from openharness.observability import TraceObserver
 from openharness.permissions.checker import PermissionChecker
 from openharness.tools.base import ToolExecutionContext
 from openharness.tools.base import ToolRegistry
@@ -48,6 +49,7 @@ class QueryContext:
     max_turns: int = 8
     hook_executor: HookExecutor | None = None
     tool_metadata: dict[str, object] | None = None
+    trace_observer: TraceObserver | None = None
 
 
 async def run_query(
