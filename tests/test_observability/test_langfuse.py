@@ -5,10 +5,16 @@ from __future__ import annotations
 from contextlib import contextmanager
 from typing import Any
 
+from dataclasses import dataclass
+from pathlib import Path
+
+from pydantic import BaseModel
+
 from openharness.observability.langfuse import (
     LangfuseTraceObserver,
     NullObservationHandle,
     NullTraceObserver,
+    _coerce_jsonable,
     create_trace_observer,
 )
 
@@ -60,6 +66,60 @@ def _make_observer(**overrides: Any) -> LangfuseTraceObserver:
                     cwd="/tmp", model="claude-test", provider="anthropic")
     defaults.update(overrides)
     return LangfuseTraceObserver(**defaults)
+
+
+# ---------------------------------------------------------------------------
+# _coerce_jsonable
+# ---------------------------------------------------------------------------
+
+
+def test_coerce_primitives():
+    assert _coerce_jsonable(None) is None
+    assert _coerce_jsonable(42) == 42
+    assert _coerce_jsonable(3.14) == 3.14
+    assert _coerce_jsonable(True) is True
+    assert _coerce_jsonable("hi") == "hi"
+
+
+def test_coerce_path():
+    assert _coerce_jsonable(Path("/tmp/run")) == "/tmp/run"
+
+
+def test_coerce_pydantic_model():
+    class M(BaseModel):
+        x: int = 1
+
+    assert _coerce_jsonable(M()) == {"x": 1}
+
+
+def test_coerce_dataclass():
+    @dataclass
+    class D:
+        a: int = 2
+
+    assert _coerce_jsonable(D()) == {"a": 2}
+
+
+def test_coerce_dict_recursively():
+    result = _coerce_jsonable({"p": Path("/x"), "n": 1})
+    assert result == {"p": "/x", "n": 1}
+
+
+def test_coerce_list_recursively():
+    assert _coerce_jsonable([Path("/a"), 1]) == ["/a", 1]
+
+
+def test_coerce_tuple_and_set_to_list():
+    assert _coerce_jsonable((1, 2)) == [1, 2]
+    assert sorted(_coerce_jsonable({3, 4})) == [3, 4]
+
+
+def test_coerce_unknown_falls_back_to_str():
+    class Weird:
+        def __str__(self) -> str:
+            return "weird"
+
+    assert _coerce_jsonable(Weird()) == "weird"
 
 
 # ---------------------------------------------------------------------------
@@ -143,6 +203,15 @@ def test_observation_handle_update_and_close():
     handle.update(output="done")
     handle.close()
     assert client.started[-1]["obs"].updates == [{"output": "done"}]
+
+
+def test_observation_handle_update_skips_none_values():
+    client = _FakeClient()
+    observer = _make_observer(client=client)
+    handle = observer.start_turn(prompt="hi")
+    handle.update(output=None, usage={"tokens": 10})
+    # None values are filtered; only non-None kwargs reach the observation
+    assert client.started[-1]["obs"].updates == [{"usage": {"tokens": 10}}]
 
 
 def test_observation_handle_close_is_idempotent():
