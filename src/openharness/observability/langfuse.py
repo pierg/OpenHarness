@@ -301,32 +301,28 @@ def create_trace_observer(
         log.warning("langfuse package not installed, tracing disabled.")
         return NullTraceObserver()
 
-    try:
-        client = Langfuse(
-            public_key=os.environ["LANGFUSE_PUBLIC_KEY"],
-            secret_key=os.environ["LANGFUSE_SECRET_KEY"],
-            base_url=os.environ.get("LANGFUSE_BASE_URL") or None,
-            host=os.environ.get("LANGFUSE_HOST") or None,
-            environment=os.environ.get("LANGFUSE_ENVIRONMENT") or None,
-            release=os.environ.get("LANGFUSE_RELEASE") or None,
-            sample_rate=float(s) if (s := os.environ.get("LANGFUSE_SAMPLE_RATE")) else None,
-        )
-    except Exception as exc:
-        log.warning("Failed to initialise Langfuse client, tracing disabled: %s", exc)
-        return NullTraceObserver()
+    client = Langfuse(
+        public_key=os.environ["LANGFUSE_PUBLIC_KEY"],
+        secret_key=os.environ["LANGFUSE_SECRET_KEY"],
+        base_url=os.environ.get("LANGFUSE_BASE_URL") or None,
+        host=os.environ.get("LANGFUSE_HOST") or None,
+        environment=os.environ.get("LANGFUSE_ENVIRONMENT") or None,
+        release=os.environ.get("LANGFUSE_RELEASE") or None,
+        sample_rate=float(s) if (s := os.environ.get("LANGFUSE_SAMPLE_RATE")) else None,
+    )
 
     if _env_truthy(os.environ.get("OPENHARNESS_LANGFUSE_VERIFY", "1")):
         try:
             if not client.auth_check():
                 log.warning("Langfuse auth check failed, tracing disabled.")
                 return NullTraceObserver()
-        except Exception as exc:
-            log.warning("Langfuse auth check failed, tracing disabled: %s", exc)
+        except OSError as exc:
+            log.warning("Langfuse auth check failed, tracing disabled: %s", exc, exc_info=True)
             return NullTraceObserver()
 
     try:
         user_id = os.environ.get("OPENHARNESS_USER_ID") or os.environ.get("USER") or getpass.getuser()
-    except Exception:
+    except OSError:
         user_id = None
 
     return LangfuseTraceObserver(
