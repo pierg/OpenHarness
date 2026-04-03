@@ -12,7 +12,6 @@ from uuid import uuid4
 from openharness.agents.contracts import (
     AgentLogPaths,
     AgentRunContext,
-    AgentRunResult,
     ToolRegistryFactory,
 )
 from openharness.agents.simple import OpenHarnessSimpleAgent, OpenHarnessSimpleAgentConfig

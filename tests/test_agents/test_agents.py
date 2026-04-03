@@ -157,7 +157,7 @@ async def test_simple_agent_writes_file_and_returns_result(tmp_path: Path):
     assert result.output_tokens == 10
     assert workspace.files["/workspace/hello.txt"] == b"Hello!\n"
 
-    events = [json.loads(l) for l in (tmp_path / "events.jsonl").read_text().splitlines()]
+    events = [json.loads(line) for line in (tmp_path / "events.jsonl").read_text().splitlines()]
     assert any(e["type"] == "tool_started" for e in events)
     assert any(e["type"] == "tool_completed" for e in events)
 
