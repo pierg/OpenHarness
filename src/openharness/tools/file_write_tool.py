@@ -2,11 +2,10 @@
 
 from __future__ import annotations
 
-from pathlib import Path
-
 from pydantic import BaseModel, Field
 
 from openharness.tools.base import BaseTool, ToolExecutionContext, ToolResult
+from openharness.workspace import LocalWorkspace, Workspace
 
 
 class FileWriteToolInput(BaseModel):
@@ -21,23 +20,26 @@ class FileWriteTool(BaseTool):
     """Write complete file contents."""
 
     name = "write_file"
-    description = "Create or overwrite a text file in the local repository."
+    description = "Create or overwrite a text file."
     input_model = FileWriteToolInput
 
-    async def execute(
-        self,
-        arguments: FileWriteToolInput,
-        context: ToolExecutionContext,
-    ) -> ToolResult:
-        path = _resolve_path(context.cwd, arguments.path)
-        if arguments.create_directories:
-            path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(arguments.content, encoding="utf-8")
+    def __init__(self, workspace: Workspace | None = None) -> None:
+        self._workspace = workspace
+
+    async def execute(self, arguments: FileWriteToolInput, context: ToolExecutionContext) -> ToolResult:
+        workspace = self._workspace or LocalWorkspace(context.cwd)
+        path = _resolve(workspace.cwd, arguments.path)
+        await workspace.write_file(
+            path, arguments.content.encode("utf-8"),
+            create_directories=arguments.create_directories,
+        )
         return ToolResult(output=f"Wrote {path}")
 
 
-def _resolve_path(base: Path, candidate: str) -> Path:
-    path = Path(candidate).expanduser()
-    if not path.is_absolute():
-        path = base / path
-    return path.resolve()
+def _resolve(base: str, candidate: str) -> str:
+    from pathlib import Path
+
+    p = Path(candidate).expanduser()
+    if p.is_absolute():
+        return str(p)
+    return str((Path(base) / candidate).resolve())

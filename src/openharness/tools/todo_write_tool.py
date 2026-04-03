@@ -7,6 +7,7 @@ from pathlib import Path
 from pydantic import BaseModel, Field
 
 from openharness.tools.base import BaseTool, ToolExecutionContext, ToolResult
+from openharness.workspace import LocalWorkspace, Workspace
 
 
 class TodoWriteToolInput(BaseModel):
@@ -24,10 +25,26 @@ class TodoWriteTool(BaseTool):
     description = "Append a TODO item to a markdown checklist file."
     input_model = TodoWriteToolInput
 
+    def __init__(self, workspace: Workspace | None = None) -> None:
+        self._workspace = workspace
+
     async def execute(self, arguments: TodoWriteToolInput, context: ToolExecutionContext) -> ToolResult:
-        path = Path(context.cwd) / arguments.path
+        workspace = self._workspace or LocalWorkspace(context.cwd)
+        path = _resolve(workspace.cwd, arguments.path)
         prefix = "- [x]" if arguments.checked else "- [ ]"
-        existing = path.read_text(encoding="utf-8") if path.exists() else "# TODO\n"
+
+        if await workspace.file_exists(path):
+            existing = (await workspace.read_file(path)).decode("utf-8")
+        else:
+            existing = "# TODO\n"
+
         updated = existing.rstrip() + f"\n{prefix} {arguments.item}\n"
-        path.write_text(updated, encoding="utf-8")
+        await workspace.write_file(path, updated.encode("utf-8"))
         return ToolResult(output=f"Updated {path}")
+
+
+def _resolve(base: str, candidate: str) -> str:
+    p = Path(candidate).expanduser()
+    if p.is_absolute():
+        return str(p)
+    return str((Path(base) / candidate).resolve())

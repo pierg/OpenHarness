@@ -9,7 +9,8 @@ instead so that provider switching is transparent.
 from __future__ import annotations
 
 from openharness.api.client import AnthropicApiClient, SupportsStreamingMessages
-from openharness.config.settings import Settings, _is_gemini
+from openharness.api.provider import _is_gemini
+from openharness.config.settings import Settings
 
 
 def create_api_client(settings: Settings) -> SupportsStreamingMessages:

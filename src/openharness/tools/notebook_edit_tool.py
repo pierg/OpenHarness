@@ -9,6 +9,7 @@ from typing import Literal
 from pydantic import BaseModel, Field
 
 from openharness.tools.base import BaseTool, ToolExecutionContext, ToolResult
+from openharness.workspace import LocalWorkspace, Workspace
 
 
 class NotebookEditToolInput(BaseModel):
@@ -29,13 +30,18 @@ class NotebookEditTool(BaseTool):
     description = "Create or edit a Jupyter notebook cell."
     input_model = NotebookEditToolInput
 
+    def __init__(self, workspace: Workspace | None = None) -> None:
+        self._workspace = workspace
+
     async def execute(
         self,
         arguments: NotebookEditToolInput,
         context: ToolExecutionContext,
     ) -> ToolResult:
-        path = _resolve_path(context.cwd, arguments.path)
-        notebook = _load_notebook(path, create_if_missing=arguments.create_if_missing)
+        workspace = self._workspace or LocalWorkspace(context.cwd)
+        path = _resolve(workspace.cwd, arguments.path)
+
+        notebook = await _load_notebook(workspace, path, create_if_missing=arguments.create_if_missing)
         if notebook is None:
             return ToolResult(output=f"Notebook not found: {path}", is_error=True)
 
@@ -54,21 +60,15 @@ class NotebookEditTool(BaseTool):
         updated = arguments.new_source if arguments.mode == "replace" else f"{existing}{arguments.new_source}"
         cell["source"] = updated
 
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(json.dumps(notebook, indent=2) + "\n", encoding="utf-8")
+        content = (json.dumps(notebook, indent=2) + "\n").encode("utf-8")
+        await workspace.write_file(path, content, create_directories=True)
         return ToolResult(output=f"Updated notebook cell {arguments.cell_index} in {path}")
 
 
-def _resolve_path(base: Path, candidate: str) -> Path:
-    path = Path(candidate).expanduser()
-    if not path.is_absolute():
-        path = base / path
-    return path.resolve()
-
-
-def _load_notebook(path: Path, *, create_if_missing: bool) -> dict | None:
-    if path.exists():
-        return json.loads(path.read_text(encoding="utf-8"))
+async def _load_notebook(workspace: Workspace, path: str, *, create_if_missing: bool) -> dict | None:
+    if await workspace.file_exists(path):
+        raw = await workspace.read_file(path)
+        return json.loads(raw.decode("utf-8"))
     if not create_if_missing:
         return None
     return {
@@ -95,3 +95,10 @@ def _normalize_source(source: str | list[str]) -> str:
     if isinstance(source, list):
         return "".join(source)
     return str(source)
+
+
+def _resolve(base: str, candidate: str) -> str:
+    p = Path(candidate).expanduser()
+    if p.is_absolute():
+        return str(p)
+    return str((Path(base) / candidate).resolve())

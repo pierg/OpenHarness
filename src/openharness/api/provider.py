@@ -4,7 +4,13 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from openharness.config.settings import Settings, _is_gemini
+from openharness.config.settings import Settings
+
+
+def _is_gemini(model: str) -> bool:
+    """Return True if *model* looks like a Gemini model identifier."""
+    m = model.lower()
+    return m.startswith("gemini") or "/gemini" in m
 
 
 @dataclass(frozen=True)

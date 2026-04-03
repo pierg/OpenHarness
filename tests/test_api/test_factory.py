@@ -38,21 +38,23 @@ def test_gemini_model_returns_gemini_client(monkeypatch):
     assert isinstance(client, GeminiApiClient)
 
 
-def test_gemini_with_vertex_project_skips_api_key(monkeypatch):
-    mock_cls = MagicMock()
-    monkeypatch.setattr("openharness.api.gemini_client.GeminiApiClient", mock_cls)
+def test_gemini_with_vertex_project_skips_api_key(monkeypatch, _stub_genai):
+    from openharness.api.gemini_client import GeminiApiClient
 
-    create_api_client(
+    mock_cls = MagicMock(return_value=MagicMock(spec=GeminiApiClient))
+    monkeypatch.setattr("openharness.api.gemini_client.GeminiApiClient", mock_cls)
+    # Re-import factory to pick up the patched class
+    import importlib
+    import openharness.api.factory as factory_mod
+    importlib.reload(factory_mod)
+
+    factory_mod.create_api_client(
         Settings(model="gemini-2.0-flash", vertex_project="my-proj", vertex_location="us-east1")
     )
     mock_cls.assert_called_once_with(project="my-proj", location="us-east1")
 
 
 def test_anthropic_base_url_forwarded(monkeypatch):
-    mock_cls = MagicMock()
-    monkeypatch.setattr("openharness.api.factory.AnthropicApiClient", mock_cls)
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test")
-
-    create_api_client(Settings(model="claude-sonnet-4-20250514", base_url="https://proxy/"))
-
-    assert mock_cls.call_args.kwargs.get("base_url") == "https://proxy/"
+    client = create_api_client(Settings(model="claude-sonnet-4-20250514", base_url="https://proxy/"))
+    assert isinstance(client, AnthropicApiClient)

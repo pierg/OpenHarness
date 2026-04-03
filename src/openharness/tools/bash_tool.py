@@ -2,12 +2,10 @@
 
 from __future__ import annotations
 
-import asyncio
-from pathlib import Path
-
 from pydantic import BaseModel, Field
 
 from openharness.tools.base import BaseTool, ToolExecutionContext, ToolResult
+from openharness.workspace import LocalWorkspace, Workspace
 
 
 class BashToolInput(BaseModel):
@@ -22,48 +20,38 @@ class BashTool(BaseTool):
     """Execute a shell command with stdout/stderr capture."""
 
     name = "bash"
-    description = "Run a shell command in the local repository."
+    description = "Run a shell command."
     input_model = BashToolInput
 
+    def __init__(self, workspace: Workspace | None = None) -> None:
+        self._workspace = workspace
+
     async def execute(self, arguments: BashToolInput, context: ToolExecutionContext) -> ToolResult:
-        cwd = Path(arguments.cwd).expanduser() if arguments.cwd else context.cwd
-        process = await asyncio.create_subprocess_exec(
-            "/bin/bash",
-            "-lc",
-            arguments.command,
-            cwd=str(cwd),
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
+        workspace = self._workspace or LocalWorkspace(context.cwd)
+        cwd = _resolve(workspace.cwd, arguments.cwd) if arguments.cwd else workspace.cwd
+        result = await workspace.run_shell(
+            arguments.command, cwd=cwd, timeout_seconds=arguments.timeout_seconds,
         )
-
-        try:
-            stdout, stderr = await asyncio.wait_for(
-                process.communicate(),
-                timeout=arguments.timeout_seconds,
-            )
-        except asyncio.TimeoutError:
-            process.kill()
-            await process.wait()
-            return ToolResult(
-                output=f"Command timed out after {arguments.timeout_seconds} seconds",
-                is_error=True,
-            )
-
-        parts = []
-        if stdout:
-            parts.append(stdout.decode("utf-8", errors="replace").rstrip())
-        if stderr:
-            parts.append(stderr.decode("utf-8", errors="replace").rstrip())
-
-        text = "\n".join(part for part in parts if part).strip()
-        if not text:
-            text = "(no output)"
-
-        if len(text) > 12000:
-            text = f"{text[:12000]}\n...[truncated]..."
-
         return ToolResult(
-            output=text,
-            is_error=process.returncode != 0,
-            metadata={"returncode": process.returncode},
+            output=format_command_output(result.stdout, result.stderr),
+            is_error=result.return_code != 0,
+            metadata={"returncode": result.return_code, "cwd": cwd},
         )
+
+
+def format_command_output(stdout: str | None, stderr: str | None) -> str:
+    """Combine stdout and stderr into a single bounded tool response."""
+    parts = [p.rstrip() for p in (stdout, stderr) if p]
+    text = "\n".join(parts).strip()
+    if not text:
+        return "(no output)"
+    return f"{text[:12000]}\n...[truncated]..." if len(text) > 12000 else text
+
+
+def _resolve(base: str, candidate: str) -> str:
+    from pathlib import Path
+
+    p = Path(candidate).expanduser()
+    if p.is_absolute():
+        return str(p)
+    return str((Path(base) / candidate).resolve())
