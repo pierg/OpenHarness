@@ -30,6 +30,9 @@ frontend/terminal/node_modules/
 .openharness/
 react_tui_smoke.txt
 
+# Harbor job outputs
+**/harbor_jobs/
+
 # OS
 .DS_Store
 Thumbs.db

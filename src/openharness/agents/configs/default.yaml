@@ -1,0 +1,32 @@
+name: default
+description: Default OpenHarness general-purpose coding agent.
+
+model: gemini-2.5-flash-lite
+max_turns: 15
+max_tokens: 8192
+
+tools:
+  - bash
+  - read_file
+  - write_file
+  - edit_file
+  - glob
+  - grep
+
+prompts:
+  system: |
+    {{ openharness_system_context }}
+
+    # Agent Persona
+    You are the default OpenHarness generic coding agent.
+    Solve the user's task using the provided tools.
+    Be concise, prefer small accurate edits, and verify your changes if possible.
+    Stop once the task is solved.
+
+  user: |
+    {{ instruction }}
+
+    {% if payload is defined and payload %}
+    # Additional Context
+    {{ payload }}
+    {% endif %}

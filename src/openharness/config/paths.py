@@ -102,7 +102,10 @@ def get_cron_registry_path() -> Path:
 def get_project_config_dir(cwd: str | Path) -> Path:
     """Return the per-project .openharness directory."""
     project_dir = Path(cwd).resolve() / ".openharness"
-    project_dir.mkdir(parents=True, exist_ok=True)
+    try:
+        project_dir.mkdir(parents=True, exist_ok=True)
+    except OSError:
+        pass
     return project_dir
 
 
