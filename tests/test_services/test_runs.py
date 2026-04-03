@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from openharness.services.runs import RunArtifacts, create_run_artifacts, generate_run_id, save_run_manifest
+from openharness.services.runs import create_run_artifacts, generate_run_id, save_run_manifest
 
 
 def test_generate_run_id_format():

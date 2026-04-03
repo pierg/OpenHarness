@@ -95,5 +95,5 @@ def save_run_manifest(run: RunArtifacts | Path, payload: dict[str, Any]) -> Path
         run_dir = Path(run)
         run_dir.mkdir(parents=True, exist_ok=True)
         path = run_dir / "run.json"
-    path.write_text(json.dumps(payload, indent=2, ensure_ascii=True) + "\n", encoding="utf-8")
+    path.write_text(json.dumps(payload, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
     return path
