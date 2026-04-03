@@ -8,18 +8,14 @@ from pathlib import Path
 
 import pytest
 
-from openharness.agents import AgentLogPaths, CommandResult, OpenHarnessSimpleAgent
-from openharness.agents.contracts import AgentWorkspace
-from openharness.agents.remote_tools import (
-    RemoteToolRegistryFactory,
-    format_command_output,
-    normalize_workspace_path,
-    resolve_workspace_path,
-)
+from openharness.agents import AgentLogPaths, OpenHarnessSimpleAgent
+from openharness.workspace import CommandResult, LocalWorkspace, Workspace
+from openharness.agents.remote_tools import WorkspaceToolRegistryFactory
 from openharness.agents.simple import OpenHarnessSimpleAgentConfig
 from openharness.api.client import ApiMessageCompleteEvent, ApiMessageRequest
 from openharness.api.usage import UsageSnapshot
 from openharness.engine.messages import ConversationMessage, TextBlock, ToolUseBlock
+from openharness.tools.bash_tool import format_command_output
 
 
 # ---------------------------------------------------------------------------
@@ -82,50 +78,33 @@ class FakeApiClient:
 
 
 def test_fake_workspace_satisfies_protocol():
-    assert isinstance(FakeWorkspace(), AgentWorkspace)
+    assert isinstance(FakeWorkspace(), Workspace)
+
+
+def test_local_workspace_satisfies_protocol(tmp_path: Path):
+    assert isinstance(LocalWorkspace(tmp_path), Workspace)
 
 
 # ---------------------------------------------------------------------------
-# RemoteToolRegistryFactory
+# WorkspaceToolRegistryFactory
 # ---------------------------------------------------------------------------
 
 
 def test_registry_factory_builds_requested_tools():
     workspace = FakeWorkspace()
-    registry = RemoteToolRegistryFactory(tool_names=("bash", "read_file")).build(workspace)
+    registry = WorkspaceToolRegistryFactory(tool_names=("bash", "read_file")).build(workspace)
     names = {t.name for t in registry.list_tools()}
     assert names == {"bash", "read_file"}
 
 
 def test_registry_factory_raises_for_unknown_tool():
     workspace = FakeWorkspace()
-    with pytest.raises(ValueError, match="Unknown remote tool"):
-        RemoteToolRegistryFactory(tool_names=("nonexistent",)).build(workspace)
+    with pytest.raises(ValueError, match="Unknown tool"):
+        WorkspaceToolRegistryFactory(tool_names=("nonexistent",)).build(workspace)
 
 
 # ---------------------------------------------------------------------------
-# Path helpers
-# ---------------------------------------------------------------------------
-
-
-def test_resolve_workspace_path_relative():
-    assert resolve_workspace_path("/workspace", "foo/bar.txt") == "/workspace/foo/bar.txt"
-
-
-def test_resolve_workspace_path_absolute():
-    assert resolve_workspace_path("/workspace", "/etc/hosts") == "/etc/hosts"
-
-
-def test_normalize_workspace_path_adds_leading_slash():
-    assert normalize_workspace_path("relative/path") == "/relative/path"
-
-
-def test_normalize_workspace_path_cleans_dots():
-    assert normalize_workspace_path("/a/b/../c") == "/a/c"
-
-
-# ---------------------------------------------------------------------------
-# format_command_output
+# format_command_output (shared by BashTool and callers)
 # ---------------------------------------------------------------------------
 
 
@@ -138,9 +117,7 @@ def test_format_command_output_empty():
 
 
 def test_format_command_output_truncates():
-    long = "x" * 20000
-    result = format_command_output(long, None)
-    assert result.endswith("...[truncated]...")
+    assert format_command_output("x" * 20000, None).endswith("...[truncated]...")
 
 
 # ---------------------------------------------------------------------------

@@ -19,7 +19,7 @@ from openharness.agents.contracts import (
     AgentWorkspace,
     ToolRegistryFactory,
 )
-from openharness.agents.remote_tools import DEFAULT_REMOTE_TOOL_NAMES, RemoteToolRegistryFactory
+from openharness.agents.remote_tools import DEFAULT_TOOL_NAMES, WorkspaceToolRegistryFactory
 from openharness.api.client import SupportsStreamingMessages
 from openharness.api.factory import create_api_client
 from openharness.api.provider import detect_provider
@@ -45,7 +45,7 @@ class OpenHarnessSimpleAgentConfig:
     """Configuration for ``OpenHarnessSimpleAgent``."""
 
     model: str
-    tool_names: tuple[str, ...] = DEFAULT_REMOTE_TOOL_NAMES
+    tool_names: tuple[str, ...] = DEFAULT_TOOL_NAMES
     max_turns: int = 8
     max_tokens: int = 4096
     system_prompt: str | None = None
@@ -67,7 +67,7 @@ class OpenHarnessSimpleAgent:
     ) -> None:
         self._config = config
         self._api_client_override = api_client
-        self._tool_registry_factory = tool_registry_factory or RemoteToolRegistryFactory(
+        self._tool_registry_factory = tool_registry_factory or WorkspaceToolRegistryFactory(
             tool_names=config.tool_names
         )
 

@@ -1,4 +1,4 @@
-"""Agent contracts, workspace tools, and the simple agent implementation."""
+"""Agent contracts, workspace implementations, and the simple agent."""
 
 from openharness.agents.contracts import (
     AgentLogPaths,
@@ -9,6 +9,7 @@ from openharness.agents.contracts import (
     ToolRegistryFactory,
 )
 from openharness.agents.simple import OpenHarnessSimpleAgent, OpenHarnessSimpleAgentConfig
+from openharness.workspace import LocalWorkspace
 
 __all__ = [
     "AgentLogPaths",
@@ -16,6 +17,7 @@ __all__ = [
     "AgentRunResult",
     "AgentWorkspace",
     "CommandResult",
+    "LocalWorkspace",
     "OpenHarnessSimpleAgent",
     "OpenHarnessSimpleAgentConfig",
     "ToolRegistryFactory",

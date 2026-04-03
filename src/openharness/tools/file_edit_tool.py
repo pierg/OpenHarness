@@ -2,11 +2,10 @@
 
 from __future__ import annotations
 
-from pathlib import Path
-
 from pydantic import BaseModel, Field
 
 from openharness.tools.base import BaseTool, ToolExecutionContext, ToolResult
+from openharness.workspace import LocalWorkspace, Workspace
 
 
 class FileEditToolInput(BaseModel):
@@ -25,30 +24,33 @@ class FileEditTool(BaseTool):
     description = "Edit an existing file by replacing a string."
     input_model = FileEditToolInput
 
-    async def execute(
-        self,
-        arguments: FileEditToolInput,
-        context: ToolExecutionContext,
-    ) -> ToolResult:
-        path = _resolve_path(context.cwd, arguments.path)
-        if not path.exists():
+    def __init__(self, workspace: Workspace | None = None) -> None:
+        self._workspace = workspace
+
+    async def execute(self, arguments: FileEditToolInput, context: ToolExecutionContext) -> ToolResult:
+        workspace = self._workspace or LocalWorkspace(context.cwd)
+        path = _resolve(workspace.cwd, arguments.path)
+
+        if not await workspace.file_exists(path):
             return ToolResult(output=f"File not found: {path}", is_error=True)
 
-        original = path.read_text(encoding="utf-8")
+        original = (await workspace.read_file(path)).decode("utf-8")
         if arguments.old_str not in original:
             return ToolResult(output="old_str was not found in the file", is_error=True)
 
-        if arguments.replace_all:
-            updated = original.replace(arguments.old_str, arguments.new_str)
-        else:
-            updated = original.replace(arguments.old_str, arguments.new_str, 1)
-
-        path.write_text(updated, encoding="utf-8")
+        updated = (
+            original.replace(arguments.old_str, arguments.new_str)
+            if arguments.replace_all
+            else original.replace(arguments.old_str, arguments.new_str, 1)
+        )
+        await workspace.write_file(path, updated.encode("utf-8"), create_directories=False)
         return ToolResult(output=f"Updated {path}")
 
 
-def _resolve_path(base: Path, candidate: str) -> Path:
-    path = Path(candidate).expanduser()
-    if not path.is_absolute():
-        path = base / path
-    return path.resolve()
+def _resolve(base: str, candidate: str) -> str:
+    from pathlib import Path
+
+    p = Path(candidate).expanduser()
+    if p.is_absolute():
+        return str(p)
+    return str((Path(base) / candidate).resolve())

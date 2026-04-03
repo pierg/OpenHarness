@@ -78,6 +78,8 @@ class GeminiApiClient:
         self, request: ApiMessageRequest
     ) -> AsyncIterator[ApiTextDeltaEvent | ApiMessageCompleteEvent]:
         """Yield text deltas then a final complete event, with retry on transient errors."""
+        last_error: Exception | None = None
+
         for attempt in range(MAX_RETRIES + 1):
             try:
                 async for event in self._stream_once(request):
@@ -86,6 +88,7 @@ class GeminiApiClient:
             except OpenHarnessApiError:
                 raise
             except Exception as exc:
+                last_error = exc
                 if attempt >= MAX_RETRIES or not _is_retryable(exc):
                     raise _translate_gemini_error(exc) from exc
                 delay = _backoff_delay(attempt)
@@ -97,6 +100,9 @@ class GeminiApiClient:
                     exc,
                 )
                 await asyncio.sleep(delay)
+
+        if last_error is not None:
+            raise _translate_gemini_error(last_error) from last_error
 
     async def _stream_once(
         self, request: ApiMessageRequest
@@ -126,7 +132,6 @@ class GeminiApiClient:
         tool_calls: list[dict[str, Any]] = []
         input_tokens = 0
         output_tokens = 0
-        finish_reason: Any = None
 
         async for chunk in response_stream:
             if chunk.usage_metadata:
@@ -136,8 +141,6 @@ class GeminiApiClient:
             if not chunk.candidates:
                 continue
             candidate = chunk.candidates[0]
-            if candidate.finish_reason is not None:
-                finish_reason = candidate.finish_reason
             if not candidate.content or not candidate.content.parts:
                 continue
 
@@ -161,17 +164,10 @@ class GeminiApiClient:
                 )
             )
 
-        if tool_calls:
-            stop_reason = "tool_use"
-        elif "MAX_TOKENS" in str(finish_reason):
-            stop_reason = "max_tokens"
-        else:
-            stop_reason = "end_turn"
-
         yield ApiMessageCompleteEvent(
             message=ConversationMessage(role="assistant", content=final_content),
             usage=UsageSnapshot(input_tokens=input_tokens, output_tokens=output_tokens),
-            stop_reason=stop_reason,
+            stop_reason="tool_use" if tool_calls else "end_turn",
         )
 
 
@@ -189,8 +185,7 @@ def _build_gemini_tools(
     declarations = []
     for tool in tools:
         schema = dict(tool.get("input_schema", {}))
-        # Gemini requires both `type` and `properties` even for parameterless tools.
-        schema.setdefault("type", "object")
+        # Gemini requires `properties` to be present even for parameterless tools.
         schema.setdefault("properties", {})
         declarations.append(
             types.FunctionDeclaration(
