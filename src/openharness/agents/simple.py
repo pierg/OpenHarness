@@ -156,7 +156,7 @@ def _maybe_log_messages(log_paths: AgentLogPaths | None, messages: list[Conversa
 def _append_jsonl(path: Path, payload: dict[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("a", encoding="utf-8") as fh:
-        fh.write(json.dumps(payload, ensure_ascii=True) + "\n")
+        fh.write(json.dumps(payload, ensure_ascii=False) + "\n")
 
 
 def _serialize_event(event: StreamEvent) -> dict[str, Any]:
