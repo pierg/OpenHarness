@@ -15,17 +15,15 @@ from openharness.agents.contracts import (
     AgentRunResult,
     ToolRegistryFactory,
 )
-from openharness.agents.remote_tools import DEFAULT_TOOL_NAMES as DEFAULT_REMOTE_TOOL_NAMES
 from openharness.agents.simple import OpenHarnessSimpleAgent, OpenHarnessSimpleAgentConfig
+from openharness.tools import DEFAULT_TOOL_NAMES
 from openharness.api.client import SupportsStreamingMessages
 from openharness.api.provider import detect_provider
 from openharness.config import load_settings
-from openharness.harbor.compat import (
-    AgentContext,
-    BaseAgent,
-    BaseEnvironment,
-    MCPServerConfig,
-)
+from harbor.agents.base import BaseAgent
+from harbor.environments.base import BaseEnvironment
+from harbor.models.agent.context import AgentContext
+from harbor.models.task.config import MCPServerConfig
 from openharness.observability import create_trace_observer
 from openharness.services.runs import save_run_manifest
 from openharness.workspace.harbor import HarborWorkspace
@@ -58,7 +56,7 @@ class OpenHarnessHarborAgent(BaseAgent):
         api_client: SupportsStreamingMessages | None = None,
         extra_env: dict[str, str] | None = None,
         remote_cwd: str = "/app",
-        tool_names: tuple[str, ...] = DEFAULT_REMOTE_TOOL_NAMES,
+        tool_names: tuple[str, ...] = DEFAULT_TOOL_NAMES,
         tool_registry_factory: ToolRegistryFactory | None = None,
         max_turns: int = 8,
         max_tokens: int = 4096,

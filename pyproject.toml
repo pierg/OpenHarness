@@ -7,7 +7,7 @@ name = "openharness"
 version = "0.1.0"
 description = "Open-source Python port of Claude Code - an AI-powered CLI coding assistant"
 license = "MIT"
-requires-python = ">=3.10"
+requires-python = ">=3.12"
 authors = [
     { name = "novix-science" },
 ]
@@ -30,6 +30,9 @@ dependencies = [
 [project.optional-dependencies]
 gemini = [
     "google-genai>=1.0",
+]
+harbor = [
+    "harbor>=0.3.0",
 ]
 langfuse = [
     "langfuse>=2.0",

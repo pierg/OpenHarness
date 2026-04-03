@@ -8,7 +8,7 @@ from enum import Enum
 from pathlib import Path
 from typing import Any
 
-from openharness.agents.remote_tools import DEFAULT_TOOL_NAMES
+from openharness.tools import DEFAULT_TOOL_NAMES
 
 
 DEFAULT_HARBOR_VERSION = "0.3.0"

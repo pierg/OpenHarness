@@ -12,7 +12,8 @@ from openharness.api.client import ApiMessageCompleteEvent
 from openharness.api.usage import UsageSnapshot
 from openharness.engine.messages import ConversationMessage, TextBlock, ToolUseBlock
 from openharness.harbor import OpenHarnessHarborAgent
-from openharness.harbor.compat import AgentContext, ExecResult
+from harbor.environments.base import ExecResult
+from harbor.models.agent.context import AgentContext
 
 
 @dataclass

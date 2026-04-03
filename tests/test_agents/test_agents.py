@@ -10,7 +10,7 @@ import pytest
 
 from openharness.agents import AgentLogPaths, OpenHarnessSimpleAgent
 from openharness.workspace import CommandResult, LocalWorkspace, Workspace
-from openharness.agents.remote_tools import WorkspaceToolRegistryFactory
+from openharness.tools import WorkspaceToolRegistryFactory
 from openharness.agents.simple import OpenHarnessSimpleAgentConfig
 from openharness.api.client import ApiMessageCompleteEvent, ApiMessageRequest
 from openharness.api.usage import UsageSnapshot
@@ -157,7 +157,7 @@ async def test_simple_agent_writes_file_and_returns_result(tmp_path: Path):
     assert result.output_tokens == 10
     assert workspace.files["/workspace/hello.txt"] == b"Hello!\n"
 
-    events = [json.loads(line) for line in (tmp_path / "events.jsonl").read_text().splitlines()]
+    events = [json.loads(l) for l in (tmp_path / "events.jsonl").read_text().splitlines()]
     assert any(e["type"] == "tool_started" for e in events)
     assert any(e["type"] == "tool_completed" for e in events)
 

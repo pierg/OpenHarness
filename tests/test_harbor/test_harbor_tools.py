@@ -6,8 +6,8 @@ from pathlib import Path
 
 import pytest
 
-from openharness.agents.remote_tools import WorkspaceToolRegistryFactory
-from openharness.harbor.compat import ExecResult
+from openharness.tools import WorkspaceToolRegistryFactory
+from harbor.environments.base import ExecResult
 from openharness.tools.base import ToolExecutionContext
 from openharness.workspace.harbor import HarborWorkspace
 
