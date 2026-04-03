@@ -287,8 +287,17 @@ def create_trace_observer(
 ) -> TraceObserver:
     """Return a ``LangfuseTraceObserver`` when the environment is configured, else a ``NullTraceObserver``.
 
-    Required environment variables: ``LANGFUSE_PUBLIC_KEY``, ``LANGFUSE_SECRET_KEY``.
-    Set ``OPENHARNESS_LANGFUSE_ENABLED=0`` to force-disable tracing.
+    Required environment variables:
+    - ``LANGFUSE_PUBLIC_KEY`` and ``LANGFUSE_SECRET_KEY`` — always required,
+      even for self-hosted deployments (Langfuse uses key-based auth everywhere).
+
+    Optional environment variables:
+    - ``LANGFUSE_HOST`` or ``LANGFUSE_BASE_URL`` — override the Langfuse endpoint.
+      Set this to point to a local or self-hosted instance, e.g. ``http://localhost:3000``.
+      Defaults to the Langfuse cloud endpoint when unset.
+    - ``LANGFUSE_ENVIRONMENT``, ``LANGFUSE_RELEASE``, ``LANGFUSE_SAMPLE_RATE`` — forwarded to the SDK.
+    - ``OPENHARNESS_LANGFUSE_ENABLED=0`` — force-disable tracing regardless of other variables.
+    - ``OPENHARNESS_LANGFUSE_VERIFY=0`` — skip the auth check on startup (useful for CI).
     """
     if not _env_truthy(os.environ.get("OPENHARNESS_LANGFUSE_ENABLED", "1")):
         return NullTraceObserver()
