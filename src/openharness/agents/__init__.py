@@ -1,24 +1,37 @@
-"""Agent contracts, workspace implementations, and the simple agent."""
+"""Agent definitions, configuration, and factory."""
 
+from __future__ import annotations
+
+from openharness.agents.architectures import (
+    PlannerExecutorAgent,
+    ReActAgent,
+    ReflectionAgent,
+    SimpleAgent,
+)
+from openharness.agents.config import AgentConfig
 from openharness.agents.contracts import (
-    AgentLogPaths,
-    AgentRunContext,
+    Agent,
     AgentRunResult,
     AgentWorkspace,
     CommandResult,
-    ToolRegistryFactory,
+    TaskDefinition,
 )
-from openharness.agents.simple import OpenHarnessSimpleAgent, OpenHarnessSimpleAgentConfig
-from openharness.workspace import LocalWorkspace
+from openharness.agents.factory import AgentFactory
+from openharness.engine.conversation import Conversation
+from openharness.engine.query import TurnResult
 
 __all__ = [
-    "AgentLogPaths",
-    "AgentRunContext",
+    "Agent",
+    "AgentConfig",
+    "AgentFactory",
     "AgentRunResult",
     "AgentWorkspace",
     "CommandResult",
-    "LocalWorkspace",
-    "OpenHarnessSimpleAgent",
-    "OpenHarnessSimpleAgentConfig",
-    "ToolRegistryFactory",
+    "Conversation",
+    "PlannerExecutorAgent",
+    "ReActAgent",
+    "ReflectionAgent",
+    "SimpleAgent",
+    "TaskDefinition",
+    "TurnResult",
 ]

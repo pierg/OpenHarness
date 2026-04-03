@@ -22,7 +22,10 @@ def get_user_plugins_dir() -> Path:
 def get_project_plugins_dir(cwd: str | Path) -> Path:
     """Return the project plugin directory."""
     path = Path(cwd).resolve() / ".openharness" / "plugins"
-    path.mkdir(parents=True, exist_ok=True)
+    try:
+        path.mkdir(parents=True, exist_ok=True)
+    except OSError:
+        pass
     return path
 
 

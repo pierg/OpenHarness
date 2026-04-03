@@ -35,11 +35,8 @@ def test_build_harbor_run_command_maps_agent_task_and_environment_specs() -> Non
         jobs_dir=Path("/tmp/jobs"),
         tool=HarborToolSpec(version="0.3.0"),
         agent=OpenHarnessHarborAgentSpec(
+            agent_name="react_example",
             model="gemini-2.5-flash-lite",
-            tool_names=("write_file", "read_file"),
-            max_turns=6,
-            max_tokens=2048,
-            system_prompt="Test prompt",
         ),
         task=HarborTaskSpec(path=Path("/tmp/task")),
         environment=HarborEnvironmentSpec(type="docker", override_cpus=2),
@@ -54,10 +51,8 @@ def test_build_harbor_run_command_maps_agent_task_and_environment_specs() -> Non
     assert "--env" in command and "docker" in command
     assert "--override-cpus" in command
     assert "--agent-kwarg" in command
-    assert 'tool_names=["write_file", "read_file"]' in command
-    assert 'max_turns=6' in command
-    assert 'max_tokens=2048' in command
-    assert 'system_prompt="Test prompt"' in command
+    assert 'agent_name="react_example"' in command
+    assert 'remote_cwd="/app"' in command
     assert "--agent-env" in command
     assert "OPENHARNESS_RUN_ID=job-1" in command
     assert f"OPENHARNESS_RUN_ROOT={Path('/tmp/jobs').resolve() / 'job-1'}" in command

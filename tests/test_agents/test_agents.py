@@ -8,10 +8,11 @@ from pathlib import Path
 
 import pytest
 
-from openharness.agents import AgentLogPaths, OpenHarnessSimpleAgent
+from openharness.agents import AgentConfig, SimpleAgent, TaskDefinition
+from openharness.permissions.modes import PermissionMode
+from openharness.runtime.session import AgentLogPaths, AgentRuntime
 from openharness.workspace import CommandResult, LocalWorkspace, Workspace
 from openharness.tools import WorkspaceToolRegistryFactory
-from openharness.agents.simple import OpenHarnessSimpleAgentConfig
 from openharness.api.client import ApiMessageCompleteEvent, ApiMessageRequest
 from openharness.api.usage import UsageSnapshot
 from openharness.engine.messages import ConversationMessage, TextBlock, ToolUseBlock
@@ -90,15 +91,15 @@ def test_local_workspace_satisfies_protocol(tmp_path: Path):
 # ---------------------------------------------------------------------------
 
 
-def test_registry_factory_builds_requested_tools():
-    workspace = FakeWorkspace()
+def test_registry_factory_builds_requested_tools(tmp_path: Path):
+    workspace = FakeWorkspace(cwd=str(tmp_path))
     registry = WorkspaceToolRegistryFactory(tool_names=("bash", "read_file")).build(workspace)
     names = {t.name for t in registry.list_tools()}
     assert names == {"bash", "read_file"}
 
 
-def test_registry_factory_raises_for_unknown_tool():
-    workspace = FakeWorkspace()
+def test_registry_factory_raises_for_unknown_tool(tmp_path: Path):
+    workspace = FakeWorkspace(cwd=str(tmp_path))
     with pytest.raises(ValueError, match="Unknown tool"):
         WorkspaceToolRegistryFactory(tool_names=("nonexistent",)).build(workspace)
 
@@ -121,7 +122,7 @@ def test_format_command_output_truncates():
 
 
 # ---------------------------------------------------------------------------
-# OpenHarnessSimpleAgent end-to-end
+# SimpleAgent end-to-end
 # ---------------------------------------------------------------------------
 
 
@@ -129,7 +130,7 @@ async def test_simple_agent_writes_file_and_returns_result(tmp_path: Path):
     api_client = FakeApiClient([
         _FakeResponse(
             message=ConversationMessage(role="assistant", content=[
-                ToolUseBlock(id="t1", name="write_file", input={"path": "hello.txt", "content": "Hello!\n"})
+                ToolUseBlock(id="t1", name="write_file", input={"path": f"{tmp_path}/hello.txt", "content": "Hello!\n"})
             ]),
             usage=UsageSnapshot(input_tokens=11, output_tokens=7),
         ),
@@ -138,24 +139,34 @@ async def test_simple_agent_writes_file_and_returns_result(tmp_path: Path):
             usage=UsageSnapshot(input_tokens=5, output_tokens=3),
         ),
     ])
-    agent = OpenHarnessSimpleAgent(
-        OpenHarnessSimpleAgentConfig(model="claude-test", tool_names=("write_file",), max_turns=4),
-        api_client=api_client,
+    config = AgentConfig(
+        model="claude-test", 
+        tools=("write_file",), 
+        max_turns=4,
+        prompts={"system": "sys", "user": "usr"}
     )
-    workspace = FakeWorkspace()
-    result = await agent.run(
-        "Write hello.txt",
-        workspace,
+    agent = SimpleAgent(config)
+    workspace = FakeWorkspace(cwd=str(tmp_path))
+    
+    runtime = AgentRuntime(
+        workspace=workspace,
+        permission_mode=PermissionMode.FULL_AUTO,
+        api_client=api_client,
         log_paths=AgentLogPaths(
             messages_path=str(tmp_path / "messages.jsonl"),
             events_path=str(tmp_path / "events.jsonl"),
-        ),
+        )
+    )
+    
+    result = await agent.run(
+        task=TaskDefinition(instruction="Write hello.txt"),
+        runtime=runtime,
     )
 
     assert result.final_text == "Done."
     assert result.input_tokens == 16
     assert result.output_tokens == 10
-    assert workspace.files["/workspace/hello.txt"] == b"Hello!\n"
+    assert workspace.files[f"{tmp_path}/hello.txt"] == b"Hello!\n"
 
     events = [json.loads(line) for line in (tmp_path / "events.jsonl").read_text().splitlines()]
     assert any(e["type"] == "tool_started" for e in events)
@@ -166,10 +177,20 @@ async def test_simple_agent_only_registers_requested_tools(tmp_path: Path):
     api_client = FakeApiClient([
         _FakeResponse(message=ConversationMessage(role="assistant", content=[TextBlock(text="ok")]))
     ])
-    agent = OpenHarnessSimpleAgent(
-        OpenHarnessSimpleAgentConfig(model="claude-test", tool_names=("bash",), max_turns=2),
+    config = AgentConfig(
+        model="claude-test", 
+        tools=("bash",), 
+        max_turns=2,
+        prompts={"system": "sys", "user": "usr"}
+    )
+    agent = SimpleAgent(config)
+    workspace = FakeWorkspace(cwd=str(tmp_path))
+    
+    runtime = AgentRuntime(
+        workspace=workspace,
         api_client=api_client,
     )
-    await agent.run("Run bash", FakeWorkspace())
+    
+    await agent.run(task=TaskDefinition(instruction="Run bash"), runtime=runtime)
     tool_names = [t["name"] for t in api_client.requests[0].tools]
     assert tool_names == ["bash"]

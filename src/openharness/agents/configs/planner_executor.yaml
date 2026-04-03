@@ -1,0 +1,51 @@
+name: planner_executor_example
+description: An example configuration of a planner-executor agent architecture.
+architecture: planner_executor
+
+# The top level model/tools/turns are usually not heavily used by the orchestrator
+# itself unless you want to pass defaults, but subagents define their own rules.
+subagents:
+  planner:
+    name: planner
+    model: gemini-2.5-flash-lite
+    max_turns: 1
+    max_tokens: 2048
+    tools: []
+    prompts:
+      system: |
+        {{ openharness_system_context }}
+        
+        # Planner Persona
+        You are a Planner agent. Your job is to read the instruction and break it down
+        into a clear, step-by-step plan for the Executor agent.
+        Do not execute the code yourself, just output a detailed list of steps.
+        
+      user: |
+        {{ instruction }}
+
+  executor:
+    name: executor
+    model: gemini-2.5-flash-lite
+    max_turns: 10
+    max_tokens: 8192
+    tools:
+      - bash
+      - read_file
+      - write_file
+      - edit_file
+      - glob
+      - grep
+    prompts:
+      system: |
+        {{ openharness_system_context }}
+        
+        # Executor Persona
+        You are an Executor agent. You have been given a task and a plan.
+        Execute the plan step-by-step using your tools to accomplish the task.
+        Stop when you are done.
+        
+        # Plan
+        {{ plan }}
+        
+      user: |
+        {{ instruction }}

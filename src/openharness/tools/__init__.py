@@ -3,7 +3,7 @@
 from openharness.tools.ask_user_question_tool import AskUserQuestionTool
 from openharness.tools.agent_tool import AgentTool
 from openharness.tools.bash_tool import BashTool
-from openharness.tools.base import BaseTool, ToolExecutionContext, ToolRegistry, ToolResult
+from openharness.tools.base import BaseTool, ToolExecutionContext, ToolRegistry, ToolRegistryFactory, ToolResult
 from openharness.tools.brief_tool import BriefTool
 from openharness.tools.config_tool import ConfigTool
 from openharness.tools.cron_create_tool import CronCreateTool
@@ -131,6 +131,7 @@ __all__ = [
     "DEFAULT_TOOL_NAMES",
     "ToolExecutionContext",
     "ToolRegistry",
+    "ToolRegistryFactory",
     "ToolResult",
     "WORKSPACE_TOOLS",
     "WorkspaceToolRegistryFactory",
