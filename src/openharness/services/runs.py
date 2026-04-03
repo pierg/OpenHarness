@@ -1,0 +1,99 @@
+"""Helpers for storing per-run artifacts under a unified runs directory.
+
+Each automated agent run gets its own subdirectory under the project's ``runs/``
+folder (resolved by ``get_project_runs_dir``).  The layout is:
+
+.. code-block:: text
+
+    <cwd>/runs/<run-id>/
+        run.json        ← metadata manifest written by save_run_manifest
+        logs/           ← optional, created when with_logs=True
+        workspace/      ← optional, created when with_workspace=True
+"""
+
+from __future__ import annotations
+
+import json
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Any
+from uuid import uuid4
+
+from openharness.config.paths import get_project_runs_dir
+
+
+def generate_run_id() -> str:
+    """Return a short unique run identifier suitable for folder names and trace IDs."""
+    return f"run-{uuid4().hex[:12]}"
+
+
+@dataclass(frozen=True)
+class RunArtifacts:
+    """Filesystem layout for a single OpenHarness run."""
+
+    run_id: str
+    run_dir: Path
+    logs_dir: Path | None = None
+    workspace_dir: Path | None = None
+
+    @property
+    def metadata_path(self) -> Path:
+        """Canonical path for the run manifest JSON file."""
+        return self.run_dir / "run.json"
+
+
+def create_run_artifacts(
+    cwd: str | Path,
+    *,
+    run_id: str | None = None,
+    with_logs: bool = False,
+    with_workspace: bool = False,
+) -> RunArtifacts:
+    """Create the directory layout for one run and return a ``RunArtifacts`` handle.
+
+    Args:
+        cwd: Project root used to locate the ``runs/`` directory.
+        run_id: Explicit run identifier; a new one is generated when omitted.
+        with_logs: Create a ``logs/`` subdirectory inside the run directory.
+        with_workspace: Create a ``workspace/`` subdirectory inside the run directory.
+    """
+    resolved_run_id = run_id or generate_run_id()
+    run_dir = get_project_runs_dir(cwd) / resolved_run_id
+    run_dir.mkdir(parents=True, exist_ok=True)
+
+    logs_dir: Path | None = None
+    if with_logs:
+        logs_dir = run_dir / "logs"
+        logs_dir.mkdir(parents=True, exist_ok=True)
+
+    workspace_dir: Path | None = None
+    if with_workspace:
+        workspace_dir = run_dir / "workspace"
+        workspace_dir.mkdir(parents=True, exist_ok=True)
+
+    return RunArtifacts(
+        run_id=resolved_run_id,
+        run_dir=run_dir,
+        logs_dir=logs_dir,
+        workspace_dir=workspace_dir,
+    )
+
+
+def save_run_manifest(run: RunArtifacts | Path, payload: dict[str, Any]) -> Path:
+    """Write *payload* as a JSON manifest for *run*.
+
+    Args:
+        run: A ``RunArtifacts`` instance or a raw directory ``Path``.
+        payload: Arbitrary JSON-serialisable data to record.
+
+    Returns:
+        The path of the written manifest file.
+    """
+    if isinstance(run, RunArtifacts):
+        path = run.metadata_path
+    else:
+        run_dir = Path(run)
+        run_dir.mkdir(parents=True, exist_ok=True)
+        path = run_dir / "run.json"
+    path.write_text(json.dumps(payload, indent=2, ensure_ascii=True) + "\n", encoding="utf-8")
+    return path
