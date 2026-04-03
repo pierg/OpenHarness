@@ -10,7 +10,7 @@ import pytest
 
 from openharness.agents import AgentLogPaths, OpenHarnessSimpleAgent
 from openharness.workspace import CommandResult, LocalWorkspace, Workspace
-from openharness.agents.remote_tools import WorkspaceToolRegistryFactory
+from openharness.tools import WorkspaceToolRegistryFactory
 from openharness.agents.simple import OpenHarnessSimpleAgentConfig
 from openharness.api.client import ApiMessageCompleteEvent, ApiMessageRequest
 from openharness.api.usage import UsageSnapshot

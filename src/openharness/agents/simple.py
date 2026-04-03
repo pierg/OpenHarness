@@ -19,7 +19,7 @@ from openharness.agents.contracts import (
     AgentWorkspace,
     ToolRegistryFactory,
 )
-from openharness.agents.remote_tools import DEFAULT_TOOL_NAMES, WorkspaceToolRegistryFactory
+from openharness.tools import DEFAULT_TOOL_NAMES, WorkspaceToolRegistryFactory
 from openharness.api.client import SupportsStreamingMessages
 from openharness.api.factory import create_api_client
 from openharness.api.provider import detect_provider

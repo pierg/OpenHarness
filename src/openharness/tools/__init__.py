@@ -40,6 +40,40 @@ from openharness.tools.todo_write_tool import TodoWriteTool
 from openharness.tools.tool_search_tool import ToolSearchTool
 from openharness.tools.web_fetch_tool import WebFetchTool
 from openharness.tools.web_search_tool import WebSearchTool
+from openharness.workspace import Workspace
+
+WORKSPACE_TOOLS: dict[str, type[BaseTool]] = {
+    "bash": BashTool,
+    "read_file": FileReadTool,
+    "write_file": FileWriteTool,
+    "edit_file": FileEditTool,
+    "glob": GlobTool,
+    "grep": GrepTool,
+    "notebook_edit": NotebookEditTool,
+    "todo_write": TodoWriteTool,
+    "enter_worktree": EnterWorktreeTool,
+    "exit_worktree": ExitWorktreeTool,
+    "remote_trigger": RemoteTriggerTool,
+}
+
+DEFAULT_TOOL_NAMES: tuple[str, ...] = (
+    "bash", "read_file", "write_file", "edit_file", "glob", "grep",
+)
+
+
+class WorkspaceToolRegistryFactory:
+    """Build a tool registry with standard tools bound to a workspace."""
+
+    def __init__(self, tool_names: tuple[str, ...] = DEFAULT_TOOL_NAMES) -> None:
+        self._tool_names = tuple(tool_names)
+
+    def build(self, workspace: Workspace) -> ToolRegistry:
+        registry = ToolRegistry()
+        for name in self._tool_names:
+            if name not in WORKSPACE_TOOLS:
+                raise ValueError(f"Unknown tool: {name!r}")
+            registry.register(WORKSPACE_TOOLS[name](workspace=workspace))
+        return registry
 
 
 def create_default_tool_registry(mcp_manager=None) -> ToolRegistry:
@@ -94,8 +128,11 @@ def create_default_tool_registry(mcp_manager=None) -> ToolRegistry:
 
 __all__ = [
     "BaseTool",
+    "DEFAULT_TOOL_NAMES",
     "ToolExecutionContext",
     "ToolRegistry",
     "ToolResult",
+    "WORKSPACE_TOOLS",
+    "WorkspaceToolRegistryFactory",
     "create_default_tool_registry",
 ]
