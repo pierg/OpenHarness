@@ -1,4 +1,12 @@
-"""Core tool-aware query loop."""
+"""Core tool-aware query loop.
+
+Two entry points:
+
+- ``run_single_turn`` — execute one LLM call + tool execution, return a
+  ``TurnResult``.  Used by ``Conversation.step()``.
+- ``run_query`` — streaming generator that runs the full multi-turn loop.
+  Kept for backward compatibility.
+"""
 
 from __future__ import annotations
 
@@ -14,7 +22,7 @@ from openharness.api.client import (
     SupportsStreamingMessages,
 )
 from openharness.api.usage import UsageSnapshot
-from openharness.engine.messages import ConversationMessage, ToolResultBlock
+from openharness.engine.messages import ConversationMessage, ToolResultBlock, ToolUseBlock
 from openharness.engine.stream_events import (
     AssistantTextDelta,
     AssistantTurnComplete,
@@ -31,6 +39,18 @@ from openharness.tools.base import ToolRegistry
 
 PermissionPrompt = Callable[[str, str], Awaitable[bool]]
 AskUserPrompt = Callable[[str], Awaitable[str]]
+
+
+@dataclass(frozen=True)
+class TurnResult:
+    """What happened in a single LLM turn (one API call + tool execution)."""
+
+    message: ConversationMessage
+    text: str
+    tool_calls: tuple[ToolUseBlock, ...]
+    tool_results: tuple[ToolResultBlock, ...]
+    usage: UsageSnapshot
+    is_final: bool
 
 
 @dataclass
@@ -50,6 +70,66 @@ class QueryContext:
     hook_executor: HookExecutor | None = None
     tool_metadata: dict[str, object] | None = None
     trace_observer: TraceObserver | None = None
+
+
+# ---------------------------------------------------------------------------
+# Step-based entry point (used by Conversation.step)
+# ---------------------------------------------------------------------------
+
+
+async def run_single_turn(
+    context: QueryContext,
+    messages: list[ConversationMessage],
+) -> TurnResult:
+    """Execute one LLM call + tool execution.  Mutates *messages* in place."""
+    final_message: ConversationMessage | None = None
+    usage = UsageSnapshot()
+
+    async for event in context.api_client.stream_message(
+        ApiMessageRequest(
+            model=context.model,
+            messages=messages,
+            system_prompt=context.system_prompt,
+            max_tokens=context.max_tokens,
+            tools=context.tool_registry.to_api_schema(),
+        )
+    ):
+        if isinstance(event, ApiMessageCompleteEvent):
+            final_message = event.message
+            usage = event.usage
+
+    if final_message is None:
+        raise RuntimeError("Model stream finished without a final message")
+
+    messages.append(final_message)
+    tool_calls = final_message.tool_uses
+
+    if not tool_calls:
+        return TurnResult(
+            message=final_message,
+            text=final_message.text.strip(),
+            tool_calls=(),
+            tool_results=(),
+            usage=usage,
+            is_final=True,
+        )
+
+    tool_results = await _execute_tools(context, tool_calls)
+    messages.append(ConversationMessage(role="user", content=list(tool_results)))
+
+    return TurnResult(
+        message=final_message,
+        text=final_message.text.strip(),
+        tool_calls=tuple(tool_calls),
+        tool_results=tuple(tool_results),
+        usage=usage,
+        is_final=False,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Streaming entry point (backward compat)
+# ---------------------------------------------------------------------------
 
 
 async def run_query(
@@ -89,38 +169,38 @@ async def run_query(
 
         tool_calls = final_message.tool_uses
 
-        if len(tool_calls) == 1:
-            # Single tool: sequential (stream events immediately)
-            tc = tool_calls[0]
+        for tc in tool_calls:
             yield ToolExecutionStarted(tool_name=tc.name, tool_input=tc.input), None
-            result = await _execute_tool_call(context, tc.name, tc.id, tc.input)
+
+        tool_results = await _execute_tools(context, tool_calls)
+
+        for tc, result in zip(tool_calls, tool_results):
             yield ToolExecutionCompleted(
                 tool_name=tc.name,
                 output=result.content,
                 is_error=result.is_error,
             ), None
-            tool_results = [result]
-        else:
-            # Multiple tools: execute concurrently, emit events after
-            for tc in tool_calls:
-                yield ToolExecutionStarted(tool_name=tc.name, tool_input=tc.input), None
 
-            async def _run(tc):
-                return await _execute_tool_call(context, tc.name, tc.id, tc.input)
-
-            results = await asyncio.gather(*[_run(tc) for tc in tool_calls])
-            tool_results = list(results)
-
-            for tc, result in zip(tool_calls, tool_results):
-                yield ToolExecutionCompleted(
-                    tool_name=tc.name,
-                    output=result.content,
-                    is_error=result.is_error,
-                ), None
-
-        messages.append(ConversationMessage(role="user", content=tool_results))
+        messages.append(ConversationMessage(role="user", content=list(tool_results)))
 
     raise RuntimeError(f"Exceeded maximum turn limit ({context.max_turns})")
+
+
+async def _execute_tools(
+    context: QueryContext,
+    tool_calls: list[ToolUseBlock],
+) -> tuple[ToolResultBlock, ...]:
+    """Execute tool calls (concurrently if multiple). Shared by both entry points."""
+    if len(tool_calls) == 1:
+        tc = tool_calls[0]
+        result = await _execute_tool_call(context, tc.name, tc.id, tc.input)
+        return (result,)
+
+    results = await asyncio.gather(*[
+        _execute_tool_call(context, tc.name, tc.id, tc.input)
+        for tc in tool_calls
+    ])
+    return tuple(results)
 
 
 async def _execute_tool_call(
@@ -158,8 +238,7 @@ async def _execute_tool_call(
             is_error=True,
         )
 
-    # Extract file_path and command for path-level permission checks
-    _file_path = str(tool_input.get("file_path", "")) or None
+    _file_path = str(tool_input.get("path") or tool_input.get("file_path") or "") or None
     _command = str(tool_input.get("command", "")) or None
     decision = context.permission_checker.evaluate(
         tool_name,

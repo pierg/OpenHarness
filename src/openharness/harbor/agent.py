@@ -1,4 +1,4 @@
-"""Harbor wrapper around the framework-agnostic simple OpenHarness agent."""
+"""Harbor wrapper around the framework-agnostic OpenHarness agent system."""
 
 from __future__ import annotations
 
@@ -9,22 +9,20 @@ from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
-from openharness.agents.contracts import (
-    AgentLogPaths,
-    AgentRunContext,
-    ToolRegistryFactory,
-)
-from openharness.agents.simple import OpenHarnessSimpleAgent, OpenHarnessSimpleAgentConfig
-from openharness.tools import DEFAULT_TOOL_NAMES
-from openharness.api.client import SupportsStreamingMessages
-from openharness.api.provider import detect_provider
-from openharness.config import load_settings
+from openharness.agents.contracts import TaskDefinition
+from openharness.agents.factory import AgentFactory
 from harbor.agents.base import BaseAgent
 from harbor.environments.base import BaseEnvironment
 from harbor.models.agent.context import AgentContext
 from harbor.models.task.config import MCPServerConfig
+from openharness.api.client import SupportsStreamingMessages
+from openharness.api.provider import detect_provider
+from openharness.config import load_settings
 from openharness.observability import create_trace_observer
+from openharness.permissions.modes import PermissionMode
+from openharness.runtime.session import AgentLogPaths, AgentRuntime
 from openharness.services.runs import save_run_manifest
+from openharness.tools.base import ToolRegistryFactory
 from openharness.workspace.harbor import HarborWorkspace
 
 
@@ -39,7 +37,10 @@ class HarborRunSummary:
 
 
 class OpenHarnessHarborAgent(BaseAgent):
-    """Thin Harbor wrapper that delegates execution to OpenHarnessSimpleAgent."""
+    """Thin Harbor wrapper that delegates to any OpenHarness agent architecture.
+
+    The ``agent_name`` selects which YAML config the factory loads.
+    """
 
     SUPPORTS_ATIF = False
 
@@ -52,14 +53,13 @@ class OpenHarnessHarborAgent(BaseAgent):
         skills_dir: str | None = None,
         memory_dir: str | None = None,
         *,
+        agent_name: str = "default",
         api_client: SupportsStreamingMessages | None = None,
         extra_env: dict[str, str] | None = None,
         remote_cwd: str = "/app",
-        tool_names: tuple[str, ...] = DEFAULT_TOOL_NAMES,
+        max_turns: int | None = None,
+        max_tokens: int | None = None,
         tool_registry_factory: ToolRegistryFactory | None = None,
-        max_turns: int = 8,
-        max_tokens: int = 4096,
-        system_prompt: str | None = None,
         **kwargs: object,
     ) -> None:
         del kwargs
@@ -70,17 +70,28 @@ class OpenHarnessHarborAgent(BaseAgent):
             or self._extra_env.get("OPENHARNESS_MODEL")
             or os.environ.get("OPENHARNESS_MODEL")
         )
-        self._agent = OpenHarnessSimpleAgent(
-            OpenHarnessSimpleAgentConfig(
-                model=resolved_model_name or load_settings().model,
-                tool_names=tuple(tool_names),
-                max_turns=max_turns,
-                max_tokens=max_tokens,
-                system_prompt=system_prompt or _build_harbor_system_prompt(remote_cwd=remote_cwd),
-            ),
-            api_client=api_client,
-            tool_registry_factory=tool_registry_factory,
-        )
+
+        self._agent_name = agent_name
+        factory = AgentFactory.with_default_configs()
+        config = factory.get_config(agent_name)
+
+        overrides: dict[str, Any] = {}
+        if resolved_model_name:
+            overrides["model"] = resolved_model_name
+        if max_turns is not None:
+            overrides["max_turns"] = max_turns
+        if max_tokens is not None:
+            overrides["max_tokens"] = max_tokens
+
+        if overrides:
+            config = config.model_copy(update=overrides)
+            factory.register(config)
+
+        self._agent = factory.create(agent_name)
+
+        self._api_client = api_client
+        self._tool_registry_factory = tool_registry_factory
+
         super().__init__(
             logs_dir=logs_dir,
             model_name=resolved_model_name,
@@ -136,14 +147,21 @@ class OpenHarnessHarborAgent(BaseAgent):
                 messages_path=str(messages_path),
                 events_path=str(events_path),
             )
-            run_context = AgentRunContext(trace_observer=trace_observer)
+            
+            runtime = AgentRuntime(
+                workspace=workspace,
+                settings=resolved_settings,
+                permission_mode=PermissionMode.FULL_AUTO,
+                api_client=self._api_client,
+                log_paths=log_paths,
+                trace_observer=trace_observer,
+                tool_registry_factory=self._tool_registry_factory,
+            )
 
             try:
                 result = await self._agent.run(
-                    instruction,
-                    workspace,
-                    log_paths=log_paths,
-                    run_context=run_context,
+                    task=TaskDefinition(instruction=instruction),
+                    runtime=runtime,
                 )
                 summary = HarborRunSummary(
                     final_text=result.final_text,
@@ -203,19 +221,6 @@ class OpenHarnessHarborAgent(BaseAgent):
                         "events_path": str(events_path),
                     },
                 )
-
-
-def _build_harbor_system_prompt(*, remote_cwd: str) -> str:
-    return (
-        "You are a simple OpenHarness coding agent running inside Harbor.\n"
-        "Solve the task directly using the available tools.\n"
-        "Prefer the smallest correct change, verify with lightweight reads or commands when useful, "
-        "and finish as soon as the task is complete.\n\n"
-        "# Harbor Session\n"
-        f"- Working directory: {remote_cwd}\n"
-        "- The tools operate against the Harbor environment.\n"
-        "- For file creation tasks, using write_file with a relative path in the working directory is fine.\n"
-    )
 
 
 @contextmanager

@@ -8,8 +8,6 @@ from enum import Enum
 from pathlib import Path
 from typing import Any
 
-from openharness.tools import DEFAULT_TOOL_NAMES
-
 
 DEFAULT_HARBOR_VERSION = "0.3.0"
 DEFAULT_HARBOR_AGENT_IMPORT_PATH = "openharness.harbor:OpenHarnessHarborAgent"
@@ -35,28 +33,31 @@ class HarborToolSpec:
 
 @dataclass(frozen=True)
 class OpenHarnessHarborAgentSpec:
-    """Agent-specific options exposed through the Harbor wrapper."""
+    """Agent-specific options exposed through the Harbor wrapper.
+
+    ``agent_name`` selects which YAML config the factory loads inside the
+    container (e.g. ``"default"``, ``"react_example"``).
+    """
 
     import_path: str = DEFAULT_HARBOR_AGENT_IMPORT_PATH
+    agent_name: str = "default"
     model: str | None = None
     remote_cwd: str = "/app"
-    tool_names: tuple[str, ...] = DEFAULT_TOOL_NAMES
-    max_turns: int = 8
-    max_tokens: int = 4096
-    system_prompt: str | None = None
+    max_turns: int | None = None
+    max_tokens: int | None = None
     extra_kwargs: dict[str, Any] = field(default_factory=dict)
     env: dict[str, str] = field(default_factory=dict)
 
     def harbor_kwargs(self) -> dict[str, Any]:
         """Return Harbor custom-agent kwargs."""
         kwargs: dict[str, Any] = {
+            "agent_name": self.agent_name,
             "remote_cwd": self.remote_cwd,
-            "tool_names": list(self.tool_names),
-            "max_turns": self.max_turns,
-            "max_tokens": self.max_tokens,
         }
-        if self.system_prompt is not None:
-            kwargs["system_prompt"] = self.system_prompt
+        if self.max_turns is not None:
+            kwargs["max_turns"] = self.max_turns
+        if self.max_tokens is not None:
+            kwargs["max_tokens"] = self.max_tokens
         kwargs.update(self.extra_kwargs)
         return kwargs
 
