@@ -2,6 +2,7 @@
 
 from openharness.observability.langfuse import (
     NullTraceObserver,
+    ObservationScope,
     ObservationHandle,
     TraceObserver,
     create_trace_observer,
@@ -9,6 +10,7 @@ from openharness.observability.langfuse import (
 
 __all__ = [
     "NullTraceObserver",
+    "ObservationScope",
     "ObservationHandle",
     "TraceObserver",
     "create_trace_observer",

@@ -14,7 +14,7 @@ from openharness.agents.catalog import (
     get_catalog_agent_configs,
     iter_catalog_agent_configs,
 )
-from openharness.agents.config import AgentConfig, AgentDefinitionMetadata, QuickEvaluation
+from openharness.agents.config import AgentConfig, AgentDefinitionMetadata
 from openharness.agents.contracts import (
     Agent,
     AgentRunResult,
@@ -37,7 +37,6 @@ __all__ = [
     "CommandResult",
     "Conversation",
     "PlannerExecutorAgent",
-    "QuickEvaluation",
     "ReActAgent",
     "ReflectionAgent",
     "SimpleAgent",

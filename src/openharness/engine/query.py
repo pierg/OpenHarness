@@ -34,7 +34,7 @@ from openharness.engine.stream_events import (
     ToolExecutionStarted,
 )
 from openharness.hooks import HookEvent, HookExecutor
-from openharness.observability import TraceObserver
+from openharness.observability import NullTraceObserver, TraceObserver
 from openharness.permissions.checker import PermissionChecker
 from openharness.tools.base import ToolExecutionContext
 from openharness.tools.base import ToolRegistry
@@ -95,22 +95,37 @@ async def run_single_turn(
     """Execute one LLM call + tool execution.  Mutates *messages* in place."""
     final_message: ConversationMessage | None = None
     usage = UsageSnapshot()
+    observer = context.trace_observer or NullTraceObserver()
 
-    async for event in context.api_client.stream_message(
-        ApiMessageRequest(
-            model=context.model,
-            messages=messages,
-            system_prompt=context.system_prompt,
-            max_tokens=context.max_tokens,
-            tools=context.tool_registry.to_api_schema(),
+    with observer.model_call(
+        model=context.model,
+        input=_trace_input_messages(messages),
+        metadata={"message_count": len(messages)},
+        model_parameters={
+            "max_tokens": context.max_tokens,
+            "max_turns": context.max_turns,
+        },
+    ) as model_handle:
+        async for event in context.api_client.stream_message(
+            ApiMessageRequest(
+                model=context.model,
+                messages=messages,
+                system_prompt=context.system_prompt,
+                max_tokens=context.max_tokens,
+                tools=context.tool_registry.to_api_schema(),
+            )
+        ):
+            if isinstance(event, ApiMessageCompleteEvent):
+                final_message = event.message
+                usage = event.usage
+
+        if final_message is None:
+            raise RuntimeError("Model stream finished without a final message")
+
+        model_handle.update(
+            output=final_message.model_dump(mode="json"),
+            metadata={"usage": usage.model_dump(mode="json")},
         )
-    ):
-        if isinstance(event, ApiMessageCompleteEvent):
-            final_message = event.message
-            usage = event.usage
-
-    if final_message is None:
-        raise RuntimeError("Model stream finished without a final message")
 
     messages.append(final_message)
     tool_calls = final_message.tool_uses
@@ -177,32 +192,76 @@ async def run_query(
 
         final_message: ConversationMessage | None = None
         usage = UsageSnapshot()
+        observer = context.trace_observer or NullTraceObserver()
 
         try:
-            async for event in context.api_client.stream_message(
-                ApiMessageRequest(
-                    model=context.model,
-                    messages=messages,
-                    system_prompt=context.system_prompt,
-                    max_tokens=context.max_tokens,
-                    tools=context.tool_registry.to_api_schema(),
-                )
-            ):
-                if isinstance(event, ApiTextDeltaEvent):
-                    yield AssistantTextDelta(text=event.text), None
-                    continue
-                if isinstance(event, ApiRetryEvent):
-                    yield StatusEvent(
-                        message=(
-                            f"Request failed; retrying in {event.delay_seconds:.1f}s "
-                            f"(attempt {event.attempt + 1} of {event.max_attempts}): {event.message}"
-                        )
-                    ), None
-                    continue
+            with observer.model_call(
+                model=context.model,
+                input=_trace_input_messages(messages),
+                metadata={
+                    "message_count": len(messages),
+                    "turn_index": turn_count,
+                    "was_compacted": was_compacted,
+                },
+                model_parameters={
+                    "max_tokens": context.max_tokens,
+                    "max_turns": context.max_turns,
+                },
+            ) as model_handle:
+                async for event in context.api_client.stream_message(
+                    ApiMessageRequest(
+                        model=context.model,
+                        messages=messages,
+                        system_prompt=context.system_prompt,
+                        max_tokens=context.max_tokens,
+                        tools=context.tool_registry.to_api_schema(),
+                    )
+                ):
+                    if isinstance(event, ApiTextDeltaEvent):
+                        yield AssistantTextDelta(text=event.text), None
+                        continue
+                    if isinstance(event, ApiRetryEvent):
+                        yield StatusEvent(
+                            message=(
+                                f"Request failed; retrying in {event.delay_seconds:.1f}s "
+                                f"(attempt {event.attempt + 1} of {event.max_attempts}): {event.message}"
+                            )
+                        ), None
+                        continue
 
-                if isinstance(event, ApiMessageCompleteEvent):
-                    final_message = event.message
-                    usage = event.usage
+                    if isinstance(event, ApiMessageCompleteEvent):
+                        final_message = event.message
+                        usage = event.usage
+
+                if final_message is None:
+                    raise RuntimeError("Model stream finished without a final message")
+
+                model_handle.update(
+                    output=final_message.model_dump(mode="json"),
+                    metadata={"usage": usage.model_dump(mode="json")},
+                )
+
+            messages.append(final_message)
+            yield AssistantTurnComplete(message=final_message, usage=usage), usage
+
+            if not final_message.tool_uses:
+                return
+
+            tool_calls = final_message.tool_uses
+
+            for tc in tool_calls:
+                yield ToolExecutionStarted(tool_name=tc.name, tool_input=tc.input), None
+
+            tool_results = await _execute_tools(context, tool_calls)
+
+            for tc, result in zip(tool_calls, tool_results):
+                yield ToolExecutionCompleted(
+                    tool_name=tc.name,
+                    output=result.content,
+                    is_error=result.is_error,
+                ), None
+
+            messages.append(ConversationMessage(role="user", content=list(tool_results)))
         except Exception as exc:
             error_msg = str(exc)
             if "connect" in error_msg.lower() or "timeout" in error_msg.lower() or "network" in error_msg.lower():
@@ -210,31 +269,6 @@ async def run_query(
             else:
                 yield ErrorEvent(message=f"API error: {error_msg}"), None
             return
-
-        if final_message is None:
-            raise RuntimeError("Model stream finished without a final message")
-
-        messages.append(final_message)
-        yield AssistantTurnComplete(message=final_message, usage=usage), usage
-
-        if not final_message.tool_uses:
-            return
-
-        tool_calls = final_message.tool_uses
-
-        for tc in tool_calls:
-            yield ToolExecutionStarted(tool_name=tc.name, tool_input=tc.input), None
-
-        tool_results = await _execute_tools(context, tool_calls)
-
-        for tc, result in zip(tool_calls, tool_results):
-            yield ToolExecutionCompleted(
-                tool_name=tc.name,
-                output=result.content,
-                is_error=result.is_error,
-            ), None
-
-        messages.append(ConversationMessage(role="user", content=list(tool_results)))
 
     if context.max_turns is not None:
         raise MaxTurnsExceeded(context.max_turns)
@@ -264,91 +298,145 @@ async def _execute_tool_call(
     tool_use_id: str,
     tool_input: dict[str, object],
 ) -> ToolResultBlock:
-    if context.hook_executor is not None:
-        pre_hooks = await context.hook_executor.execute(
-            HookEvent.PRE_TOOL_USE,
-            {"tool_name": tool_name, "tool_input": tool_input, "event": HookEvent.PRE_TOOL_USE.value},
-        )
-        if pre_hooks.blocked:
-            return ToolResultBlock(
-                tool_use_id=tool_use_id,
-                content=pre_hooks.reason or f"pre_tool_use hook blocked {tool_name}",
-                is_error=True,
+    observer = context.trace_observer or NullTraceObserver()
+    with observer.tool_call(
+        tool_name=tool_name,
+        tool_input=tool_input,
+        metadata={
+            "cwd": str(context.cwd),
+            "tool_use_id": tool_use_id,
+        },
+    ) as tool_handle:
+        if context.hook_executor is not None:
+            pre_hooks = await context.hook_executor.execute(
+                HookEvent.PRE_TOOL_USE,
+                {"tool_name": tool_name, "tool_input": tool_input, "event": HookEvent.PRE_TOOL_USE.value},
             )
-
-    tool = context.tool_registry.get(tool_name)
-    if tool is None:
-        return ToolResultBlock(
-            tool_use_id=tool_use_id,
-            content=f"Unknown tool: {tool_name}",
-            is_error=True,
-        )
-
-    try:
-        parsed_input = tool.input_model.model_validate(tool_input)
-    except Exception as exc:
-        return ToolResultBlock(
-            tool_use_id=tool_use_id,
-            content=f"Invalid input for {tool_name}: {exc}",
-            is_error=True,
-        )
-
-    _file_path = str(tool_input.get("path") or tool_input.get("file_path") or "") or None
-    _command = str(tool_input.get("command", "")) or None
-    # Normalize common tool inputs before permission checks so path rules apply
-    # consistently across built-in tools that use either `file_path` or `path`.
-    _file_path = _resolve_permission_file_path(context.cwd, tool_input, parsed_input) or _file_path
-    _command = _extract_permission_command(tool_input, parsed_input) or _command
-    decision = context.permission_checker.evaluate(
-        tool_name,
-        is_read_only=tool.is_read_only(parsed_input),
-        file_path=_file_path,
-        command=_command,
-    )
-    if not decision.allowed:
-        if decision.requires_confirmation and context.permission_prompt is not None:
-            confirmed = await context.permission_prompt(tool_name, decision.reason)
-            if not confirmed:
+            if pre_hooks.blocked:
+                tool_handle.update(
+                    output=pre_hooks.reason,
+                    metadata={"blocked_by_hook": True},
+                )
                 return ToolResultBlock(
                     tool_use_id=tool_use_id,
-                    content=f"Permission denied for {tool_name}",
+                    content=pre_hooks.reason or f"pre_tool_use hook blocked {tool_name}",
                     is_error=True,
                 )
-        else:
+
+        tool = context.tool_registry.get(tool_name)
+        if tool is None:
+            tool_handle.update(
+                output=f"Unknown tool: {tool_name}",
+                metadata={"is_error": True},
+            )
             return ToolResultBlock(
                 tool_use_id=tool_use_id,
-                content=decision.reason or f"Permission denied for {tool_name}",
+                content=f"Unknown tool: {tool_name}",
                 is_error=True,
             )
 
-    result = await tool.execute(
-        parsed_input,
-        ToolExecutionContext(
-            cwd=context.cwd,
+        try:
+            parsed_input = tool.input_model.model_validate(tool_input)
+        except Exception as exc:
+            tool_handle.update(
+                output=f"Invalid input for {tool_name}: {exc}",
+                metadata={"is_error": True},
+            )
+            return ToolResultBlock(
+                tool_use_id=tool_use_id,
+                content=f"Invalid input for {tool_name}: {exc}",
+                is_error=True,
+            )
+
+        _file_path = str(tool_input.get("path") or tool_input.get("file_path") or "") or None
+        _command = str(tool_input.get("command", "")) or None
+        # Normalize common tool inputs before permission checks so path rules apply
+        # consistently across built-in tools that use either `file_path` or `path`.
+        _file_path = _resolve_permission_file_path(context.cwd, tool_input, parsed_input) or _file_path
+        _command = _extract_permission_command(tool_input, parsed_input) or _command
+        decision = context.permission_checker.evaluate(
+            tool_name,
+            is_read_only=tool.is_read_only(parsed_input),
+            file_path=_file_path,
+            command=_command,
+        )
+        if not decision.allowed:
+            if decision.requires_confirmation and context.permission_prompt is not None:
+                confirmed = await context.permission_prompt(tool_name, decision.reason)
+                if not confirmed:
+                    tool_handle.update(
+                        output=f"Permission denied for {tool_name}",
+                        metadata={"is_error": True, "permission_reason": decision.reason},
+                    )
+                    return ToolResultBlock(
+                        tool_use_id=tool_use_id,
+                        content=f"Permission denied for {tool_name}",
+                        is_error=True,
+                    )
+            else:
+                tool_handle.update(
+                    output=decision.reason or f"Permission denied for {tool_name}",
+                    metadata={"is_error": True, "permission_reason": decision.reason},
+                )
+                return ToolResultBlock(
+                    tool_use_id=tool_use_id,
+                    content=decision.reason or f"Permission denied for {tool_name}",
+                    is_error=True,
+                )
+
+        result = await tool.execute(
+            parsed_input,
+            ToolExecutionContext(
+                cwd=context.cwd,
+                metadata={
+                    "tool_registry": context.tool_registry,
+                    "ask_user_prompt": context.ask_user_prompt,
+                    "trace_observer": context.trace_observer,
+                    **(context.tool_metadata or {}),
+                },
+            ),
+        )
+        tool_result = ToolResultBlock(
+            tool_use_id=tool_use_id,
+            content=result.output,
+            is_error=result.is_error,
+        )
+        if context.hook_executor is not None:
+            await context.hook_executor.execute(
+                HookEvent.POST_TOOL_USE,
+                {
+                    "tool_name": tool_name,
+                    "tool_input": tool_input,
+                    "tool_output": tool_result.content,
+                    "tool_is_error": tool_result.is_error,
+                    "event": HookEvent.POST_TOOL_USE.value,
+                },
+            )
+        tool_handle.update(
+            output=result.output,
             metadata={
-                "tool_registry": context.tool_registry,
-                "ask_user_prompt": context.ask_user_prompt,
-                **(context.tool_metadata or {}),
-            },
-        ),
-    )
-    tool_result = ToolResultBlock(
-        tool_use_id=tool_use_id,
-        content=result.output,
-        is_error=result.is_error,
-    )
-    if context.hook_executor is not None:
-        await context.hook_executor.execute(
-            HookEvent.POST_TOOL_USE,
-            {
-                "tool_name": tool_name,
-                "tool_input": tool_input,
-                "tool_output": tool_result.content,
-                "tool_is_error": tool_result.is_error,
-                "event": HookEvent.POST_TOOL_USE.value,
+                "is_error": result.is_error,
+                **(result.metadata or {}),
             },
         )
-    return tool_result
+        return tool_result
+
+
+def _latest_user_prompt(messages: list[ConversationMessage]) -> str:
+    for message in reversed(messages):
+        if message.role == "user" and message.text.strip():
+            return message.text.strip()
+    return ""
+
+
+def _trace_input_messages(messages: list[ConversationMessage]) -> list[dict[str, str]]:
+    return [
+        {
+            "role": message.role,
+            "text": message.text.strip(),
+        }
+        for message in messages
+    ]
 
 
 def _resolve_permission_file_path(

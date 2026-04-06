@@ -14,15 +14,6 @@ from openharness.tools import DEFAULT_TOOL_NAMES
 _JINJA_ENV = Environment(loader=BaseLoader(), undefined=StrictUndefined)
 
 
-class QuickEvaluation(BaseModel):
-    """A lightweight post-run assertion for fast regression checks."""
-
-    name: str
-    contains: str | None = None
-    not_contains: str | None = None
-    message: str | None = None
-
-
 class AgentDefinitionMetadata(BaseModel):
     """Coordinator/swarm metadata projected from a YAML agent config."""
 
@@ -60,7 +51,6 @@ class AgentConfig(BaseModel):
     tools: tuple[str, ...] = DEFAULT_TOOL_NAMES
 
     definition: AgentDefinitionMetadata | None = None
-    evaluations: tuple[QuickEvaluation, ...] = ()
     prompts: dict[str, str] = Field(default_factory=dict)
 
     subagents: dict[str, "AgentConfig"] = Field(default_factory=dict)

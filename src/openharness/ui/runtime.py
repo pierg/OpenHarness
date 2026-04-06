@@ -22,6 +22,7 @@ from openharness.hooks import HookEvent, HookExecutionContext, HookExecutor, loa
 from openharness.hooks.hot_reload import HookReloader
 from openharness.mcp.client import McpClientManager
 from openharness.mcp.config import load_mcp_server_configs
+from openharness.observability import NullTraceObserver, TraceObserver
 from openharness.permissions import PermissionChecker
 from openharness.permissions.modes import PermissionMode
 from openharness.plugins import load_plugins
@@ -55,6 +56,7 @@ class RuntimeBundle:
     session_id: str = ""
     settings_overrides: dict[str, Any] = field(default_factory=dict)
     session_backend: SessionBackend = DEFAULT_SESSION_BACKEND
+    trace_observer: TraceObserver = field(default_factory=NullTraceObserver)
 
     def current_settings(self):
         """Return the effective settings for this session.
@@ -127,6 +129,7 @@ async def build_runtime(
     restore_messages: list[dict] | None = None,
     enforce_max_turns: bool = True,
     session_backend: SessionBackend | None = None,
+    trace_observer: TraceObserver | None = None,
 ) -> RuntimeBundle:
     """Build the shared runtime for an OpenHarness session."""
     settings_overrides: dict[str, Any] = {
@@ -218,6 +221,7 @@ async def build_runtime(
         ask_user_prompt=ask_user_prompt,
         hook_executor=hook_executor,
         tool_metadata={"mcp_manager": mcp_manager, "bridge_manager": bridge_manager},
+        trace_observer=trace_observer,
     )
     # Restore messages from a saved session if provided
     if restore_messages:
@@ -242,6 +246,7 @@ async def build_runtime(
         session_id=uuid4().hex[:12],
         settings_overrides=settings_overrides,
         session_backend=session_backend or DEFAULT_SESSION_BACKEND,
+        trace_observer=trace_observer or NullTraceObserver(),
     )
 
 

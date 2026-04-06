@@ -51,35 +51,62 @@ class ReflectionAgent:
         return self._config
 
     async def run(self, task: TaskDefinition, runtime: AgentRuntime) -> AgentRunResult:
-        result: AgentRunResult | None = None
+        trace_observer = runtime.trace_observer
+        with trace_observer.span(
+            name=f"agent:{self._config.name}",
+            input={
+                "instruction": task.instruction,
+                "payload": task.payload,
+            },
+            metadata={
+                "architecture": self._config.architecture,
+                "max_attempts": self._max_attempts,
+            },
+        ) as agent_span:
+            result: AgentRunResult | None = None
 
-        for attempt in range(1, self._max_attempts + 1):
-            log.info("Reflection attempt %d/%d", attempt, self._max_attempts)
-            result = await self._worker.run(task, runtime)
+            for attempt in range(1, self._max_attempts + 1):
+                with trace_observer.span(
+                    name=f"attempt:{attempt}",
+                    input={"instruction": task.instruction},
+                    metadata={"agent": self._config.name},
+                ) as attempt_span:
+                    log.info("Reflection attempt %d/%d", attempt, self._max_attempts)
+                    result = await self._worker.run(task, runtime)
 
-            verdict: Verdict = await runtime.run_agent_config(
-                self._critic_config,
-                TaskDefinition(
-                    instruction=task.instruction,
-                    payload={"solution": result.output, "attempt": attempt},
-                ),
-                output_type=Verdict,
-            )
+                    verdict: Verdict = await runtime.run_agent_config(
+                        self._critic_config,
+                        TaskDefinition(
+                            instruction=task.instruction,
+                            payload={"solution": result.output, "attempt": attempt},
+                        ),
+                        output_type=Verdict,
+                    )
 
-            if verdict.approved:
-                log.info("Critic approved on attempt %d", attempt)
-                return result
+                    attempt_span.update(
+                        output={
+                            "approved": verdict.approved,
+                            "feedback": verdict.feedback,
+                            "issues": verdict.issues,
+                        }
+                    )
 
-            log.info("Critic rejected: %s", verdict.feedback)
-            task = TaskDefinition(
-                instruction=task.instruction,
-                payload={
-                    **task.payload,
-                    "previous_attempt": result.output,
-                    "feedback": verdict.feedback,
-                    "issues": verdict.issues,
-                },
-            )
+                    if verdict.approved:
+                        log.info("Critic approved on attempt %d", attempt)
+                        agent_span.update(output={"final_text": result.final_text})
+                        return result
 
-        assert result is not None
-        return result
+                    log.info("Critic rejected: %s", verdict.feedback)
+                    task = TaskDefinition(
+                        instruction=task.instruction,
+                        payload={
+                            **task.payload,
+                            "previous_attempt": result.output,
+                            "feedback": verdict.feedback,
+                            "issues": verdict.issues,
+                        },
+                    )
+
+            assert result is not None
+            agent_span.update(output={"final_text": result.final_text})
+            return result

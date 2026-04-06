@@ -2,53 +2,50 @@
 
 This document describes the current unified agent architecture in OpenHarness.
 
-After the refactor, there is no longer a “YAML agents system” on one side and an unrelated “coordinator/swarm system” on the other. The code now has two explicit layers:
+The codebase no longer has a separate "YAML agents system" and "upstream swarm system". It now has two explicit layers that meet through one shared contract:
 
-- Control plane: `AgentDefinition`, coordinator mode, `agent` / `send_message`, and swarm backends.
-- Execution plane: `AgentConfig`, compositional architectures, `Workflow`, and `AgentRuntime`.
+- Control plane: `AgentDefinition`, coordinator mode, `agent` / `send_message`, swarm backends, mailbox delivery, permission sync, and worktree-aware spawning.
+- Execution plane: `AgentConfig`, YAML architectures, `Workflow`, and `AgentRuntime`.
 
-The key design rule is:
+The key rule is:
 
 - `AgentDefinition` is the public routing and deployment contract.
 - `AgentConfig` is the private composition and execution contract.
-
-`runner` connects the two.
+- `runner` connects the two.
 
 ---
 
 ## Overview
 
-At a high level:
-
 ```mermaid
 flowchart TD
-    A["YAML AgentConfig"] --> B["catalog.py"]
+    A["YAML AgentConfig"] --> B["agents.catalog"]
     B --> C["Projected AgentDefinition"]
     C --> D["Coordinator / agent_tool"]
     D --> E["TeammateSpawnConfig"]
-    E --> F["Swarm runner"]
+    E --> F["Swarm backend"]
     F --> G["prompt_native runner"]
     F --> H["yaml_workflow runner"]
     H --> I["Workflow"]
     I --> J["AgentFactory"]
-    J --> K["Composed Agent tree"]
+    J --> K["Composed agent tree"]
     K --> L["AgentRuntime"]
     G --> M["RuntimeBundle / QueryEngine"]
 ```
 
-There are now three ways an agent can exist:
+There are now three ways an agent can appear in the catalog:
 
-1. Built-in prompt-native agents such as `worker`, `Explore`, `Plan`, and `verification`.
-2. YAML-backed compositional agents projected into the coordinator catalog.
-3. Markdown/plugin-defined agents loaded as `AgentDefinition`s.
+1. Built-in prompt-native definitions such as `worker`, `Explore`, `Plan`, and `verification`.
+2. YAML-backed compositional agents projected into `AgentDefinition`.
+3. Markdown or plugin-defined agents loaded directly as `AgentDefinition`.
 
 Coordinator mode sees one merged catalog of all of them.
 
 ---
 
-## Contracts — `agents.contracts`
+## Contracts
 
-Everything builds on three core types:
+Everything builds on three core types in `agents.contracts`:
 
 ```text
 TaskDefinition          what to do
@@ -69,19 +66,18 @@ AgentRunResult[T]       what came back
 
 ---
 
-## Configuration — `agents.config`
+## YAML Execution Model
 
-`AgentConfig` is the YAML execution model. It describes:
+`AgentConfig` in `agents.config` is the YAML execution model. It describes:
 
 - `architecture`: `simple`, `planner_executor`, `reflection`, or `react`
 - model and turn limits
 - tool set
 - prompt templates
 - nested `subagents`
-- optional `definition` metadata for coordinator/swarm projection
-- optional `evaluations` for quick post-run assertions
+- optional `definition` metadata for coordinator and swarm projection
 
-Example:
+Minimal example:
 
 ```yaml
 name: default
@@ -108,20 +104,12 @@ tools:
   - send_message
   - task_stop
 
-evaluations:
-  - name: no-traceback
-    not_contains: "Traceback"
-
 prompts:
   system: |
     {{ openharness_system_context }}
     You are a coding agent.
   user: |
     {{ instruction }}
-
-subagents:
-  planner: { ... }
-  executor: { ... }
 ```
 
 ### `definition`
@@ -143,20 +131,11 @@ subagents:
 - `initial_prompt`
 - `isolation`
 
-If `definition` is omitted, the system still projects the YAML config into an `AgentDefinition`, but it uses sensible defaults.
-
-### `evaluations`
-
-`evaluations` are lightweight assertions run after a YAML workflow completes. Today they support:
-
-- `contains`
-- `not_contains`
-
-They are not a full benchmark harness. They are meant for cheap regression checks and policy assertions.
+If `definition` is omitted, the system still projects the YAML config into an `AgentDefinition`, but it uses defaults derived from the YAML config itself.
 
 ---
 
-## Catalogs — `agents.catalog`
+## Catalogs
 
 YAML configs are loaded from three locations:
 
@@ -181,9 +160,9 @@ So there is now one shared YAML catalog, not separate loaders per subsystem.
 
 ---
 
-## Coordinator Catalog — `coordinator.agent_definitions`
+## Coordinator Catalog
 
-`AgentDefinition` is the public agent contract used by coordinator mode and swarm spawning.
+`coordinator.agent_definitions` produces the public agent catalog used by coordinator mode and swarm spawning.
 
 The merged coordinator catalog is assembled in this order:
 
@@ -192,7 +171,7 @@ The merged coordinator catalog is assembled in this order:
 3. user markdown definitions from `~/.openharness/agents`
 4. plugin-provided definitions
 
-Important fields on `AgentDefinition` now include:
+Important `AgentDefinition` fields include:
 
 - `name`
 - `description`
@@ -207,17 +186,14 @@ Important fields on `AgentDefinition` now include:
 - `permissions`
 - `plan_mode_required`
 - `allow_permission_prompts`
+- `background`
+- `isolation`
 
-Lookup works by either:
-
-- definition `name`
-- or `subagent_type`
-
-That makes `subagent_type` the stable routing key the coordinator should use.
+Lookup works by either definition `name` or `subagent_type`. In practice, `subagent_type` is the stable routing key the coordinator should use.
 
 ---
 
-## Architectures — `agents.architectures`
+## Architectures
 
 Architectures still provide the main execution value of our fork.
 
@@ -234,7 +210,7 @@ Two-stage composition:
 
 ### `reflection`
 
-Worker + critic loop:
+Worker plus critic loop:
 
 1. worker proposes a solution
 2. critic returns a structured verdict
@@ -242,19 +218,19 @@ Worker + critic loop:
 
 ### `react`
 
-Think / Act / Observe loop:
+Think, Act, Observe loop:
 
 1. thinker returns structured next action
 2. actor executes with tools
 3. observation is fed into the next step
 
-The important point is that architecture logic stays in the execution plane. Coordinator mode does not need to understand any of this internals. It just routes to a definition whose `runner` is `yaml_workflow`.
+The important point is that architecture logic stays in the execution plane. Coordinator mode does not need to understand the internals. It routes to a definition whose `runner` is `yaml_workflow`.
 
 ---
 
-## Runtime — `runtime.session`
+## Runtime
 
-`AgentRuntime` is the execution substrate used by YAML architectures.
+`AgentRuntime` in `runtime.session` is the execution substrate used by YAML architectures.
 
 Responsibilities:
 
@@ -273,85 +249,52 @@ Key APIs:
 - `create_conversation(config, task)`
 - `build_result(output)`
 
-`AgentRuntime` is used by architecture code. It is not the coordinator-facing contract.
-
----
-
-## Workflow — `runtime.workflow`
-
-`Workflow` is the entry point for YAML-backed agent execution.
-
-It now:
+`Workflow` in `runtime.workflow` is the top-level execution entry point for YAML agents. It:
 
 1. loads the merged YAML catalog with `AgentFactory.with_catalog_configs(workspace.cwd)`
 2. creates the requested agent tree
 3. builds an `AgentRuntime`
 4. runs the agent
-5. executes configured quick evaluations
+5. returns `WorkflowResult(agent_result=...)`
 
-```python
-wf = Workflow(workspace)
-result = await wf.run(
-    TaskDefinition(instruction="Fix the bug"),
-    agent_name="default",
-)
-```
-
-`WorkflowResult` contains:
-
-- `agent_result`
-- `evaluation`
-
-This is the execution path used by the `yaml_workflow` runner.
+This is the path used by the `yaml_workflow` runner.
 
 ---
 
-## Tool Registries — `tools`
+## Tool Registries
 
-There are now two relevant tool-registry layers:
+There are two relevant tool-registry layers.
 
 ### `create_default_tool_registry(...)`
 
 Used by interactive prompt-native sessions. It supports:
 
-- allow/deny filtering
+- allow and deny filtering
 - MCP tools
-- coordinator/swarm tools
+- coordinator and swarm tools
 
 ### `WorkspaceToolRegistryFactory(...)`
 
-Used by `AgentRuntime` for YAML architectures. It now supports:
+Used by `AgentRuntime` for YAML architectures. It supports:
 
-- workspace-bound tools like `bash`, `read_file`, `write_file`, `glob`, `grep`
-- compatibility tools like `agent`, `send_message`, and `task_stop`
+- workspace-bound tools such as `bash`, `read_file`, `write_file`, `glob`, and `grep`
+- compatibility tools such as `agent`, `send_message`, and `task_stop`
 - tool-name normalization so upstream aliases such as `Read` and `Edit` map to `read_file` and `edit_file`
 
-This means YAML agents can now opt into coordinator/swarm delegation tools directly by listing them in `tools`.
+This means YAML agents can now opt into coordinator and swarm delegation tools directly by listing them in `tools`.
 
 ---
 
-## Coordinator And Swarm
+## Coordinator To Swarm Flow
 
-### Coordinator prompt generation
+`coordinator_mode.py` now renders a dynamic catalog into the system prompt and user context. The coordinator is no longer hardcoded to always use `subagent_type="worker"`.
 
-`coordinator_mode.py` now renders a dynamic agent catalog into the system prompt and user context. The coordinator is no longer told to always use `subagent_type="worker"`.
+When it chooses an agent:
 
-Instead it sees the current available catalog and chooses from:
-
-- built-in prompt-native agents
-- YAML-projected compositional agents
-- markdown/plugin agents
-
-### `agent_tool`
-
-`agent_tool` is the main bridge from coordinator to execution.
-
-Flow:
-
-1. resolve `AgentDefinition` by `subagent_type`
-2. map it into `TeammateSpawnConfig`
-3. choose a backend
-4. spawn a teammate
+1. `agent_tool` resolves the `AgentDefinition` by `subagent_type`
+2. it maps that definition into `TeammateSpawnConfig`
+3. it selects a backend from the swarm registry
+4. the backend starts a stateful teammate runner
 
 The spawn config now carries the fields the backend actually needs:
 
@@ -367,16 +310,15 @@ The spawn config now carries the fields the backend actually needs:
 - `allow_permission_prompts`
 - `initial_prompt`
 - `max_turns`
+- `worktree_path`
 
-### `send_message`
-
-`send_message` stays transport-oriented. It does not care whether the target teammate is prompt-native or YAML-backed. It routes follow-up turns into the active runner.
+`send_message` is transport-oriented. It does not care whether the target teammate is prompt-native or YAML-backed. It routes follow-up turns into the active runner through the same backend.
 
 ---
 
-## Runner Types — `swarm.runner`
+## Runner Types
 
-`TeammateSpawnConfig.runner` selects the execution substrate.
+`swarm.runner.create_teammate_runner(...)` dispatches by `TeammateSpawnConfig.runner`.
 
 ### `prompt_native`
 
@@ -401,19 +343,38 @@ Path:
 2. load the merged YAML catalog
 3. create a `Workflow`
 4. run the named `AgentConfig`
-5. return final text plus evaluation metadata
+5. return final text and usage
 
-This is where our fork’s extra value lives: composition, architectures, structured intermediate steps, and quick evaluations.
+This is where our fork adds composition and reusable architectures on top of upstream swarm orchestration.
 
 ### `harbor`
 
-`harbor` exists in the model as a runner type and `OpenHarnessHarborAgent` uses the same catalog, but swarm teammate execution does not yet instantiate Harbor-backed runners. Today this is a reserved integration point, not a fully wired swarm path.
+`harbor` exists in the contract and the Harbor wrapper uses the same YAML catalog, but swarm teammate execution does not yet instantiate Harbor-backed runners. Today this is a reserved integration point, not a fully wired swarm path.
+
+---
+
+## Messaging, Permissions, And Worktrees
+
+The upstream multi-agent runtime contributes the operational layer:
+
+- swarm backends: in-process and subprocess
+- file-based teammate mailbox for leader/worker messaging
+- permission sync between workers and the leader
+- worktree-aware spawn configuration
+- richer coordinator prompt generation and team lifecycle support
+
+Our YAML layer builds on top of that rather than replacing it.
+
+The separation is:
+
+- upstream owns teammate transport, lifecycle, routing, and interactive coordination
+- our fork owns compositional execution once a `yaml_workflow` teammate is running
 
 ---
 
 ## End-To-End Flows
 
-### 1. Standalone YAML workflow
+### Standalone YAML workflow
 
 ```mermaid
 flowchart TD
@@ -423,89 +384,147 @@ flowchart TD
     D --> E["Conversation / Query loop"]
     E --> F["Tools + permissions + model"]
     F --> G["AgentRunResult"]
-    G --> H["Quick evaluations"]
-    H --> I["WorkflowResult"]
+    G --> H["WorkflowResult"]
 ```
 
-This is the path used by direct workflow execution and by the YAML teammate runner.
-
-### 2. Coordinator spawning a YAML-backed agent
+### Coordinator spawning a YAML-backed agent
 
 ```mermaid
 flowchart TD
-    A["Coordinator decides on subagent_type='planner-executor'"] --> B["get_agent_definition"]
+    A["Coordinator chooses subagent_type"] --> B["get_agent_definition"]
     B --> C["Projected AgentDefinition from YAML catalog"]
     C --> D["agent_tool"]
     D --> E["TeammateSpawnConfig runner=yaml_workflow"]
-    E --> F["in_process or subprocess backend"]
+    E --> F["Swarm backend"]
     F --> G["create_teammate_runner"]
     G --> H["YamlWorkflowTeammateRunner"]
     H --> I["Workflow.run(agent_config_name)"]
     I --> J["Composed architecture executes"]
 ```
 
-This is the main new integration path created by the refactor.
-
-### 3. Coordinator spawning a prompt-native worker
+### Coordinator spawning a prompt-native worker
 
 ```mermaid
 flowchart TD
-    A["Coordinator decides on subagent_type='worker'"] --> B["get_agent_definition"]
+    A["Coordinator chooses subagent_type='worker'"] --> B["get_agent_definition"]
     B --> C["Built-in prompt-native AgentDefinition"]
     C --> D["agent_tool"]
     D --> E["TeammateSpawnConfig runner=prompt_native"]
-    E --> F["Backend"]
+    E --> F["Swarm backend"]
     F --> G["PromptNativeTeammateRunner"]
     G --> H["RuntimeBundle / QueryEngine"]
-    H --> I["Interactive multi-turn worker"]
 ```
 
-This preserves upstream-style workers while using the same swarm transport and spawn contract as YAML agents.
-
-### 4. In-process vs subprocess
+### In-process vs subprocess
 
 Backends differ only in transport:
 
-- `in_process`: runs the teammate runner directly inside the current Python process and uses mailbox delivery for follow-up turns.
-- `subprocess`: serializes the spawn config to disk, starts `python -m openharness.swarm.worker`, and feeds follow-up turns over stdin.
+- `in_process`: runs the teammate runner inside the current Python process and exchanges follow-up work through the swarm mailbox.
+- `subprocess`: serializes the spawn config, launches `python -m openharness.swarm.worker`, and routes follow-up turns over stdin.
 
 Both eventually execute the same runner contract.
 
 ---
 
-## Composition
+## Concrete Example
 
-Compositionality is still the main advantage of the YAML layer.
+The repository now includes a runnable example at `examples/local_coordinator_swarm_fix_bug`.
 
-Example:
+That example demonstrates the real merged flow:
+
+1. a project-local YAML config is placed in `.openharness/agent_configs`
+2. that YAML config is projected into `AgentDefinition` with `subagent_type=coordinator-swarm-fixer`
+3. the script resolves that definition exactly like coordinator mode would
+4. it maps the definition into `TeammateSpawnConfig`
+5. it spawns the teammate through the in-process swarm backend
+6. it sends the bug-fix task over the leader-to-worker mailbox
+7. the `yaml_workflow` runner executes a `planner_executor` architecture
+8. the script verifies the edited file locally
+
+The example YAML agent is:
 
 ```yaml
-name: nested_example
+name: coordinator_swarm_example
 architecture: planner_executor
+definition:
+  subagent_type: coordinator-swarm-fixer
+  description: Example YAML planner/executor that coordinator mode can spawn through the swarm runtime.
+  runner: yaml_workflow
+  color: teal
+
 subagents:
   planner:
     architecture: simple
     tools: []
   executor:
-    architecture: reflection
-    subagents:
-      worker:
-        architecture: simple
-        tools: [bash, write_file, agent]
-      critic:
-        architecture: simple
-        tools: []
+    architecture: simple
+    tools:
+      - bash
+      - read_file
+      - write_file
+      - edit_file
+      - glob
+      - grep
+      - agent
+      - send_message
+      - task_stop
 ```
 
-This gives us:
+This is the important pattern:
 
-- reusable agent trees
-- architecture-specific behavior
-- structured intermediate contracts
-- optional recursive delegation through `agent` / `send_message`
-- cheap workflow-level evaluations
+- the coordinator sees one routable `AgentDefinition`
+- the YAML side still controls the internal composition
+- the executor can opt into upstream swarm tools such as `agent` and `send_message`
 
-That is the additional value we layer on top of upstream’s coordinator and swarm runtime.
+That is how we get full advantage from upstream coordinator and swarm infrastructure while still keeping our own compositional value.
+
+---
+
+## Langfuse View
+
+If Langfuse is configured, the merged agent system now emits nested observations that mirror the runtime boundaries.
+
+Expected shape for a YAML-backed swarm teammate:
+
+```text
+OpenHarness Session
+└── swarm.yaml_workflow_turn
+    └── yaml_workflow
+        └── architecture.planner_executor
+            ├── planner_phase
+            │   └── agent_config:planner
+            │       └── OpenHarness Turn
+            │           ├── OpenHarness Model Turn
+            │           └── ...
+            └── executor_phase
+                └── agent_config:executor
+                    └── OpenHarness Turn
+                        ├── OpenHarness Model Turn
+                        ├── write_file
+                        ├── agent
+                        └── send_message
+```
+
+Expected shape for a prompt-native teammate:
+
+```text
+OpenHarness Session
+└── swarm.prompt_native_turn
+    └── OpenHarness Turn
+        ├── OpenHarness Model Turn
+        ├── read_file
+        └── bash
+```
+
+The important point is that Langfuse now shows:
+
+- the swarm handoff
+- the selected runner
+- the YAML workflow boundary
+- architecture phases such as planner vs executor, reflection attempts, or react steps
+- model turns and tool calls inside each phase
+
+This makes the control-plane to execution-plane transition visible instead of implicit.
 
 ---
 
@@ -513,10 +532,11 @@ That is the additional value we layer on top of upstream’s coordinator and swa
 
 When working on this system, use this mental model:
 
-- Coordinator chooses *which* agent to run by `subagent_type`.
-- `AgentDefinition` describes *how that agent should be spawned*.
-- `runner` decides *which execution substrate* to use.
-- `AgentConfig` describes *how a YAML-backed agent is composed internally*.
+- Coordinator chooses which agent to run by `subagent_type`.
+- `AgentDefinition` describes how that agent should be spawned.
+- `runner` decides which execution substrate to use.
+- `AgentConfig` describes how a YAML-backed agent is composed internally.
 - `Workflow` and `AgentRuntime` do the actual work for compositional agents.
+- Swarm backends, mailbox delivery, permission sync, and worktree handling stay below that line as the shared operational layer.
 
-If you keep those responsibilities separate, the architecture stays coherent.
+If those responsibilities stay separate, the architecture remains coherent.

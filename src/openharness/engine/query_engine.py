@@ -11,6 +11,7 @@ from openharness.engine.messages import ConversationMessage, ToolResultBlock
 from openharness.engine.query import AskUserPrompt, PermissionPrompt, QueryContext, run_query
 from openharness.engine.stream_events import StreamEvent
 from openharness.hooks import HookExecutor
+from openharness.observability import TraceObserver
 from openharness.permissions.checker import PermissionChecker
 from openharness.tools.base import ToolRegistry
 
@@ -33,6 +34,7 @@ class QueryEngine:
         ask_user_prompt: AskUserPrompt | None = None,
         hook_executor: HookExecutor | None = None,
         tool_metadata: dict[str, object] | None = None,
+        trace_observer: TraceObserver | None = None,
     ) -> None:
         self._api_client = api_client
         self._tool_registry = tool_registry
@@ -46,6 +48,7 @@ class QueryEngine:
         self._ask_user_prompt = ask_user_prompt
         self._hook_executor = hook_executor
         self._tool_metadata = tool_metadata or {}
+        self._trace_observer = trace_observer
         self._messages: list[ConversationMessage] = []
         self._cost_tracker = CostTracker()
 
@@ -124,6 +127,7 @@ class QueryEngine:
             ask_user_prompt=self._ask_user_prompt,
             hook_executor=self._hook_executor,
             tool_metadata=self._tool_metadata,
+            trace_observer=self._trace_observer,
         )
         async for event, usage in run_query(context, self._messages):
             if usage is not None:
@@ -145,6 +149,7 @@ class QueryEngine:
             ask_user_prompt=self._ask_user_prompt,
             hook_executor=self._hook_executor,
             tool_metadata=self._tool_metadata,
+            trace_observer=self._trace_observer,
         )
         async for event, usage in run_query(context, self._messages):
             if usage is not None:
