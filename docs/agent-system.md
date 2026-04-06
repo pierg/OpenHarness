@@ -1,256 +1,485 @@
 # Agent System
 
-This document describes the composable agent framework: contracts, configuration, architectures, runtime, and the end-to-end workflow.
+This document describes the current unified agent architecture in OpenHarness.
+
+After the refactor, there is no longer a “YAML agents system” on one side and an unrelated “coordinator/swarm system” on the other. The code now has two explicit layers:
+
+- Control plane: `AgentDefinition`, coordinator mode, `agent` / `send_message`, and swarm backends.
+- Execution plane: `AgentConfig`, compositional architectures, `Workflow`, and `AgentRuntime`.
+
+The key design rule is:
+
+- `AgentDefinition` is the public routing and deployment contract.
+- `AgentConfig` is the private composition and execution contract.
+
+`runner` connects the two.
+
+---
+
+## Overview
+
+At a high level:
+
+```mermaid
+flowchart TD
+    A["YAML AgentConfig"] --> B["catalog.py"]
+    B --> C["Projected AgentDefinition"]
+    C --> D["Coordinator / agent_tool"]
+    D --> E["TeammateSpawnConfig"]
+    E --> F["Swarm runner"]
+    F --> G["prompt_native runner"]
+    F --> H["yaml_workflow runner"]
+    H --> I["Workflow"]
+    I --> J["AgentFactory"]
+    J --> K["Composed Agent tree"]
+    K --> L["AgentRuntime"]
+    G --> M["RuntimeBundle / QueryEngine"]
+```
+
+There are now three ways an agent can exist:
+
+1. Built-in prompt-native agents such as `worker`, `Explore`, `Plan`, and `verification`.
+2. YAML-backed compositional agents projected into the coordinator catalog.
+3. Markdown/plugin-defined agents loaded as `AgentDefinition`s.
+
+Coordinator mode sees one merged catalog of all of them.
 
 ---
 
 ## Contracts — `agents.contracts`
 
-Everything builds on three types:
+Everything builds on three core types:
 
-```
+```text
 TaskDefinition          what to do
   instruction: str      primary natural-language task
-  payload: dict         extra template variables forwarded to prompts
+  payload: dict         extra variables forwarded to prompts / workflows
 
 Agent (Protocol)        who does it
   run(task, runtime) -> AgentRunResult
 
 AgentRunResult[T]       what came back
-  output: T             str for free-text, BaseModel for structured
+  output: T             str or structured Pydantic model
   input_tokens: int
   output_tokens: int
-  final_text -> str     backward-compat property
+  final_text -> str
 ```
 
-`Agent` is a `Protocol` — any class with an `async def run(task, runtime)` method satisfies it, so architectures compose freely.
+`Agent` is intentionally just a protocol. Any architecture can contain any other architecture as long as it implements `run(task, runtime)`.
 
 ---
 
 ## Configuration — `agents.config`
 
-`AgentConfig` is a Pydantic model loadable from YAML:
+`AgentConfig` is the YAML execution model. It describes:
+
+- `architecture`: `simple`, `planner_executor`, `reflection`, or `react`
+- model and turn limits
+- tool set
+- prompt templates
+- nested `subagents`
+- optional `definition` metadata for coordinator/swarm projection
+- optional `evaluations` for quick post-run assertions
+
+Example:
 
 ```yaml
-name: my_agent
-architecture: simple          # simple | planner_executor | reflection | react
+name: default
+architecture: simple
+description: Default compositional coding agent.
 model: gemini-2.5-flash-lite
 max_turns: 15
 max_tokens: 8192
-tools: [bash, read_file, write_file, edit_file, glob, grep]
+
+definition:
+  subagent_type: yaml-default
+  description: Composable YAML coding agent.
+  runner: yaml_workflow
+  color: cyan
+
+tools:
+  - bash
+  - read_file
+  - write_file
+  - edit_file
+  - glob
+  - grep
+  - agent
+  - send_message
+  - task_stop
+
+evaluations:
+  - name: no-traceback
+    not_contains: "Traceback"
 
 prompts:
-  system: "{{ openharness_system_context }}  ..."
-  user:   "{{ instruction }}"
+  system: |
+    {{ openharness_system_context }}
+    You are a coding agent.
+  user: |
+    {{ instruction }}
 
-subagents:                    # recursive — each value is another AgentConfig
+subagents:
   planner: { ... }
   executor: { ... }
 ```
 
-Key method: `render_prompt(name, **vars)` — renders a Jinja template from the `prompts` dict.
+### `definition`
+
+`definition` is the bridge into the control plane. It contains coordinator-visible metadata such as:
+
+- `subagent_type`
+- `description`
+- `runner`
+- `system_prompt` / `system_prompt_mode`
+- `color`
+- `permission_mode`
+- `plan_mode_required`
+- `allow_permission_prompts`
+- `tools` / `disallowed_tools`
+- `skills`
+- `required_mcp_servers`
+- `background`
+- `initial_prompt`
+- `isolation`
+
+If `definition` is omitted, the system still projects the YAML config into an `AgentDefinition`, but it uses sensible defaults.
+
+### `evaluations`
+
+`evaluations` are lightweight assertions run after a YAML workflow completes. Today they support:
+
+- `contains`
+- `not_contains`
+
+They are not a full benchmark harness. They are meant for cheap regression checks and policy assertions.
 
 ---
 
-## Factory — `agents.factory`
+## Catalogs — `agents.catalog`
 
-`AgentFactory` loads YAML configs, resolves architecture classes, and recursively builds agent trees.
+YAML configs are loaded from three locations:
 
-```
-factory = AgentFactory.with_default_configs()   # loads agents/configs/*.yaml
-agent   = factory.create("default")             # returns Agent
+1. Built-in: `src/openharness/agents/configs`
+2. User: `~/.openharness/agent_configs`
+3. Project: `.openharness/agent_configs`
 
-factory.register(config)                        # programmatic registration
-factory.list_agents()                           # -> ["default", "react_example", ...]
-factory.get_config("default")                   # -> AgentConfig
-AgentFactory.register_architecture("custom", MyAgent)
-```
+Merge order is last-writer-wins by config name:
 
-Architectures are looked up from an internal registry:
+1. built-in
+2. user
+3. project
 
-| Key                | Class                |
-|--------------------|----------------------|
-| `simple`           | `SimpleAgent`        |
-| `planner_executor` | `PlannerExecutorAgent` |
-| `reflection`       | `ReflectionAgent`    |
-| `react`            | `ReActAgent`         |
+This merged catalog is used by:
 
-Subagent configs are built recursively via `_build_agent(config)`.
+- `AgentFactory.with_catalog_configs()`
+- `Workflow`
+- coordinator-side YAML projection into `AgentDefinition`
+- Harbor wrapper setup
+
+So there is now one shared YAML catalog, not separate loaders per subsystem.
+
+---
+
+## Coordinator Catalog — `coordinator.agent_definitions`
+
+`AgentDefinition` is the public agent contract used by coordinator mode and swarm spawning.
+
+The merged coordinator catalog is assembled in this order:
+
+1. built-in prompt-native definitions
+2. projected YAML-backed definitions
+3. user markdown definitions from `~/.openharness/agents`
+4. plugin-provided definitions
+
+Important fields on `AgentDefinition` now include:
+
+- `name`
+- `description`
+- `subagent_type`
+- `runner`
+- `agent_config_name`
+- `agent_architecture`
+- `system_prompt`
+- `system_prompt_mode`
+- `tools` / `disallowed_tools`
+- `permission_mode`
+- `permissions`
+- `plan_mode_required`
+- `allow_permission_prompts`
+
+Lookup works by either:
+
+- definition `name`
+- or `subagent_type`
+
+That makes `subagent_type` the stable routing key the coordinator should use.
 
 ---
 
 ## Architectures — `agents.architectures`
 
-Each architecture is a class satisfying `Agent`. They differ only in orchestration; the LLM interaction is always delegated to `AgentRuntime`.
+Architectures still provide the main execution value of our fork.
 
-### SimpleAgent
+### `simple`
 
-Leaf node. Delegates entirely to `runtime.run_agent_config(config, task)`.
+Leaf architecture. Delegates directly to `AgentRuntime.run_agent_config(...)`.
 
-```
-SimpleAgent(config)
-  run(task, runtime) -> AgentRunResult[str]
-```
+### `planner_executor`
 
-### PlannerExecutorAgent
+Two-stage composition:
 
-Composes two `Agent` instances. The planner produces output, the executor receives it as `task.payload["plan"]`.
+1. planner produces a structured plan
+2. executor carries it out
 
-```
-PlannerExecutorAgent(config, planner=Agent, executor=Agent)
-  run(task, runtime):
-    plan   = planner.run(task, runtime)
-    result = executor.run(task + plan, runtime)
-```
+### `reflection`
 
-### ReflectionAgent
+Worker + critic loop:
 
-Worker + critic loop. The worker is any `Agent`; the critic is an `AgentConfig` that returns structured `Verdict { approved, feedback, issues }`. Iterates up to `config.max_turns` attempts.
+1. worker proposes a solution
+2. critic returns a structured verdict
+3. retry until approved or attempts exhausted
 
-```
-ReflectionAgent(config, worker=Agent)
-  run(task, runtime):
-    loop:
-      result  = worker.run(task, runtime)
-      verdict = runtime.run_agent_config(critic_config, ..., output_type=Verdict)
-      if verdict.approved: return result
-      task += feedback
-```
+### `react`
 
-### ReActAgent
+Think / Act / Observe loop:
 
-Think / Act / Observe loop. The thinker produces structured `Thought { reasoning, action, is_finished, final_answer }`; the actor executes the action with tools. Runs up to `config.max_turns` steps.
+1. thinker returns structured next action
+2. actor executes with tools
+3. observation is fed into the next step
 
-```
-ReActAgent(config)
-  run(task, runtime):
-    loop:
-      thought = runtime.run_agent_config(thinker, ..., output_type=Thought)
-      if thought.is_finished: return final_answer
-      observation = runtime.run_agent_config(actor, thought.action)
-      observations.append(...)
-```
-
----
-
-## Conversation — `engine.conversation`
-
-Low-level handle over a single agent's multi-turn LLM loop. Created by `AgentRuntime.create_conversation()`.
-
-```
-conv = runtime.create_conversation(config, task)
-
-# Step-by-step control
-result: TurnResult = await conv.step()
-conv.inject(ConversationMessage.from_user_text("try again"))
-result = await conv.step()
-
-# Or run to completion
-text = await conv.run_to_completion(on_turn_complete=callback)
-```
-
-Key properties and methods:
-
-| Member              | Description                                          |
-|---------------------|------------------------------------------------------|
-| `step()`            | Execute one LLM turn, return `TurnResult`            |
-| `run_to_completion()`| Loop `step()` until done                            |
-| `inject(message)`   | Insert a message and re-open the conversation        |
-| `messages`           | Current message list                                |
-| `is_complete`        | Whether the conversation has finished                |
-| `final_text`         | Last assistant text output                          |
+The important point is that architecture logic stays in the execution plane. Coordinator mode does not need to understand any of this internals. It just routes to a definition whose `runner` is `yaml_workflow`.
 
 ---
 
 ## Runtime — `runtime.session`
 
-`AgentRuntime` is the execution substrate that every agent receives. It wires together settings, API clients, tool registries, permissions, tracing, usage tracking, and JSONL logging.
+`AgentRuntime` is the execution substrate used by YAML architectures.
 
-```
-runtime = AgentRuntime(
-    workspace,
-    settings=...,              # Settings (loaded from config/env)
-    permission_mode=...,       # override PermissionMode (FULL_AUTO for headless)
-    api_client=...,            # explicit client, or auto-created per model
-    log_paths=...,             # JSONL event/message paths
-    trace_observer=...,        # telemetry
-    tool_registry_factory=..., # custom tool builder
-)
-```
+Responsibilities:
 
-### High-level helpers (what architectures call)
+- resolve settings and provider clients
+- build the runtime system prompt
+- construct a tool registry
+- enforce permissions
+- create `Conversation` objects
+- track usage
+- log messages and stream events
 
-| Method                                  | Returns         | Description                                      |
-|-----------------------------------------|-----------------|--------------------------------------------------|
-| `run_agent_config(config, task)`        | `str`           | Run a config end-to-end, return final text       |
-| `run_agent_config(..., output_type=T)`  | `T`             | Same, but parse structured output into Pydantic  |
-| `create_conversation(config, task)`     | `Conversation`  | For step-level control                           |
-| `build_result(output)`                  | `AgentRunResult` | Package output + accumulated token usage        |
+Key APIs:
 
-### How structured output works
+- `run_agent_config(config, task)`
+- `run_agent_config(..., output_type=MyModel)`
+- `create_conversation(config, task)`
+- `build_result(output)`
 
-When `output_type` is provided:
-1. The JSON schema is injected into the system prompt
-2. The conversation runs to completion
-3. The response text is parsed and validated against the Pydantic model
+`AgentRuntime` is used by architecture code. It is not the coordinator-facing contract.
 
 ---
 
 ## Workflow — `runtime.workflow`
 
-Top-level orchestrator for standalone task runs. Wires factory -> agent -> runtime.
+`Workflow` is the entry point for YAML-backed agent execution.
+
+It now:
+
+1. loads the merged YAML catalog with `AgentFactory.with_catalog_configs(workspace.cwd)`
+2. creates the requested agent tree
+3. builds an `AgentRuntime`
+4. runs the agent
+5. executes configured quick evaluations
 
 ```python
-from openharness.runtime import Workflow
-
 wf = Workflow(workspace)
-result: WorkflowResult = await wf.run(
-    task=TaskDefinition(instruction="Fix the bug"),
+result = await wf.run(
+    TaskDefinition(instruction="Fix the bug"),
     agent_name="default",
 )
-print(result.agent_result.final_text)
 ```
 
-`WorkflowResult` wraps `AgentRunResult` and an optional `evaluation` dict.
+`WorkflowResult` contains:
+
+- `agent_result`
+- `evaluation`
+
+This is the execution path used by the `yaml_workflow` runner.
 
 ---
 
-## End-to-end flow
+## Tool Registries — `tools`
 
+There are now two relevant tool-registry layers:
+
+### `create_default_tool_registry(...)`
+
+Used by interactive prompt-native sessions. It supports:
+
+- allow/deny filtering
+- MCP tools
+- coordinator/swarm tools
+
+### `WorkspaceToolRegistryFactory(...)`
+
+Used by `AgentRuntime` for YAML architectures. It now supports:
+
+- workspace-bound tools like `bash`, `read_file`, `write_file`, `glob`, `grep`
+- compatibility tools like `agent`, `send_message`, and `task_stop`
+- tool-name normalization so upstream aliases such as `Read` and `Edit` map to `read_file` and `edit_file`
+
+This means YAML agents can now opt into coordinator/swarm delegation tools directly by listing them in `tools`.
+
+---
+
+## Coordinator And Swarm
+
+### Coordinator prompt generation
+
+`coordinator_mode.py` now renders a dynamic agent catalog into the system prompt and user context. The coordinator is no longer told to always use `subagent_type="worker"`.
+
+Instead it sees the current available catalog and chooses from:
+
+- built-in prompt-native agents
+- YAML-projected compositional agents
+- markdown/plugin agents
+
+### `agent_tool`
+
+`agent_tool` is the main bridge from coordinator to execution.
+
+Flow:
+
+1. resolve `AgentDefinition` by `subagent_type`
+2. map it into `TeammateSpawnConfig`
+3. choose a backend
+4. spawn a teammate
+
+The spawn config now carries the fields the backend actually needs:
+
+- `runner`
+- `agent_config_name`
+- `agent_architecture`
+- `system_prompt`
+- `system_prompt_mode`
+- `allowed_tools`
+- `disallowed_tools`
+- `permission_mode`
+- `plan_mode_required`
+- `allow_permission_prompts`
+- `initial_prompt`
+- `max_turns`
+
+### `send_message`
+
+`send_message` stays transport-oriented. It does not care whether the target teammate is prompt-native or YAML-backed. It routes follow-up turns into the active runner.
+
+---
+
+## Runner Types — `swarm.runner`
+
+`TeammateSpawnConfig.runner` selects the execution substrate.
+
+### `prompt_native`
+
+Used for built-in prompt-oriented workers.
+
+Path:
+
+1. build a `RuntimeBundle`
+2. configure model, cwd, tools, and permission mode
+3. maintain conversation state across turns
+4. execute each incoming message through the query engine
+
+This is the closest match to upstream worker behavior.
+
+### `yaml_workflow`
+
+Used for compositional YAML agents.
+
+Path:
+
+1. build a `LocalWorkspace`
+2. load the merged YAML catalog
+3. create a `Workflow`
+4. run the named `AgentConfig`
+5. return final text plus evaluation metadata
+
+This is where our fork’s extra value lives: composition, architectures, structured intermediate steps, and quick evaluations.
+
+### `harbor`
+
+`harbor` exists in the model as a runner type and `OpenHarnessHarborAgent` uses the same catalog, but swarm teammate execution does not yet instantiate Harbor-backed runners. Today this is a reserved integration point, not a fully wired swarm path.
+
+---
+
+## End-To-End Flows
+
+### 1. Standalone YAML workflow
+
+```mermaid
+flowchart TD
+    A["Workflow.run(agent_name='default')"] --> B["AgentFactory.with_catalog_configs"]
+    B --> C["Agent tree"]
+    C --> D["AgentRuntime"]
+    D --> E["Conversation / Query loop"]
+    E --> F["Tools + permissions + model"]
+    F --> G["AgentRunResult"]
+    G --> H["Quick evaluations"]
+    H --> I["WorkflowResult"]
 ```
-YAML configs
-    |
-    v
-AgentFactory.with_default_configs()
-    |
-    v
-factory.create("react_example")     # builds Agent tree recursively
-    |
-    v
-agent.run(task, runtime)
-    |
-    ├── runtime.run_agent_config()   # renders prompts, builds tools, calls LLM
-    |       |
-    |       v
-    |   Conversation.run_to_completion()
-    |       |
-    |       v
-    |   engine.query.run_single_turn()   # API call + tool execution + permissions
-    |
-    └── runtime.build_result(output)     # package output + usage
-            |
-            v
-        AgentRunResult[T]
+
+This is the path used by direct workflow execution and by the YAML teammate runner.
+
+### 2. Coordinator spawning a YAML-backed agent
+
+```mermaid
+flowchart TD
+    A["Coordinator decides on subagent_type='planner-executor'"] --> B["get_agent_definition"]
+    B --> C["Projected AgentDefinition from YAML catalog"]
+    C --> D["agent_tool"]
+    D --> E["TeammateSpawnConfig runner=yaml_workflow"]
+    E --> F["in_process or subprocess backend"]
+    F --> G["create_teammate_runner"]
+    G --> H["YamlWorkflowTeammateRunner"]
+    H --> I["Workflow.run(agent_config_name)"]
+    I --> J["Composed architecture executes"]
 ```
+
+This is the main new integration path created by the refactor.
+
+### 3. Coordinator spawning a prompt-native worker
+
+```mermaid
+flowchart TD
+    A["Coordinator decides on subagent_type='worker'"] --> B["get_agent_definition"]
+    B --> C["Built-in prompt-native AgentDefinition"]
+    C --> D["agent_tool"]
+    D --> E["TeammateSpawnConfig runner=prompt_native"]
+    E --> F["Backend"]
+    F --> G["PromptNativeTeammateRunner"]
+    G --> H["RuntimeBundle / QueryEngine"]
+    H --> I["Interactive multi-turn worker"]
+```
+
+This preserves upstream-style workers while using the same swarm transport and spawn contract as YAML agents.
+
+### 4. In-process vs subprocess
+
+Backends differ only in transport:
+
+- `in_process`: runs the teammate runner directly inside the current Python process and uses mailbox delivery for follow-up turns.
+- `subprocess`: serializes the spawn config to disk, starts `python -m openharness.swarm.worker`, and feeds follow-up turns over stdin.
+
+Both eventually execute the same runner contract.
 
 ---
 
 ## Composition
 
-Any `Agent` can be used as a building block inside another. The factory builds trees recursively from YAML `subagents`:
+Compositionality is still the main advantage of the YAML layer.
+
+Example:
 
 ```yaml
-# A planner-executor where the executor is itself a reflection agent
 name: nested_example
 architecture: planner_executor
 subagents:
@@ -262,10 +491,32 @@ subagents:
     subagents:
       worker:
         architecture: simple
-        tools: [bash, write_file]
+        tools: [bash, write_file, agent]
       critic:
         architecture: simple
         tools: []
 ```
 
-Because the `Agent` protocol is a single method, any architecture can nest any other without coupling.
+This gives us:
+
+- reusable agent trees
+- architecture-specific behavior
+- structured intermediate contracts
+- optional recursive delegation through `agent` / `send_message`
+- cheap workflow-level evaluations
+
+That is the additional value we layer on top of upstream’s coordinator and swarm runtime.
+
+---
+
+## Practical Mental Model
+
+When working on this system, use this mental model:
+
+- Coordinator chooses *which* agent to run by `subagent_type`.
+- `AgentDefinition` describes *how that agent should be spawned*.
+- `runner` decides *which execution substrate* to use.
+- `AgentConfig` describes *how a YAML-backed agent is composed internally*.
+- `Workflow` and `AgentRuntime` do the actual work for compositional agents.
+
+If you keep those responsibilities separate, the architecture stays coherent.
