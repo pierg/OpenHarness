@@ -2,11 +2,16 @@
 
 from __future__ import annotations
 
+import asyncio
+from pathlib import Path
+
 from pydantic import BaseModel, Field
 
 from openharness.services.cron import get_cron_job
+from openharness.sandbox import SandboxUnavailableError
 from openharness.tools.base import BaseTool, ToolExecutionContext, ToolResult
 from openharness.tools.bash_tool import format_command_output
+from openharness.utils.shell import create_shell_subprocess
 from openharness.workspace import LocalWorkspace, Workspace
 
 
@@ -37,10 +42,45 @@ class RemoteTriggerTool(BaseTool):
             return ToolResult(output=f"Cron job not found: {arguments.name}", is_error=True)
 
         workspace = self._workspace or LocalWorkspace(context.cwd)
-        cwd = job.get("cwd") or workspace.cwd
+        cwd = Path(job.get("cwd") or workspace.cwd).expanduser()
+
+        if isinstance(workspace, LocalWorkspace):
+            try:
+                process = await create_shell_subprocess(
+                    str(job["command"]),
+                    cwd=cwd,
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE,
+                )
+            except SandboxUnavailableError as exc:
+                return ToolResult(output=str(exc), is_error=True)
+            try:
+                stdout, stderr = await asyncio.wait_for(
+                    process.communicate(),
+                    timeout=arguments.timeout_seconds,
+                )
+            except asyncio.TimeoutError:
+                process.kill()
+                await process.wait()
+                return ToolResult(
+                    output=f"Remote trigger timed out after {arguments.timeout_seconds} seconds",
+                    is_error=True,
+                )
+
+            body = format_command_output(
+                stdout.decode("utf-8", errors="replace") if stdout else None,
+                stderr.decode("utf-8", errors="replace") if stderr else None,
+            )
+            return ToolResult(
+                output=f"Triggered {arguments.name}\n{body}",
+                is_error=process.returncode != 0,
+                metadata={"returncode": process.returncode},
+            )
 
         result = await workspace.run_shell(
-            str(job["command"]), cwd=cwd, timeout_seconds=arguments.timeout_seconds,
+            str(job["command"]),
+            cwd=str(cwd),
+            timeout_seconds=arguments.timeout_seconds,
         )
         body = format_command_output(result.stdout, result.stderr)
         return ToolResult(

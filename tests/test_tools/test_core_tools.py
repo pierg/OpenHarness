@@ -71,6 +71,12 @@ async def test_glob_and_grep(tmp_path: Path):
     )
     assert "b.py:1:def beta():" in grep_result.output
 
+    file_root_result = await GrepTool().execute(
+        GrepToolInput(pattern=r"def\s+alpha", root="a.py"),
+        context,
+    )
+    assert "a.py:1:def alpha():" in file_root_result.output
+
 
 @pytest.mark.asyncio
 async def test_bash_tool_runs_command(tmp_path: Path):
@@ -225,7 +231,7 @@ async def test_cron_and_remote_trigger_tools(tmp_path: Path, monkeypatch):
     context = ToolExecutionContext(cwd=tmp_path)
 
     create_result = await CronCreateTool().execute(
-        CronCreateToolInput(name="nightly", schedule="daily", command="printf 'CRON_OK'"),
+        CronCreateToolInput(name="nightly", schedule="0 0 * * *", command="printf 'CRON_OK'"),
         context,
     )
     assert create_result.is_error is False

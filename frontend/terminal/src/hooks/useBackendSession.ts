@@ -8,11 +8,15 @@ import type {
 	FrontendConfig,
 	McpServerSnapshot,
 	SelectOptionPayload,
+	SwarmNotificationSnapshot,
+	SwarmTeammateSnapshot,
 	TaskSnapshot,
 	TranscriptItem,
 } from '../types.js';
 
 const PROTOCOL_PREFIX = 'OHJSON:';
+const ASSISTANT_DELTA_FLUSH_MS = 33;
+const ASSISTANT_DELTA_FLUSH_CHARS = 256;
 
 export function useBackendSession(config: FrontendConfig, onExit: (code?: number | null) => void) {
 	const [transcript, setTranscript] = useState<TranscriptItem[]>([]);
@@ -23,10 +27,40 @@ export function useBackendSession(config: FrontendConfig, onExit: (code?: number
 	const [mcpServers, setMcpServers] = useState<McpServerSnapshot[]>([]);
 	const [bridgeSessions, setBridgeSessions] = useState<BridgeSessionSnapshot[]>([]);
 	const [modal, setModal] = useState<Record<string, unknown> | null>(null);
-	const [selectRequest, setSelectRequest] = useState<{title: string; submitPrefix: string; options: SelectOptionPayload[]} | null>(null);
+	const [selectRequest, setSelectRequest] = useState<{title: string; command: string; options: SelectOptionPayload[]} | null>(null);
 	const [busy, setBusy] = useState(false);
+	const [ready, setReady] = useState(false);
+	const [todoMarkdown, setTodoMarkdown] = useState('');
+	const [swarmTeammates, setSwarmTeammates] = useState<SwarmTeammateSnapshot[]>([]);
+	const [swarmNotifications, setSwarmNotifications] = useState<SwarmNotificationSnapshot[]>([]);
 	const childRef = useRef<ChildProcessWithoutNullStreams | null>(null);
 	const sentInitialPrompt = useRef(false);
+
+	// Streaming deltas can arrive one token at a time; updating Ink state for each
+	// delta causes heavy re-rendering/flicker. Buffer and flush at ~30fps.
+	const assistantBufferRef = useRef('');
+	const pendingAssistantDeltaRef = useRef('');
+	const assistantFlushTimerRef = useRef<NodeJS.Timeout | null>(null);
+
+	const flushAssistantDelta = (): void => {
+		const pending = pendingAssistantDeltaRef.current;
+		if (!pending) {
+			return;
+		}
+		pendingAssistantDeltaRef.current = '';
+		assistantBufferRef.current += pending;
+		setAssistantBuffer(assistantBufferRef.current);
+	};
+
+	const clearAssistantDelta = (): void => {
+		pendingAssistantDeltaRef.current = '';
+		assistantBufferRef.current = '';
+		if (assistantFlushTimerRef.current) {
+			clearTimeout(assistantFlushTimerRef.current);
+			assistantFlushTimerRef.current = null;
+		}
+		setAssistantBuffer('');
+	};
 
 	const sendRequest = (payload: Record<string, unknown>): void => {
 		const child = childRef.current;
@@ -41,6 +75,7 @@ export function useBackendSession(config: FrontendConfig, onExit: (code?: number
 		const child = spawn(command, args, {
 			stdio: ['pipe', 'pipe', 'inherit'],
 			env: process.env,
+			detached: true,
 		});
 		childRef.current = child;
 
@@ -60,16 +95,39 @@ export function useBackendSession(config: FrontendConfig, onExit: (code?: number
 			onExit(code);
 		});
 
+		// Ensure child processes are killed on parent exit (prevents stale processes)
+		const killChild = (): void => {
+			if (!child.killed) {
+				// Kill process group to ensure Python backend and its children all die
+				try {
+					if (child.pid) {
+						process.kill(-child.pid, 'SIGTERM');
+					}
+				} catch {
+					child.kill('SIGTERM');
+				}
+			}
+			if (assistantFlushTimerRef.current) {
+				clearTimeout(assistantFlushTimerRef.current);
+				assistantFlushTimerRef.current = null;
+			}
+		};
+		process.on('exit', killChild);
+		process.on('SIGINT', killChild);
+		process.on('SIGTERM', killChild);
+
 		return () => {
 			reader.close();
-			if (!child.killed) {
-				child.kill();
-			}
+			killChild();
+			process.removeListener('exit', killChild);
+			process.removeListener('SIGINT', killChild);
+			process.removeListener('SIGTERM', killChild);
 		};
 	}, []);
 
 	const handleEvent = (event: BackendEvent): void => {
 		if (event.type === 'ready') {
+			setReady(true);
 			setStatus(event.state ?? {});
 			setTasks(event.tasks ?? []);
 			setCommands(event.commands ?? []);
@@ -97,17 +155,39 @@ export function useBackendSession(config: FrontendConfig, onExit: (code?: number
 			return;
 		}
 		if (event.type === 'assistant_delta') {
-			setAssistantBuffer((value) => value + (event.message ?? ''));
+			const delta = event.message ?? '';
+			if (!delta) {
+				return;
+			}
+			pendingAssistantDeltaRef.current += delta;
+			if (pendingAssistantDeltaRef.current.length >= ASSISTANT_DELTA_FLUSH_CHARS) {
+				flushAssistantDelta();
+				return;
+			}
+			if (!assistantFlushTimerRef.current) {
+				assistantFlushTimerRef.current = setTimeout(() => {
+					assistantFlushTimerRef.current = null;
+					flushAssistantDelta();
+				}, ASSISTANT_DELTA_FLUSH_MS);
+			}
 			return;
 		}
 		if (event.type === 'assistant_complete') {
-			const text = event.message ?? assistantBuffer;
+			if (assistantFlushTimerRef.current) {
+				clearTimeout(assistantFlushTimerRef.current);
+				assistantFlushTimerRef.current = null;
+			}
+			flushAssistantDelta();
+			const text = event.message ?? assistantBufferRef.current;
 			setTranscript((items) => [...items, {role: 'assistant', text}]);
-			setAssistantBuffer('');
+			clearAssistantDelta();
 			setBusy(false);
 			return;
 		}
 		if (event.type === 'line_complete') {
+			// If the line ended without an assistant_complete (e.g. errors), make sure we
+			// don't leave stale streaming text on screen.
+			clearAssistantDelta();
 			setBusy(false);
 			return;
 		}
@@ -123,14 +203,14 @@ export function useBackendSession(config: FrontendConfig, onExit: (code?: number
 		}
 		if (event.type === 'clear_transcript') {
 			setTranscript([]);
-			setAssistantBuffer('');
+			clearAssistantDelta();
 			return;
 		}
 		if (event.type === 'select_request') {
 			const m = event.modal ?? {};
 			setSelectRequest({
 				title: String(m.title ?? 'Select'),
-				submitPrefix: String(m.submit_prefix ?? ''),
+				command: String(m.command ?? ''),
 				options: event.select_options ?? [],
 			});
 			return;
@@ -141,7 +221,29 @@ export function useBackendSession(config: FrontendConfig, onExit: (code?: number
 		}
 		if (event.type === 'error') {
 			setTranscript((items) => [...items, {role: 'system', text: `error: ${event.message ?? 'unknown error'}`}]);
+			clearAssistantDelta();
 			setBusy(false);
+			return;
+		}
+		if (event.type === 'todo_update') {
+			if (event.todo_markdown != null) {
+				setTodoMarkdown(event.todo_markdown);
+			}
+			return;
+		}
+		if (event.type === 'swarm_status') {
+			if (event.swarm_teammates != null) {
+				setSwarmTeammates(event.swarm_teammates);
+			}
+			if (event.swarm_notifications != null) {
+				setSwarmNotifications((prev) => [...prev, ...event.swarm_notifications!].slice(-20));
+			}
+			return;
+		}
+		if (event.type === 'plan_mode_change') {
+			if (event.plan_mode != null) {
+				setStatus((s) => ({...s, permission_mode: event.plan_mode}));
+			}
 			return;
 		}
 		if (event.type === 'shutdown') {
@@ -161,11 +263,15 @@ export function useBackendSession(config: FrontendConfig, onExit: (code?: number
 			modal,
 			selectRequest,
 			busy,
+			ready,
+			todoMarkdown,
+			swarmTeammates,
+			swarmNotifications,
 			setModal,
 			setSelectRequest,
 			setBusy,
 			sendRequest,
 		}),
-		[assistantBuffer, bridgeSessions, busy, commands, mcpServers, modal, selectRequest, status, tasks, transcript]
+		[assistantBuffer, bridgeSessions, busy, commands, mcpServers, modal, ready, selectRequest, status, swarmNotifications, swarmTeammates, tasks, todoMarkdown, transcript]
 	);
 }
