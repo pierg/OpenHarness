@@ -8,7 +8,7 @@ version = "0.1.2"
 description = "Open-source Python port of Claude Code - an AI-powered CLI coding assistant"
 readme = "README.md"
 license = "MIT"
-requires-python = ">=3.10"
+requires-python = ">=3.12"
 authors = [
     { name = "novix-science" },
 ]
@@ -30,6 +30,7 @@ dependencies = [
     "questionary>=2.0.1",
     "watchfiles>=0.20.0",
     "croniter>=2.0.0",
+    "loguru>=0.7.0",
 ]
 
 [project.optional-dependencies]
@@ -70,8 +71,8 @@ asyncio_mode = "auto"
 
 [tool.ruff]
 line-length = 100
-target-version = "py311"
+target-version = "py312"
 
 [tool.mypy]
-python_version = "3.11"
+python_version = "3.12"
 strict = true

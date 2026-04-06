@@ -5,11 +5,13 @@ from __future__ import annotations
 from contextlib import contextmanager
 from typing import Any
 
+from openharness.agents.contracts import TaskDefinition
 from openharness.observability.langfuse import (
     LangfuseTraceObserver,
     NullObservationHandle,
     NullTraceObserver,
     create_trace_observer,
+    trace_agent_run,
 )
 
 
@@ -31,8 +33,10 @@ class _FakeClient:
     def __init__(self) -> None:
         self.started: list[dict] = []
         self.flush_count = 0
+        self.trace_id_seeds: list[str | None] = []
 
     def create_trace_id(self, *, seed: str) -> str:
+        self.trace_id_seeds.append(seed)
         return "trace-123"
 
     def start_as_current_observation(self, **kwargs: Any):
@@ -51,15 +55,32 @@ class _FakeClient:
 
 @contextmanager
 def _fake_propagate(**kwargs: Any):
+    del kwargs
     yield
 
 
 def _make_observer(**overrides: Any) -> LangfuseTraceObserver:
-    defaults = dict(client=_FakeClient(), propagate_fn=_fake_propagate,
-                    session_id="sess-1", interface="interactive",
-                    cwd="/tmp", model="claude-test", provider="anthropic")
+    defaults = dict(
+        client=_FakeClient(),
+        propagate_fn=_fake_propagate,
+        session_id="sess-1",
+        interface="interactive",
+        cwd="/tmp",
+        model="claude-test",
+        provider="anthropic",
+    )
     defaults.update(overrides)
     return LangfuseTraceObserver(**defaults)
+
+
+class _PropagateRecorder:
+    def __init__(self) -> None:
+        self.calls: list[dict[str, Any]] = []
+
+    @contextmanager
+    def __call__(self, **kwargs: Any):
+        self.calls.append(kwargs)
+        yield
 
 
 # ---------------------------------------------------------------------------
@@ -93,6 +114,26 @@ def test_start_session_sets_trace_id():
     observer = _make_observer()
     observer.start_session()
     assert observer.trace_id == "trace-123"
+
+
+def test_start_session_uses_run_id_as_trace_seed_and_name():
+    client = _FakeClient()
+    propagate = _PropagateRecorder()
+    observer = _make_observer(client=client, propagate_fn=propagate, run_id="run-abc123def456")
+
+    observer.start_session()
+
+    assert observer.trace_id == "trace-123"
+    assert observer.trace_name == "run-abc123def456"
+    assert client.trace_id_seeds == ["run-abc123def456"]
+    assert propagate.calls == [
+        {
+            "user_id": None,
+            "session_id": "sess-1",
+            "trace_name": "run-abc123def456",
+            "tags": ["openharness", "interactive", "anthropic"],
+        }
+    ]
 
 
 def test_start_session_is_idempotent():
@@ -186,6 +227,53 @@ def test_scope_helpers_close_observations():
         span.update(output="done")
 
     assert client.started[-1]["obs"].updates == [{"output": "done"}]
+
+
+class _DummyRuntime:
+    def __init__(self, observer: LangfuseTraceObserver) -> None:
+        self.trace_observer = observer
+
+
+class _DummyConfig:
+    name = "demo-agent"
+    architecture = "reflection"
+
+
+class _DummyResult:
+    final_text = "done"
+    input_tokens = 5
+    output_tokens = 2
+
+
+class _DummyAgent:
+    def __init__(self) -> None:
+        self._config = _DummyConfig()
+
+    @trace_agent_run
+    async def run(self, task: TaskDefinition, runtime: _DummyRuntime) -> _DummyResult:
+        del task, runtime
+        return _DummyResult()
+
+
+async def test_trace_agent_run_wraps_agent_boundary():
+    client = _FakeClient()
+    observer = _make_observer(client=client)
+    agent = _DummyAgent()
+
+    result = await agent.run(
+        TaskDefinition(instruction="Fix the bug", payload={"path": "main.py"}),
+        _DummyRuntime(observer),
+    )
+
+    assert result.final_text == "done"
+    assert [call["kwargs"]["name"] for call in client.started] == ["session", "agent:demo-agent"]
+    assert client.started[-1]["obs"].updates == [
+        {
+            "output": {"final_text": "done"},
+            "metadata": {"input_tokens": 5, "output_tokens": 2},
+        }
+    ]
+
 
 # ---------------------------------------------------------------------------
 # create_trace_observer

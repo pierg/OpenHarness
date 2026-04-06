@@ -18,6 +18,7 @@ import logging
 import os
 from contextlib import AbstractContextManager
 from dataclasses import asdict, is_dataclass
+from functools import wraps
 from pathlib import Path
 from typing import Any, Callable, Protocol
 
@@ -50,7 +51,7 @@ class ObservationScope(AbstractContextManager[ObservationHandle]):
     def __exit__(self, exc_type: object, exc: BaseException | None, tb: object) -> bool:
         del exc_type, tb
         if exc is not None:
-            self._handle.update(metadata={"error": str(exc)})
+            self._handle.update(level="ERROR", metadata={"error": str(exc)})
         self._handle.close()
         return False
 
@@ -60,11 +61,15 @@ class TraceObserver(Protocol):
 
     enabled: bool
     trace_id: str | None
+    run_id: str | None
+    trace_name: str | None
 
     def start_session(self, *, metadata: dict[str, Any] | None = None) -> None:
         """Start the session-level observation."""
 
-    def end_session(self, *, output: Any | None = None, metadata: dict[str, Any] | None = None) -> None:
+    def end_session(
+        self, *, output: Any | None = None, metadata: dict[str, Any] | None = None
+    ) -> None:
         """End the session-level observation."""
 
     def start_model_call(
@@ -141,11 +146,15 @@ class NullTraceObserver:
 
     enabled = False
     trace_id: str | None = None
+    run_id: str | None = None
+    trace_name: str | None = None
 
     def start_session(self, *, metadata: dict[str, Any] | None = None) -> None:
         pass
 
-    def end_session(self, *, output: Any | None = None, metadata: dict[str, Any] | None = None) -> None:
+    def end_session(
+        self, *, output: Any | None = None, metadata: dict[str, Any] | None = None
+    ) -> None:
         pass
 
     def start_model_call(
@@ -282,6 +291,7 @@ class LangfuseTraceObserver:
         cwd: str,
         model: str,
         provider: str | None = None,
+        run_id: str | None = None,
         user_id: str | None = None,
         flush_mode: str = "session_end",
     ) -> None:
@@ -292,10 +302,12 @@ class LangfuseTraceObserver:
         self._cwd = cwd
         self._model = model
         self._provider = provider
+        self.run_id = run_id
         self._user_id = user_id
         self._flush_mode = flush_mode
         self._propagation_context: Any | None = None
         self._session_handle: _LangfuseObservationHandle | None = None
+        self.trace_name = run_id or f"openharness.{interface}"
         self.trace_id: str | None = None
 
     def start_session(self, *, metadata: dict[str, Any] | None = None) -> None:
@@ -304,11 +316,13 @@ class LangfuseTraceObserver:
         tags = ["openharness", self._interface]
         if self._provider:
             tags.append(self._provider)
-        self.trace_id = self._client.create_trace_id(seed=f"{self._interface}:{self._session_id}")
+        self.trace_id = self._client.create_trace_id(
+            seed=self.run_id or f"{self._interface}:{self._session_id}"
+        )
         self._propagation_context = self._propagate_fn(
             user_id=self._user_id,
             session_id=self._session_id,
-            trace_name=f"openharness.{self._interface}",
+            trace_name=self.trace_name,
             tags=tags,
         )
         self._propagation_context.__enter__()
@@ -317,12 +331,20 @@ class LangfuseTraceObserver:
             as_type="agent",
             trace_context={"trace_id": self.trace_id},
             input={"cwd": self._cwd},
-            metadata={"interface": self._interface, "cwd": self._cwd, "model": self._model,
-                       "provider": self._provider, **(metadata or {})},
+            metadata={
+                "interface": self._interface,
+                "cwd": self._cwd,
+                "model": self._model,
+                "provider": self._provider,
+                "run_id": self.run_id,
+                **(metadata or {}),
+            },
         )
         self._flush_if_live()
 
-    def end_session(self, *, output: Any | None = None, metadata: dict[str, Any] | None = None) -> None:
+    def end_session(
+        self, *, output: Any | None = None, metadata: dict[str, Any] | None = None
+    ) -> None:
         try:
             if self._session_handle is not None:
                 self._session_handle.update(output=output, metadata=metadata)
@@ -343,8 +365,14 @@ class LangfuseTraceObserver:
         model_parameters: dict[str, str | int | float | bool | list[str] | None] | None = None,
     ) -> ObservationHandle:
         self.start_session()
-        return self._start_observation(name="model", as_type="generation", input=input,
-                                       metadata=metadata, model=model, model_parameters=model_parameters)
+        return self._start_observation(
+            name="model",
+            as_type="generation",
+            input=input,
+            metadata=metadata,
+            model=model,
+            model_parameters=model_parameters,
+        )
 
     def start_tool_call(
         self, *, tool_name: str, tool_input: Any, metadata: dict[str, Any] | None = None
@@ -412,22 +440,91 @@ class LangfuseTraceObserver:
         if self._flush_mode == "live":
             self.flush()
 
-    def _start_observation(self, *, name: str, as_type: str, input: Any | None = None,
-                           metadata: dict[str, Any] | None = None,
-                           trace_context: dict[str, str] | None = None,
-                           model: str | None = None,
-                           model_parameters: dict[str, str | int | float | bool | list[str] | None] | None = None,
-                           ) -> _LangfuseObservationHandle:
+    def _start_observation(
+        self,
+        *,
+        name: str,
+        as_type: str,
+        input: Any | None = None,
+        metadata: dict[str, Any] | None = None,
+        trace_context: dict[str, str] | None = None,
+        model: str | None = None,
+        model_parameters: dict[str, str | int | float | bool | list[str] | None] | None = None,
+    ) -> _LangfuseObservationHandle:
         cm = self._client.start_as_current_observation(
-            trace_context=trace_context, name=name, as_type=as_type,
-            input=_coerce_jsonable(input), metadata=_coerce_jsonable(metadata),
-            model=model, model_parameters=model_parameters,
+            trace_context=trace_context,
+            name=name,
+            as_type=as_type,
+            input=_coerce_jsonable(input),
+            metadata=_coerce_jsonable(metadata),
+            model=model,
+            model_parameters=model_parameters,
         )
         return _LangfuseObservationHandle(
             cm,
             cm.__enter__(),
             on_close=self._flush_if_live if self._flush_mode == "live" else None,
         )
+
+
+# ---------------------------------------------------------------------------
+# Agent tracing helper
+# ---------------------------------------------------------------------------
+
+
+def trace_agent_run(func: Callable[..., Any]) -> Callable[..., Any]:
+    """Wrap an async ``Agent.run(task, runtime, ...)`` with one agent span.
+
+    Composite architectures already invoke traced child agents. This helper keeps
+    their own tracing layer minimal: one span at the agent boundary, plus the
+    model/tool spans emitted by the query engine below.
+    """
+
+    @wraps(func)
+    async def wrapper(self, task: Any, runtime: Any, *args: Any, **kwargs: Any) -> Any:
+        trace_observer = getattr(runtime, "trace_observer", NullTraceObserver())
+        config = getattr(self, "config", None) or getattr(self, "_config", None)
+
+        name = f"agent:{getattr(config, 'name', self.__class__.__name__.lower())}"
+        metadata: dict[str, Any] = {}
+        architecture = getattr(config, "architecture", None)
+        if architecture:
+            metadata["architecture"] = architecture
+
+        span_input = {"instruction": task.instruction}
+        if getattr(task, "payload", None):
+            span_input["payload"] = task.payload
+
+        with trace_observer.span(
+            name=name,
+            input=span_input,
+            metadata=metadata or None,
+        ) as span:
+            result = await func(self, task, runtime, *args, **kwargs)
+            update_payload = _trace_agent_result(result)
+            if update_payload:
+                span.update(**update_payload)
+            return result
+
+    return wrapper
+
+
+def _trace_agent_result(result: Any) -> dict[str, Any]:
+    payload: dict[str, Any] = {}
+    if hasattr(result, "final_text"):
+        payload["output"] = {"final_text": getattr(result, "final_text")}
+    elif hasattr(result, "output"):
+        payload["output"] = {"result": getattr(result, "output")}
+
+    metadata: dict[str, Any] = {}
+    if hasattr(result, "input_tokens"):
+        metadata["input_tokens"] = getattr(result, "input_tokens")
+    if hasattr(result, "output_tokens"):
+        metadata["output_tokens"] = getattr(result, "output_tokens")
+    if metadata:
+        payload["metadata"] = metadata
+
+    return payload
 
 
 def create_trace_observer(
@@ -437,6 +534,7 @@ def create_trace_observer(
     cwd: str,
     model: str,
     provider: str | None = None,
+    run_id: str | None = None,
 ) -> TraceObserver:
     """Return a ``LangfuseTraceObserver`` when the environment is configured, else a ``NullTraceObserver``.
 
@@ -453,6 +551,8 @@ def create_trace_observer(
     - ``OPENHARNESS_LANGFUSE_VERIFY=0`` — skip the auth check on startup (useful for CI).
     - ``OPENHARNESS_LANGFUSE_FLUSH_MODE=live`` — flush observations as spans close so
       traces become visible during long-running local runs.
+    - ``OPENHARNESS_RUN_ID`` — when set (or when ``run_id`` is passed explicitly),
+      Langfuse traces use that value as the trace name and deterministic trace seed.
     """
     if not _env_truthy(os.environ.get("OPENHARNESS_LANGFUSE_ENABLED", "1")):
         return NullTraceObserver()
@@ -462,7 +562,10 @@ def create_trace_observer(
     try:
         from langfuse import Langfuse, propagate_attributes  # noqa: PLC0415
     except ImportError:
-        log.warning("langfuse package not installed, tracing disabled.")
+        log.warning(
+            "langfuse package not installed, tracing disabled. "
+            "Install the optional dependency with: uv pip install --python .venv/bin/python 'langfuse>=2.0'"
+        )
         return NullTraceObserver()
 
     client = Langfuse(
@@ -485,15 +588,22 @@ def create_trace_observer(
             return NullTraceObserver()
 
     try:
-        user_id = os.environ.get("OPENHARNESS_USER_ID") or os.environ.get("USER") or getpass.getuser()
+        user_id = (
+            os.environ.get("OPENHARNESS_USER_ID") or os.environ.get("USER") or getpass.getuser()
+        )
     except OSError:
         user_id = None
+    resolved_run_id = run_id or os.environ.get("OPENHARNESS_RUN_ID")
 
     return LangfuseTraceObserver(
-        client=client, propagate_fn=propagate_attributes,
-        session_id=session_id, interface=interface, cwd=cwd,
+        client=client,
+        propagate_fn=propagate_attributes,
+        session_id=session_id,
+        interface=interface,
+        cwd=cwd,
         model=model,
         provider=provider,
+        run_id=resolved_run_id,
         user_id=user_id,
         flush_mode=os.environ.get("OPENHARNESS_LANGFUSE_FLUSH_MODE", "session_end"),
     )

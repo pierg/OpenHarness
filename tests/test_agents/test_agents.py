@@ -16,7 +16,8 @@ from openharness.workspace import CommandResult, LocalWorkspace, Workspace
 from openharness.tools import WorkspaceToolRegistryFactory, normalize_tool_name
 from openharness.api.client import ApiMessageCompleteEvent, ApiMessageRequest
 from openharness.api.usage import UsageSnapshot
-from openharness.engine.messages import ConversationMessage, TextBlock, ToolUseBlock
+from openharness.engine.messages import ConversationMessage, TextBlock, ToolResultBlock, ToolUseBlock
+from openharness.engine.query import _trace_model_input, _trace_model_output
 from openharness.tools.bash_tool import format_command_output
 
 
@@ -330,3 +331,42 @@ async def test_simple_agent_emits_trace_stages(tmp_path: Path):
     assert ("span", "agent:trace-demo") in trace_observer.closed
     assert ("model", "model") in trace_observer.closed
     assert ("tool", "tool:write_file") in trace_observer.closed
+
+
+def test_trace_model_input_uses_latest_message_only():
+    messages = [
+        ConversationMessage.from_user_text("Original task"),
+        ConversationMessage(role="assistant", content=[TextBlock(text="I will inspect the file.")]),
+        ConversationMessage.from_user_text("Mailbox follow-up"),
+    ]
+
+    rendered = _trace_model_input("System prompt", messages)
+
+    assert rendered == "User\nMailbox follow-up"
+
+
+def test_trace_model_input_labels_tool_results_as_tool_messages():
+    messages = [
+        ConversationMessage.from_user_text("Fix bug"),
+        ConversationMessage(
+            role="assistant",
+            content=[ToolUseBlock(id="tool-1", name="read_file", input={"path": "main.py"})],
+        ),
+        ConversationMessage(
+            role="user",
+            content=[ToolResultBlock(tool_use_id="tool-1", content="def main(): pass")],
+        ),
+    ]
+
+    rendered = _trace_model_input("", messages)
+
+    assert rendered == "Tool result: read_file\ndef main(): pass"
+
+
+def test_trace_model_output_summarizes_tool_calls():
+    message = ConversationMessage(
+        role="assistant",
+        content=[ToolUseBlock(id="tool-1", name="bash", input={"command": "pytest -q"})],
+    )
+
+    assert _trace_model_output(message) == 'Requested tools:\n- bash(command=pytest -q)'

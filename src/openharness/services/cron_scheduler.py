@@ -307,13 +307,15 @@ async def run_scheduler_loop(*, once: bool = False) -> None:
 
 def _run_daemon() -> None:
     """Entry point for the scheduler subprocess."""
+    from openharness.observability.logging import setup_logging
+    from loguru import logger
+    
     log_file = get_logs_dir() / "cron_scheduler.log"
     log_file.parent.mkdir(parents=True, exist_ok=True)
-    logging.basicConfig(
-        filename=str(log_file),
-        level=logging.INFO,
-        format="%(asctime)s %(levelname)s %(message)s",
-    )
+    
+    setup_logging()
+    logger.add(str(log_file), rotation="10 MB", level="INFO")
+    
     asyncio.run(run_scheduler_loop())
 
 

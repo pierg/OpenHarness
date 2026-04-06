@@ -306,6 +306,9 @@ class TeammateSpawnConfig:
     session_id: str | None = None
     """Explicit session ID (generated if not provided)."""
 
+    run_id: str | None = None
+    """Top-level OpenHarness run ID used for shared observability grouping."""
+
     subscriptions: list[str] = field(default_factory=list)
     """Event topics this teammate subscribes to."""
 

@@ -1256,6 +1256,9 @@ def main(
     ),
 ) -> None:
     """Start an interactive session or run a single prompt."""
+    from openharness.observability.logging import setup_logging
+    setup_logging(debug=debug)
+    
     if ctx.invoked_subcommand is not None:
         return
 

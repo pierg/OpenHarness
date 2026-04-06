@@ -6,6 +6,7 @@ from openharness.observability.langfuse import (
     ObservationHandle,
     TraceObserver,
     create_trace_observer,
+    trace_agent_run,
 )
 
 __all__ = [
@@ -14,4 +15,5 @@ __all__ = [
     "ObservationHandle",
     "TraceObserver",
     "create_trace_observer",
+    "trace_agent_run",
 ]

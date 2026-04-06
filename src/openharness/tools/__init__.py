@@ -24,6 +24,7 @@ from openharness.tools.glob_tool import GlobTool
 from openharness.tools.grep_tool import GrepTool
 from openharness.tools.list_mcp_resources_tool import ListMcpResourcesTool
 from openharness.tools.lsp_tool import LspTool
+from openharness.tools.mailbox_read_tool import MailboxReadTool
 from openharness.tools.mcp_auth_tool import McpAuthTool
 from openharness.tools.mcp_tool import McpToolAdapter
 from openharness.tools.notebook_edit_tool import NotebookEditTool
@@ -63,6 +64,7 @@ WORKSPACE_TOOLS: dict[str, type[BaseTool]] = {
 WORKSPACE_COMPAT_TOOLS: dict[str, type[BaseTool]] = {
     "agent": AgentTool,
     "send_message": SendMessageTool,
+    "mailbox_read": MailboxReadTool,
     "task_stop": TaskStopTool,
     "skill": SkillTool,
     "task_create": TaskCreateTool,
@@ -139,6 +141,8 @@ _TOOL_ALIAS_OVERRIDES = {
     "agent": "agent",
     "sendmessage": "send_message",
     "send_message": "send_message",
+    "mailboxread": "mailbox_read",
+    "mailbox_read": "mailbox_read",
     "teamcreate": "team_create",
     "team_create": "team_create",
     "teamdelete": "team_delete",
@@ -254,6 +258,7 @@ def create_default_tool_registry(
         TaskUpdateTool(),
         AgentTool(),
         SendMessageTool(),
+        MailboxReadTool(),
         TeamCreateTool(),
         TeamDeleteTool(),
     ):

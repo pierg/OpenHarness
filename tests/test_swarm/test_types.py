@@ -112,6 +112,7 @@ def test_teammate_spawn_config_defaults():
     assert cfg.permissions == []
     assert cfg.plan_mode_required is False
     assert cfg.allow_permission_prompts is False
+    assert cfg.run_id is None
 
 
 # ---------------------------------------------------------------------------
@@ -128,14 +129,11 @@ def test_teammate_executor_is_protocol():
         def is_available(self) -> bool:
             return True
 
-        async def spawn(self, config):
-            ...
+        async def spawn(self, config): ...
 
-        async def send_message(self, agent_id, message):
-            ...
+        async def send_message(self, agent_id, message): ...
 
-        async def shutdown(self, agent_id, *, force=False):
-            ...
+        async def shutdown(self, agent_id, *, force=False): ...
 
     executor = MockExecutor()
     assert isinstance(executor, TeammateExecutor)

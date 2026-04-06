@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import os
 
 from pydantic import BaseModel, Field
 
@@ -12,6 +13,23 @@ from openharness.tasks.manager import get_task_manager
 from openharness.tools.base import BaseTool, ToolExecutionContext, ToolResult
 
 logger = logging.getLogger(__name__)
+
+
+def _resolve_sender_agent_id() -> str:
+    """Prefer the current worker identity when available."""
+    agent_id = os.environ.get("CLAUDE_CODE_AGENT_ID")
+    if agent_id:
+        return agent_id
+
+    try:
+        from openharness.swarm.in_process import get_teammate_context  # noqa: PLC0415
+    except ImportError:
+        return "coordinator"
+
+    context = get_teammate_context()
+    if context is None:
+        return "coordinator"
+    return context.agent_id
 
 
 class SendMessageToolInput(BaseModel):
@@ -51,7 +69,10 @@ class SendMessageTool(BaseTool):
             except KeyError:
                 executor = registry.get_executor()
 
-        teammate_msg = TeammateMessage(text=message, from_agent="coordinator")
+        teammate_msg = TeammateMessage(
+            text=message,
+            from_agent=_resolve_sender_agent_id(),
+        )
         try:
             await executor.send_message(agent_id, teammate_msg)
         except ValueError as exc:

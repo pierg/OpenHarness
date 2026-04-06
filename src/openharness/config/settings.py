@@ -146,6 +146,13 @@ def normalize_anthropic_model_name(model: str) -> str:
 def default_provider_profiles() -> dict[str, ProviderProfile]:
     """Return the built-in provider workflow catalog."""
     return {
+        "gemini-api": ProviderProfile(
+            label="Google Gemini API",
+            provider="gemini",
+            api_format="google",
+            auth_source="gemini_api_key",
+            default_model="gemini-2.5-flash",
+        ),
         "claude-api": ProviderProfile(
             label="Anthropic-Compatible API",
             provider="anthropic",
@@ -236,6 +243,8 @@ def resolve_model_setting(
             )
         if is_claude_family_provider(provider):
             return _CLAUDE_ALIAS_TARGETS["sonnet"]
+        if provider == "gemini":
+            return "gemini-2.5-flash"
         return "gpt-5.4"
 
     if is_claude_family_provider(provider):
@@ -259,6 +268,7 @@ def auth_source_provider_name(auth_source: str) -> str:
     """Map an auth source to the storage/runtime provider name."""
     mapping = {
         "anthropic_api_key": "anthropic",
+        "gemini_api_key": "gemini",
         "openai_api_key": "openai",
         "codex_subscription": "openai_codex",
         "claude_subscription": "anthropic_claude",
@@ -291,6 +301,8 @@ def default_auth_source_for_provider(provider: str, api_format: str | None = Non
     """Infer the default auth source for a provider/backend."""
     if provider == "anthropic_claude":
         return "claude_subscription"
+    if provider == "gemini" or api_format == "google":
+        return "gemini_api_key"
     if provider == "openai_codex":
         return "codex_subscription"
     if provider == "copilot":
@@ -356,12 +368,12 @@ def _profile_from_flat_settings(settings: "Settings") -> tuple[str, ProviderProf
         provider=provider,
         api_format=settings.api_format,
         auth_source=default_auth_source_for_provider(provider, settings.api_format),
-        default_model=settings.model or defaults.get("claude-api", ProviderProfile(
-            label="Claude API",
-            provider="anthropic",
-            api_format="anthropic",
-            auth_source="anthropic_api_key",
-            default_model="sonnet",
+        default_model=settings.model or defaults.get("gemini-api", ProviderProfile(
+            label="Google Gemini API",
+            provider="gemini",
+            api_format="google",
+            auth_source="gemini_api_key",
+            default_model="gemini-2.5-flash",
         )).default_model,
         last_model=settings.model or None,
         base_url=settings.base_url,
@@ -374,12 +386,12 @@ class Settings(BaseModel):
 
     # API configuration
     api_key: str = ""
-    model: str = "claude-sonnet-4-6"
+    model: str = "gemini-2.5-flash"
     max_tokens: int = 16384
     base_url: str | None = None
     api_format: str = "anthropic"  # "anthropic", "openai", or "copilot"
     provider: str = ""
-    active_profile: str = "claude-api"
+    active_profile: str = "gemini-api"
     profiles: dict[str, ProviderProfile] = Field(default_factory=default_provider_profiles)
     max_turns: int = 200
 

@@ -23,6 +23,7 @@ Usage
 from __future__ import annotations
 
 import json
+import logging
 import sys
 import time
 from dataclasses import dataclass
@@ -38,6 +39,8 @@ from openharness.harbor import (
     OpenHarnessHarborAgentSpec,
     run_harbor_job,
 )
+
+log = logging.getLogger(__name__)
 
 HERE = Path(__file__).parent
 TASK_DIR = HERE / "harbor_task"
@@ -83,8 +86,6 @@ def run_agent(agent_name: str, architecture: str) -> RunResult:
         status = None
         if result.result_path.exists():
             data = json.loads(result.result_path.read_text())
-            # Harbor 0.3.0 result structure:
-            # stats -> evals -> <agent>__<dataset> -> metrics -> [{"mean": 1.0}]
             evals = data.get("stats", {}).get("evals", {})
             for key, val in evals.items():
                 metrics = val.get("metrics", [])
@@ -114,21 +115,24 @@ def run_agent(agent_name: str, architecture: str) -> RunResult:
         )
 
 
-def print_table(results: list[RunResult]) -> None:
+def _print_table(results: list[RunResult]) -> None:
     """Pretty-print a comparison table."""
     hdr = f"{'Agent':<30} {'Architecture':<20} {'Score':>6} {'Status':<10} {'Time':>7}  Error"
-    print(hdr)
-    print("-" * len(hdr) + "----------")
+    log.info(hdr)
+    log.info("-" * len(hdr) + "----------")
     for r in results:
         score_str = f"{r.score}" if r.score is not None else "N/A"
         err = r.error or ""
-        print(
+        log.info(
             f"{r.agent_name:<30} {r.architecture:<20} {score_str:>6} "
             f"{(r.status or 'N/A'):<10} {r.elapsed_seconds:>6.1f}s  {err}"
         )
 
 
 def main() -> None:
+    from openharness.observability.logging import setup_logging
+    setup_logging()
+
     factory = AgentFactory.with_default_configs()
     available = factory.list_agents()
 
@@ -136,32 +140,31 @@ def main() -> None:
     agents_to_run = [a for a in requested if a in available]
 
     if not agents_to_run:
-        print(f"No matching agents. Available: {available}")
+        log.info(f"No matching agents. Available: {available}")
         return
 
-    print(f"Task:   {TASK_DIR}")
-    print(f"Jobs:   {JOBS_DIR}")
-    print(f"Agents: {agents_to_run}\n")
+    log.info(f"Task:   {TASK_DIR}")
+    log.info(f"Agents: {agents_to_run}\n")
 
     results: list[RunResult] = []
     for agent_name in agents_to_run:
         config = factory.get_config(agent_name)
-        print(f"--- Running: {agent_name} (architecture: {config.architecture}) ---")
+        log.info(f"--- Running: {agent_name} (architecture: {config.architecture}) ---")
         result = run_agent(agent_name, config.architecture)
-        status_icon = "PASS" if result.score and result.score > 0 else "FAIL"
-        print(f"    {status_icon}  score={result.score}  ({result.elapsed_seconds:.1f}s)")
+        status_icon = "✅ PASS" if result.score and result.score > 0 else "❌ FAIL"
+        log.info(f"    {status_icon}  score={result.score}  ({result.elapsed_seconds:.1f}s)")
         if result.error:
-            print(f"    Error: {result.error}")
-        print()
+            log.info(f"    Error: {result.error}")
+        log.info("")
         results.append(result)
 
-    print("\n" + "=" * 80)
-    print("COMPARISON TABLE")
-    print("=" * 80)
-    print_table(results)
+    log.info("\n" + "=" * 80)
+    log.info("COMPARISON TABLE")
+    log.info("=" * 80)
+    _print_table(results)
 
     passed = sum(1 for r in results if r.score and r.score > 0)
-    print(f"\n{passed}/{len(results)} agents solved the task.")
+    log.info(f"\n{passed}/{len(results)} agents solved the task.")
 
 
 if __name__ == "__main__":

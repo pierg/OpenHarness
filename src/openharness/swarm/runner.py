@@ -91,13 +91,16 @@ def _create_swarm_trace_observer(
         cwd=_effective_cwd(config),
         model=model,
         provider=detect_provider(settings).name,
+        run_id=config.run_id,
     )
 
 
 class PromptNativeTeammateRunner:
     """Stateful teammate runner backed by the interactive query engine."""
 
-    def __init__(self, bundle: RuntimeBundle, config: TeammateSpawnConfig, trace_observer: TraceObserver) -> None:
+    def __init__(
+        self, bundle: RuntimeBundle, config: TeammateSpawnConfig, trace_observer: TraceObserver
+    ) -> None:
         self._bundle = bundle
         self._config = config
         self._trace_observer = trace_observer
@@ -119,6 +122,7 @@ class PromptNativeTeammateRunner:
                 "team": config.team,
                 "teammate_name": config.name,
                 "parent_session_id": config.parent_session_id,
+                "run_id": config.run_id,
             }
         )
 
@@ -163,7 +167,9 @@ class PromptNativeTeammateRunner:
 
             after = self._bundle.engine.total_usage
             delta_total = max(0, _usage_total(after) - before_total)
-            delta_input = max(0, int(getattr(after, "input_tokens", 0)) - int(getattr(before, "input_tokens", 0)))
+            delta_input = max(
+                0, int(getattr(after, "input_tokens", 0)) - int(getattr(before, "input_tokens", 0))
+            )
             delta_output = max(
                 0,
                 int(getattr(after, "output_tokens", 0)) - int(getattr(before, "output_tokens", 0)),
@@ -217,6 +223,7 @@ class YamlWorkflowTeammateRunner:
                 "teammate_name": config.name,
                 "agent_config_name": self._agent_name,
                 "architecture": workflow_config.architecture,
+                "run_id": config.run_id,
             }
         )
         self._initial_prompt_pending = True

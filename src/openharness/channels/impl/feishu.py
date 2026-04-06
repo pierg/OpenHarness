@@ -20,7 +20,16 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-FEISHU_AVAILABLE = importlib.util.find_spec("lark_oapi") is not None
+
+def _has_package(name: str) -> bool:
+    """Return True if a package is installed without importing it."""
+    try:
+        return importlib.util.find_spec(name) is not None
+    except (ImportError, ModuleNotFoundError):
+        return False
+
+
+FEISHU_AVAILABLE = _has_package("lark_oapi")
 
 # Message type display mapping
 MSG_TYPE_MAP = {

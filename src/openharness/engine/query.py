@@ -11,9 +11,10 @@ Two entry points:
 from __future__ import annotations
 
 import asyncio
+import json
 from dataclasses import dataclass
 from pathlib import Path
-from typing import AsyncIterator, Awaitable, Callable
+from typing import Any, AsyncIterator, Awaitable, Callable
 
 from openharness.api.client import (
     ApiMessageCompleteEvent,
@@ -42,6 +43,8 @@ from openharness.tools.base import ToolRegistry
 
 PermissionPrompt = Callable[[str, str], Awaitable[bool]]
 AskUserPrompt = Callable[[str], Awaitable[str]]
+
+_TRACE_TEXT_LIMIT = 4000
 
 
 @dataclass(frozen=True)
@@ -99,8 +102,8 @@ async def run_single_turn(
 
     with observer.model_call(
         model=context.model,
-        input=_trace_input_messages(messages),
-        metadata={"message_count": len(messages)},
+        input=_trace_model_input(context.system_prompt, messages),
+        metadata=_trace_model_metadata(messages),
         model_parameters={
             "max_tokens": context.max_tokens,
             "max_turns": context.max_turns,
@@ -123,8 +126,11 @@ async def run_single_turn(
             raise RuntimeError("Model stream finished without a final message")
 
         model_handle.update(
-            output=final_message.model_dump(mode="json"),
-            metadata={"usage": usage.model_dump(mode="json")},
+            output=_trace_model_output(final_message),
+            metadata={
+                "usage": usage.model_dump(mode="json"),
+                "tool_calls": _trace_tool_calls(final_message.tool_uses) or None,
+            },
         )
 
     messages.append(final_message)
@@ -197,9 +203,9 @@ async def run_query(
         try:
             with observer.model_call(
                 model=context.model,
-                input=_trace_input_messages(messages),
+                input=_trace_model_input(context.system_prompt, messages),
                 metadata={
-                    "message_count": len(messages),
+                    **_trace_model_metadata(messages),
                     "turn_index": turn_count,
                     "was_compacted": was_compacted,
                 },
@@ -237,8 +243,11 @@ async def run_query(
                     raise RuntimeError("Model stream finished without a final message")
 
                 model_handle.update(
-                    output=final_message.model_dump(mode="json"),
-                    metadata={"usage": usage.model_dump(mode="json")},
+                    output=_trace_model_output(final_message),
+                    metadata={
+                        "usage": usage.model_dump(mode="json"),
+                        "tool_calls": _trace_tool_calls(final_message.tool_uses) or None,
+                    },
                 )
 
             messages.append(final_message)
@@ -413,7 +422,7 @@ async def _execute_tool_call(
                 },
             )
         tool_handle.update(
-            output=result.output,
+            output=_truncate_trace_text(result.output),
             metadata={
                 "is_error": result.is_error,
                 **(result.metadata or {}),
@@ -429,14 +438,106 @@ def _latest_user_prompt(messages: list[ConversationMessage]) -> str:
     return ""
 
 
-def _trace_input_messages(messages: list[ConversationMessage]) -> list[dict[str, str]]:
+def _trace_model_input(system_prompt: str, messages: list[ConversationMessage]) -> list[dict[str, Any]]:
+    history: list[dict[str, Any]] = []
+    if system_prompt:
+        history.append({"role": "system", "content": _truncate_trace_text(system_prompt)})
+    history.extend(_trace_history_entries(messages))
+    return history
+
+
+def _trace_model_metadata(messages: list[ConversationMessage]) -> dict[str, Any]:
+    history = _trace_history_entries(messages)
+    latest = history[-1] if history else None
+    metadata: dict[str, Any] = {
+        "message_count": len(messages),
+        "history_entry_count": len(history),
+    }
+    if latest is not None:
+        metadata["latest_role"] = latest.get("role")
+        if latest.get("role") == "tool":
+            metadata["latest_input_kind"] = "tool_result"
+            metadata["latest_tool_name"] = latest.get("name")
+        else:
+            metadata["latest_input_kind"] = "message"
+    return metadata
+
+
+def _trace_history_entries(messages: list[ConversationMessage]) -> list[dict[str, Any]]:
+    entries: list[dict[str, Any]] = []
+    for message in messages:
+        text = _truncate_trace_text(message.text)
+        tool_results = [block for block in message.content if isinstance(block, ToolResultBlock)]
+        tool_uses = [block for block in message.content if isinstance(block, ToolUseBlock)]
+
+        if message.role == "user" and text:
+            entries.append({"role": "user", "content": text})
+
+        if message.role == "assistant":
+            entry: dict[str, Any] = {"role": "assistant", "content": text}
+            rendered_tool_calls = _trace_tool_calls(tool_uses)
+            if rendered_tool_calls:
+                entry["tool_calls"] = rendered_tool_calls
+            if text or rendered_tool_calls:
+                entries.append(entry)
+
+        for result in tool_results:
+            entries.append(
+                {
+                    "role": "tool",
+                    "name": _tool_name_for_result(messages, result.tool_use_id) or result.tool_use_id,
+                    "content": _truncate_trace_text(result.content),
+                    "is_error": result.is_error,
+                }
+            )
+
+        if not text and message.role == "user" and not tool_results:
+            entries.append(
+                {
+                    "role": "user",
+                    "content": f"[non-text blocks: {', '.join(block.type for block in message.content)}]",
+                }
+            )
+
+    return entries
+
+
+def _trace_model_output(message: ConversationMessage) -> dict[str, Any]:
+    return {
+        "content": _truncate_trace_text(message.text.strip()),
+        "tool_calls": _trace_tool_calls(message.tool_uses) or None,
+    }
+
+
+def _trace_tool_calls(tool_uses: list[ToolUseBlock]) -> list[dict[str, Any]]:
     return [
         {
-            "role": message.role,
-            "text": message.text.strip(),
+            "name": tool_use.name,
+            "arguments": _coerce_trace_tool_arguments(tool_use.input),
         }
-        for message in messages
+        for tool_use in tool_uses
     ]
+
+
+def _coerce_trace_tool_arguments(arguments: dict[str, Any]) -> dict[str, Any]:
+    return {
+        str(key): _truncate_trace_text(json.dumps(value) if not isinstance(value, str) else value)
+        for key, value in arguments.items()
+    }
+
+
+def _truncate_trace_text(text: str, *, limit: int = _TRACE_TEXT_LIMIT) -> str:
+    if len(text) <= limit:
+        return text
+    return f"{text[: limit - 16]}...[truncated]..."
+
+
+def _tool_name_for_result(messages: list[ConversationMessage], tool_use_id: str) -> str | None:
+    for message in reversed(messages):
+        for block in message.content:
+            if isinstance(block, ToolUseBlock) and block.id == tool_use_id:
+                return block.name
+    return None
 
 
 def _resolve_permission_file_path(
