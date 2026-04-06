@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Literal, Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Any, Literal, Protocol, runtime_checkable
 
 if TYPE_CHECKING:
     pass
@@ -273,6 +273,9 @@ class TeammateSpawnConfig:
     parent_session_id: str
     """Parent session ID (for transcript correlation)."""
 
+    description: str | None = None
+    """Short operator-facing description of the delegated work."""
+
     model: str | None = None
     """Model override for this teammate."""
 
@@ -305,6 +308,33 @@ class TeammateSpawnConfig:
 
     subscriptions: list[str] = field(default_factory=list)
     """Event topics this teammate subscribes to."""
+
+    runner: Literal["prompt_native", "yaml_workflow", "harbor"] = "prompt_native"
+    """Execution substrate for this teammate."""
+
+    agent_config_name: str | None = None
+    """YAML config name when ``runner`` is ``yaml_workflow`` or ``harbor``."""
+
+    agent_architecture: str | None = None
+    """Architecture label for diagnostics/UI."""
+
+    permission_mode: str | None = None
+    """Coordinator-level permission mode hint."""
+
+    allowed_tools: list[str] | None = None
+    """Explicit tool allow-list for prompt-native teammates."""
+
+    disallowed_tools: list[str] | None = None
+    """Explicit tool deny-list for prompt-native teammates."""
+
+    initial_prompt: str | None = None
+    """Extra task prelude inserted before the first user prompt."""
+
+    max_turns: int | None = None
+    """Optional per-teammate turn cap override."""
+
+    task_payload: dict[str, Any] = field(default_factory=dict)
+    """Opaque task payload forwarded to YAML workflow runners."""
 
 
 # ---------------------------------------------------------------------------

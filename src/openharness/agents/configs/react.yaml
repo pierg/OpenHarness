@@ -2,6 +2,11 @@ name: react_example
 description: ReAct architecture — explicit Think / Act / Observe loop.
 architecture: react
 max_turns: 5
+definition:
+  subagent_type: react
+  description: ReAct workflow with explicit reasoning and acting phases. Use this when the task benefits from stepwise tool-driven exploration before answering.
+  runner: yaml_workflow
+  color: green
 
 subagents:
   thinker:

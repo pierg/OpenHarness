@@ -34,6 +34,7 @@ class AppConfig:
     """Configuration for a terminal app session."""
 
     prompt: str | None = None
+    cwd: str | None = None
     model: str | None = None
     base_url: str | None = None
     system_prompt: str | None = None
@@ -241,6 +242,7 @@ class OpenHarnessTerminalApp(App[None]):
     async def on_mount(self) -> None:
         self._bundle = await build_runtime(
             prompt=self._config.prompt,
+            cwd=self._config.cwd,
             model=self._config.model,
             base_url=self._config.base_url,
             system_prompt=self._config.system_prompt,

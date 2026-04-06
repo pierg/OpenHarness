@@ -11,8 +11,9 @@ import pytest
 from openharness.agents import AgentConfig, SimpleAgent, TaskDefinition
 from openharness.permissions.modes import PermissionMode
 from openharness.runtime.session import AgentLogPaths, AgentRuntime
+from openharness.runtime.workflow import _run_quick_evaluations
 from openharness.workspace import CommandResult, LocalWorkspace, Workspace
-from openharness.tools import WorkspaceToolRegistryFactory
+from openharness.tools import WorkspaceToolRegistryFactory, normalize_tool_name
 from openharness.api.client import ApiMessageCompleteEvent, ApiMessageRequest
 from openharness.api.usage import UsageSnapshot
 from openharness.engine.messages import ConversationMessage, TextBlock, ToolUseBlock
@@ -102,6 +103,31 @@ def test_registry_factory_raises_for_unknown_tool(tmp_path: Path):
     workspace = FakeWorkspace(cwd=str(tmp_path))
     with pytest.raises(ValueError, match="Unknown tool"):
         WorkspaceToolRegistryFactory(tool_names=("nonexistent",)).build(workspace)
+
+
+def test_registry_factory_supports_swarm_tools(tmp_path: Path):
+    workspace = FakeWorkspace(cwd=str(tmp_path))
+    registry = WorkspaceToolRegistryFactory(tool_names=("agent", "send_message", "task_stop")).build(workspace)
+    names = {t.name for t in registry.list_tools()}
+    assert names == {"agent", "send_message", "task_stop"}
+
+
+def test_normalize_tool_name_supports_upstream_aliases():
+    assert normalize_tool_name("Read") == "read_file"
+    assert normalize_tool_name("Edit") == "edit_file"
+    assert normalize_tool_name("WebFetch") == "web_fetch"
+
+
+def test_run_quick_evaluations_reports_failures():
+    config = AgentConfig(
+        evaluations=(
+            {"name": "has-done", "contains": "Done"},
+            {"name": "no-traceback", "not_contains": "Traceback"},
+        )
+    )
+    result = _run_quick_evaluations(config.evaluations, "Done without errors")
+    assert result["passed"] is True
+    assert result["failures"] == []
 
 
 # ---------------------------------------------------------------------------

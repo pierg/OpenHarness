@@ -8,6 +8,8 @@ import pytest
 from openharness.coordinator.agent_definitions import (
     AgentDefinition,
     _parse_agent_frontmatter,
+    get_agent_definition,
+    get_all_agent_definitions,
     get_builtin_agent_definitions,
     load_agents_dir,
 )
@@ -80,6 +82,21 @@ def test_builtin_general_purpose_has_all_tools():
     builtins = get_builtin_agent_definitions()
     gp = next(a for a in builtins if a.name == "general-purpose")
     assert gp.tools == ["*"] or gp.tools is None  # all tools
+
+
+def test_yaml_catalog_agents_are_projected():
+    agents = get_all_agent_definitions()
+    yaml_default = next(agent for agent in agents if agent.name == "default")
+    assert yaml_default.runner == "yaml_workflow"
+    assert yaml_default.agent_config_name == "default"
+    assert yaml_default.agent_architecture == "simple"
+    assert yaml_default.subagent_type == "yaml-default"
+
+
+def test_get_agent_definition_matches_subagent_type():
+    agent = get_agent_definition("planner-executor")
+    assert agent is not None
+    assert agent.name == "planner_executor_example"
 
 
 # ---------------------------------------------------------------------------

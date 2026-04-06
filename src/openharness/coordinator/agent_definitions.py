@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import os
 from pathlib import Path
 from typing import Any, Literal
 
@@ -131,7 +132,13 @@ class AgentDefinition(BaseModel):
     # --- Python-specific ---
     permissions: list[str] = Field(default_factory=list)  # extra permission rules
     subagent_type: str = "general-purpose"  # routing key used by the harness
-    source: Literal["builtin", "user", "plugin"] = "builtin"
+    source: Literal["builtin", "user", "project", "plugin"] = "builtin"
+    runner: Literal["prompt_native", "yaml_workflow", "harbor"] = "prompt_native"
+    agent_config_name: str | None = None
+    agent_architecture: str | None = None
+    system_prompt_mode: Literal["default", "replace", "append"] | None = None
+    plan_mode_required: bool = False
+    allow_permission_prompts: bool = False
 
 
 # ---------------------------------------------------------------------------
@@ -902,13 +909,92 @@ def _get_user_agents_dir() -> Path:
     return get_config_dir() / "agents"
 
 
-def get_all_agent_definitions() -> list[AgentDefinition]:
+def _load_yaml_agent_definitions(cwd: str | None = None) -> list[AgentDefinition]:
+    """Project YAML agent configs into coordinator-visible definitions."""
+    from openharness.agents.catalog import iter_catalog_agent_configs  # noqa: PLC0415
+
+    def _project_source(value: str) -> Literal["builtin", "user", "project"]:
+        if value == "project":
+            return "project"
+        if value == "user":
+            return "user"
+        return "builtin"
+
+    def _collect_tools(config: Any) -> list[str]:
+        seen: dict[str, None] = {}
+        for tool_name in getattr(config, "tools", ()) or ():
+            seen[str(tool_name)] = None
+        for subagent in getattr(config, "subagents", {}).values():
+            for tool_name in _collect_tools(subagent):
+                seen[tool_name] = None
+        return list(seen)
+
+    definitions: list[AgentDefinition] = []
+    for item in iter_catalog_agent_configs(cwd):
+        config = item.config
+        metadata = config.definition
+        tool_names = list(metadata.tools) if metadata and metadata.tools is not None else _collect_tools(config)
+
+        definitions.append(
+            AgentDefinition(
+                name=config.name,
+                description=(
+                    metadata.description
+                    if metadata and metadata.description
+                    else config.description
+                    or f"Composable YAML agent '{config.name}'"
+                ),
+                system_prompt=(
+                    metadata.system_prompt
+                    if metadata and metadata.system_prompt
+                    else (
+                        f"Composable YAML agent '{config.name}' implemented with the "
+                        f"'{config.architecture}' architecture."
+                    )
+                ),
+                system_prompt_mode=metadata.system_prompt_mode if metadata else None,
+                tools=tool_names or None,
+                disallowed_tools=list(metadata.disallowed_tools) if metadata and metadata.disallowed_tools else None,
+                color=metadata.color if metadata else None,
+                permission_mode=metadata.permission_mode if metadata else None,
+                permissions=list(metadata.permissions) if metadata else [],
+                skills=list(metadata.skills) if metadata else [],
+                required_mcp_servers=(
+                    list(metadata.required_mcp_servers)
+                    if metadata and metadata.required_mcp_servers
+                    else None
+                ),
+                background=metadata.background if metadata else False,
+                initial_prompt=metadata.initial_prompt if metadata else None,
+                isolation=metadata.isolation if metadata else None,
+                filename=item.path.stem,
+                base_dir=str(item.path.parent),
+                subagent_type=(
+                    metadata.subagent_type
+                    if metadata and metadata.subagent_type
+                    else config.name
+                ),
+                source=_project_source(item.source),
+                runner=metadata.runner if metadata else "yaml_workflow",
+                agent_config_name=config.name,
+                agent_architecture=config.architecture,
+                plan_mode_required=metadata.plan_mode_required if metadata else False,
+                allow_permission_prompts=(
+                    metadata.allow_permission_prompts if metadata else False
+                ),
+            )
+        )
+    return definitions
+
+
+def get_all_agent_definitions(cwd: str | None = None) -> list[AgentDefinition]:
     """Return all agent definitions: built-in + user + plugin.
 
     Merge order (last writer wins for same ``name``):
     1. Built-in agents
-    2. User agents (~/.openharness/agents/)
-    3. Plugin agents (loaded from active plugins)
+    2. Built-in/user/project YAML agents
+    3. User markdown agents (~/.openharness/agents/)
+    4. Plugin agents (loaded from active plugins)
 
     User definitions override built-ins with the same name; plugin definitions
     override user definitions with the same name.
@@ -919,21 +1005,23 @@ def get_all_agent_definitions() -> list[AgentDefinition]:
     for agent in get_builtin_agent_definitions():
         agent_map[agent.name] = agent
 
-    # 2. User-defined agents
+    # 2. YAML-backed compositional agents
+    effective_cwd = cwd or os.getcwd()
+    for agent in _load_yaml_agent_definitions(effective_cwd):
+        agent_map[agent.name] = agent
+
+    # 3. User-defined markdown agents
     user_agents = load_agents_dir(_get_user_agents_dir())
     for agent in user_agents:
         agent_map[agent.name] = agent
 
-    # 3. Plugin agents — loaded lazily to avoid import cycles
+    # 4. Plugin agents — loaded lazily to avoid import cycles
     try:
         from openharness.plugins.loader import load_plugins  # noqa: PLC0415
         from openharness.config.settings import load_settings  # noqa: PLC0415
 
         settings = load_settings()
-        import os  # noqa: PLC0415
-
-        cwd = os.getcwd()
-        for plugin in load_plugins(settings, cwd):
+        for plugin in load_plugins(settings, effective_cwd):
             if not plugin.enabled:
                 continue
             for agent_def in getattr(plugin, "agents", []):
@@ -945,10 +1033,10 @@ def get_all_agent_definitions() -> list[AgentDefinition]:
     return list(agent_map.values())
 
 
-def get_agent_definition(name: str) -> AgentDefinition | None:
+def get_agent_definition(name: str, cwd: str | None = None) -> AgentDefinition | None:
     """Return the agent definition for *name*, or ``None`` if not found."""
-    for agent in get_all_agent_definitions():
-        if agent.name == name:
+    for agent in get_all_agent_definitions(cwd):
+        if agent.name == name or agent.subagent_type == name:
             return agent
     return None
 

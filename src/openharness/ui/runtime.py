@@ -23,6 +23,7 @@ from openharness.hooks.hot_reload import HookReloader
 from openharness.mcp.client import McpClientManager
 from openharness.mcp.config import load_mcp_server_configs
 from openharness.permissions import PermissionChecker
+from openharness.permissions.modes import PermissionMode
 from openharness.plugins import load_plugins
 from openharness.prompts import build_runtime_system_prompt
 from openharness.state import AppState, AppStateStore
@@ -109,12 +110,16 @@ def _resolve_api_client_from_settings(settings) -> SupportsStreamingMessages:
 async def build_runtime(
     *,
     prompt: str | None = None,
+    cwd: str | None = None,
     model: str | None = None,
     max_turns: int | None = None,
     base_url: str | None = None,
     system_prompt: str | None = None,
     api_key: str | None = None,
     api_format: str | None = None,
+    permission_mode: str | None = None,
+    allowed_tools: list[str] | None = None,
+    disallowed_tools: list[str] | None = None,
     active_profile: str | None = None,
     api_client: SupportsStreamingMessages | None = None,
     permission_prompt: PermissionPrompt | None = None,
@@ -134,15 +139,32 @@ async def build_runtime(
         "active_profile": active_profile,
     }
     settings = load_settings().merge_cli_overrides(**settings_overrides)
-    cwd = str(Path.cwd())
-    plugins = load_plugins(settings, cwd)
+    runtime_cwd = str(Path(cwd or Path.cwd()).resolve())
+    if permission_mode is not None:
+        resolved_permission_mode = (
+            permission_mode
+            if isinstance(permission_mode, PermissionMode)
+            else PermissionMode(permission_mode)
+        )
+        settings = settings.model_copy(
+            update={
+                "permission": settings.permission.model_copy(
+                    update={"mode": resolved_permission_mode}
+                )
+            }
+        )
+    plugins = load_plugins(settings, runtime_cwd)
     if api_client:
         resolved_api_client = api_client
     else:
         resolved_api_client = _resolve_api_client_from_settings(settings)
     mcp_manager = McpClientManager(load_mcp_server_configs(settings, plugins))
     await mcp_manager.connect_all()
-    tool_registry = create_default_tool_registry(mcp_manager)
+    tool_registry = create_default_tool_registry(
+        mcp_manager,
+        allowed_tools=allowed_tools,
+        disallowed_tools=disallowed_tools,
+    )
     provider = detect_provider(settings)
     _, active_profile = settings.resolve_profile()
     bridge_manager = get_bridge_manager()
@@ -151,7 +173,7 @@ async def build_runtime(
             model=display_model_setting(active_profile),
             permission_mode=settings.permission.mode.value,
             theme=settings.theme,
-            cwd=cwd,
+            cwd=runtime_cwd,
             provider=provider.name,
             auth_status=auth_status(settings),
             base_url=settings.base_url or "",
@@ -173,7 +195,7 @@ async def build_runtime(
     hook_executor = HookExecutor(
         hook_reloader.current_registry() if api_client is None else load_hook_registry(settings, plugins),
         HookExecutionContext(
-            cwd=Path(cwd).resolve(),
+            cwd=Path(runtime_cwd).resolve(),
             api_client=resolved_api_client,
             default_model=settings.model,
         ),
@@ -183,9 +205,13 @@ async def build_runtime(
         api_client=resolved_api_client,
         tool_registry=tool_registry,
         permission_checker=PermissionChecker(settings.permission),
-        cwd=cwd,
+        cwd=runtime_cwd,
         model=settings.model,
-        system_prompt=build_runtime_system_prompt(settings, cwd=cwd, latest_user_prompt=prompt),
+        system_prompt=build_runtime_system_prompt(
+            settings,
+            cwd=runtime_cwd,
+            latest_user_prompt=prompt,
+        ),
         max_tokens=settings.max_tokens,
         max_turns=engine_max_turns,
         permission_prompt=permission_prompt,
@@ -204,7 +230,7 @@ async def build_runtime(
 
     return RuntimeBundle(
         api_client=resolved_api_client,
-        cwd=cwd,
+        cwd=runtime_cwd,
         mcp_manager=mcp_manager,
         tool_registry=tool_registry,
         app_state=app_state,

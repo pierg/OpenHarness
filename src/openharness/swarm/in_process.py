@@ -35,6 +35,7 @@ from openharness.swarm.mailbox import (
     TeammateMailbox,
     create_idle_notification,
 )
+from openharness.swarm.runner import create_teammate_runner
 from openharness.swarm.types import (
     BackendType,
     SpawnResult,
@@ -224,10 +225,9 @@ async def start_in_process_teammate(
     abort_controller:
         Dual-signal abort controller for this teammate.
     query_context:
-        Optional pre-built
-        :class:`~openharness.engine.query.QueryContext`.  When *None* this
-        function runs a stub that respects the cancel signals so tests and
-        direct invocations still work.
+        Optional pre-built :class:`~openharness.engine.query.QueryContext`.
+        When provided we keep the legacy direct query-loop path; otherwise we
+        create a stateful teammate runner from :mod:`openharness.swarm.runner`.
     """
     ctx = TeammateContext(
         agent_id=agent_id,
@@ -245,6 +245,7 @@ async def start_in_process_teammate(
     mailbox = TeammateMailbox(team_name=config.team, agent_id=agent_id)
 
     logger.debug("[in_process] %s: starting", agent_id)
+    runner = None
 
     try:
         ctx.status = "running"
@@ -252,20 +253,27 @@ async def start_in_process_teammate(
         if query_context is not None:
             await _run_query_loop(query_context, config, ctx, mailbox)
         else:
-            # Minimal stub: log that we received the prompt and honour cancel.
-            # Replace this branch with a real QueryContext builder once the
-            # harness wires up the full engine for in-process teammates.
-            logger.info(
-                "[in_process] %s: no query_context supplied — stub run for prompt: %.80s",
-                agent_id,
-                config.prompt,
-            )
+            runner = await create_teammate_runner(config)
+            if config.prompt.strip():
+                initial_result = await runner.run_turn(config.prompt)
+                ctx.total_tokens += initial_result.input_tokens + initial_result.output_tokens
+
             ctx.status = "idle"
-            for _ in range(10):
-                if abort_controller.is_cancelled:
-                    logger.debug("[in_process] %s: cancelled during stub run", agent_id)
+            while not abort_controller.is_cancelled:
+                should_stop = await _drain_mailbox(mailbox, ctx)
+                if should_stop:
                     return
-                await asyncio.sleep(0.1)
+
+                try:
+                    queued = ctx.message_queue.get_nowait()
+                except asyncio.QueueEmpty:
+                    await asyncio.sleep(0.1)
+                    continue
+
+                ctx.status = "running"
+                result = await runner.run_turn(queued.text)
+                ctx.total_tokens += result.input_tokens + result.output_tokens
+                ctx.status = "idle"
 
     except asyncio.CancelledError:
         logger.debug("[in_process] %s: task cancelled", agent_id)
@@ -273,6 +281,9 @@ async def start_in_process_teammate(
     except Exception:
         logger.exception("[in_process] %s: unhandled exception in agent loop", agent_id)
     finally:
+        if runner is not None:
+            with contextlib.suppress(Exception):
+                await runner.close()
         ctx.status = "stopped"
         # Notify the leader that this teammate has gone idle / finished.
         with contextlib.suppress(Exception):

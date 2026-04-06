@@ -8,7 +8,13 @@ from openharness.agents.architectures import (
     ReflectionAgent,
     SimpleAgent,
 )
-from openharness.agents.config import AgentConfig
+from openharness.agents.catalog import (
+    CatalogAgentConfig,
+    get_catalog_agent_config,
+    get_catalog_agent_configs,
+    iter_catalog_agent_configs,
+)
+from openharness.agents.config import AgentConfig, AgentDefinitionMetadata, QuickEvaluation
 from openharness.agents.contracts import (
     Agent,
     AgentRunResult,
@@ -23,15 +29,21 @@ from openharness.engine.query import TurnResult
 __all__ = [
     "Agent",
     "AgentConfig",
+    "AgentDefinitionMetadata",
     "AgentFactory",
     "AgentRunResult",
     "AgentWorkspace",
+    "CatalogAgentConfig",
     "CommandResult",
     "Conversation",
     "PlannerExecutorAgent",
+    "QuickEvaluation",
     "ReActAgent",
     "ReflectionAgent",
     "SimpleAgent",
     "TaskDefinition",
     "TurnResult",
+    "get_catalog_agent_config",
+    "get_catalog_agent_configs",
+    "iter_catalog_agent_configs",
 ]

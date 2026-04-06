@@ -2,15 +2,16 @@
 
 from __future__ import annotations
 
+import dataclasses
 import json
 import logging
+import shlex
+import sys
+import uuid
+from pathlib import Path
 from typing import TYPE_CHECKING
 
-from openharness.swarm.spawn_utils import (
-    build_inherited_cli_flags,
-    build_inherited_env_vars,
-    get_teammate_command,
-)
+from openharness.swarm.spawn_utils import build_inherited_env_vars
 from openharness.swarm.types import (
     BackendType,
     SpawnResult,
@@ -39,6 +40,7 @@ class SubprocessBackend:
 
     def __init__(self) -> None:
         self._agent_tasks = {}
+        self._agent_config_paths: dict[str, Path] = {}
 
     def is_available(self) -> bool:
         """Subprocess backend is always available."""
@@ -51,18 +53,35 @@ class SubprocessBackend:
         that accepts the initial prompt via stdin.
         """
         agent_id = f"{config.name}@{config.team}"
-
-        flags = build_inherited_cli_flags(
-            model=config.model,
-            plan_mode_required=config.plan_mode_required,
-        )
         extra_env = build_inherited_env_vars()
+        extra_env.update(
+            {
+                "CLAUDE_CODE_TEAM_NAME": config.team,
+                "CLAUDE_CODE_AGENT_ID": agent_id,
+                "CLAUDE_CODE_AGENT_NAME": config.name,
+            }
+        )
+        if config.color:
+            extra_env["CLAUDE_CODE_AGENT_COLOR"] = config.color
 
         # Build environment export prefix for shell invocation
         env_prefix = " ".join(f"{k}={v!r}" for k, v in extra_env.items())
 
-        teammate_cmd = get_teammate_command()
-        cmd_parts = [teammate_cmd, "-m", "openharness"] + flags
+        from openharness.config.paths import get_tasks_dir  # noqa: PLC0415
+
+        config_path = get_tasks_dir() / f"teammate_{uuid.uuid4().hex}.json"
+        config_path.write_text(
+            json.dumps(dataclasses.asdict(config), indent=2),
+            encoding="utf-8",
+        )
+
+        cmd_parts = [
+            shlex.quote(sys.executable),
+            "-m",
+            "openharness.swarm.worker",
+            "--config",
+            shlex.quote(str(config_path)),
+        ]
         command = f"{env_prefix} {' '.join(cmd_parts)}" if env_prefix else " ".join(cmd_parts)
 
         manager = get_task_manager()
@@ -86,6 +105,7 @@ class SubprocessBackend:
             )
 
         self._agent_tasks[agent_id] = record.id
+        self._agent_config_paths[agent_id] = config_path
         logger.debug("Spawned teammate %s as task %s", agent_id, record.id)
         return SpawnResult(
             task_id=record.id,
@@ -141,6 +161,16 @@ class SubprocessBackend:
             # Task may have already finished — still clean up mapping
         finally:
             self._agent_tasks.pop(agent_id, None)
+            config_path = self._agent_config_paths.pop(agent_id, None)
+            if config_path is not None:
+                try:
+                    config_path.unlink(missing_ok=True)
+                except OSError:
+                    logger.debug(
+                        "Unable to remove teammate config %s",
+                        config_path,
+                        exc_info=True,
+                    )
 
         logger.debug("Shut down teammate %s (task %s)", agent_id, task_id)
         return True

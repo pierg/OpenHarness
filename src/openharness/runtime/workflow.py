@@ -7,6 +7,7 @@ from typing import Any
 from pydantic import BaseModel, Field
 
 from openharness.agents.contracts import AgentRunResult, TaskDefinition
+from openharness.agents.config import QuickEvaluation
 from openharness.agents.factory import AgentFactory
 from openharness.api.client import SupportsStreamingMessages
 from openharness.observability import TraceObserver
@@ -39,7 +40,7 @@ class Workflow:
         agent_factory: AgentFactory | None = None,
     ) -> None:
         self.workspace = workspace
-        self.factory = agent_factory or AgentFactory.with_default_configs()
+        self.factory = agent_factory or AgentFactory.with_catalog_configs(workspace.cwd)
 
     async def run(
         self,
@@ -59,6 +60,7 @@ class Workflow:
             log_paths: Optional paths for JSONL event logging.
             trace_observer: Optional telemetry observer.
         """
+        config = self.factory.get_config(agent_name)
         agent = self.factory.create(agent_name)
 
         runtime = AgentRuntime(
@@ -71,4 +73,47 @@ class Workflow:
 
         result = await agent.run(task=task, runtime=runtime)
 
-        return WorkflowResult(agent_result=result)
+        return WorkflowResult(
+            agent_result=result,
+            evaluation=_run_quick_evaluations(config.evaluations, result.final_text),
+        )
+
+
+def _run_quick_evaluations(
+    evaluations: tuple[QuickEvaluation, ...],
+    output_text: str,
+) -> dict[str, Any]:
+    """Evaluate lightweight output assertions for YAML-configured agents."""
+    if not evaluations:
+        return {}
+
+    results: list[dict[str, Any]] = []
+    failures: list[str] = []
+
+    for evaluation in evaluations:
+        passed = True
+        reasons: list[str] = []
+
+        if evaluation.contains and evaluation.contains not in output_text:
+            passed = False
+            reasons.append(f"missing substring {evaluation.contains!r}")
+        if evaluation.not_contains and evaluation.not_contains in output_text:
+            passed = False
+            reasons.append(f"forbidden substring {evaluation.not_contains!r} was present")
+
+        result = {
+            "name": evaluation.name,
+            "passed": passed,
+            "message": evaluation.message,
+            "details": "; ".join(reasons) if reasons else "",
+        }
+        results.append(result)
+        if not passed:
+            failures.append(evaluation.name)
+
+    return {
+        "passed": not failures,
+        "total": len(results),
+        "failures": failures,
+        "results": results,
+    }

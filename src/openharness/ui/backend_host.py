@@ -40,6 +40,7 @@ _PROTOCOL_PREFIX = "OHJSON:"
 class BackendHostConfig:
     """Configuration for one backend host session."""
 
+    cwd: str | None = None
     model: str | None = None
     max_turns: int | None = None
     base_url: str | None = None
@@ -70,6 +71,7 @@ class ReactBackendHost:
 
     async def run(self) -> int:
         self._bundle = await build_runtime(
+            cwd=self._config.cwd,
             model=self._config.model,
             max_turns=self._config.max_turns,
             base_url=self._config.base_url,

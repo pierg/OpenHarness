@@ -6,6 +6,7 @@ import asyncio
 import os
 import shlex
 import time
+from contextlib import suppress
 from dataclasses import replace
 from pathlib import Path
 from uuid import uuid4
@@ -176,6 +177,12 @@ class BackgroundTaskManager:
         reader = asyncio.create_task(self._copy_output(task_id, process))
         return_code = await process.wait()
         await reader
+        if process.stdin is not None:
+            process.stdin.close()
+        with suppress(Exception):
+            transport = getattr(process, "_transport", None)
+            if transport is not None:
+                transport.close()
 
         current_generation = self._generations.get(task_id)
         if current_generation != generation:

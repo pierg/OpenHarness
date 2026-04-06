@@ -106,3 +106,53 @@ async def test_agent_tool_supports_remote_and_teammate_modes(tmp_path: Path, mon
         assert result.is_error is False
         # Output format: "Spawned agent X (task_id=Y, backend=Z)"
         assert "agent" in result.output.lower() or "task_id" in result.output.lower()
+
+
+@pytest.mark.asyncio
+async def test_agent_tool_projects_yaml_definition_into_spawn_config(tmp_path: Path, monkeypatch):
+    from openharness.tools import agent_tool as agent_tool_module
+
+    captured = {}
+
+    class FakeExecutor:
+        type = "in_process"
+
+        async def spawn(self, config):
+            captured["config"] = config
+
+            class Result:
+                success = True
+                task_id = "task-123"
+                agent_id = "yaml-default@default"
+                backend_type = "in_process"
+                error = None
+
+            return Result()
+
+    class FakeRegistry:
+        def get_executor(self, backend_type=None):
+            return FakeExecutor()
+
+    monkeypatch.setattr(agent_tool_module, "get_backend_registry", lambda: FakeRegistry())
+    monkeypatch.setitem(
+        AgentTool.execute.__globals__,
+        "get_backend_registry",
+        lambda: FakeRegistry(),
+    )
+
+    result = await AgentTool().execute(
+        AgentToolInput(
+            description="compose",
+            prompt="Solve it",
+            subagent_type="yaml-default",
+            mode="in_process_teammate",
+        ),
+        ToolExecutionContext(cwd=tmp_path),
+    )
+
+    assert result.is_error is False
+    config = captured["config"]
+    assert config.runner == "yaml_workflow"
+    assert config.agent_config_name == "default"
+    assert config.allowed_tools is not None
+    assert "agent" in config.allowed_tools

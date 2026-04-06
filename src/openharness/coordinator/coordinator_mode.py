@@ -7,6 +7,11 @@ import re
 from dataclasses import dataclass, field
 from typing import Optional
 
+from openharness.coordinator.agent_definitions import (
+    filter_agents_by_mcp_requirements,
+    get_all_agent_definitions,
+)
+
 
 # ---------------------------------------------------------------------------
 # TeamRegistry (kept for backward compatibility)
@@ -220,6 +225,7 @@ def get_coordinator_tools() -> list[str]:
 def get_coordinator_user_context(
     mcp_clients: list[dict[str, str]] | None = None,
     scratchpad_dir: Optional[str] = None,
+    cwd: str | None = None,
 ) -> dict[str, str]:
     """Build the workerToolsContext injected into the coordinator's user turn."""
     if not is_coordinator_mode():
@@ -245,12 +251,50 @@ def get_coordinator_user_context(
             "Use this for durable cross-worker knowledge — structure files however fits the work."
         )
 
-    return {"workerToolsContext": content}
+    server_names = [c["name"] for c in mcp_clients or []]
+    agent_catalog = _format_agent_catalog(cwd=cwd, available_servers=server_names)
+
+    return {
+        "workerToolsContext": content,
+        "availableAgentsContext": agent_catalog,
+    }
 
 
-def get_coordinator_system_prompt() -> str:
+def _format_agent_catalog(
+    *,
+    cwd: str | None = None,
+    available_servers: list[str] | None = None,
+) -> str:
+    """Render the current coordinator-visible agent catalog."""
+    agents = get_all_agent_definitions(cwd)
+    if available_servers:
+        agents = filter_agents_by_mcp_requirements(agents, available_servers)
+
+    lines = ["Available subagent types:"]
+    for agent in sorted(agents, key=lambda item: item.subagent_type.lower()):
+        runner = {
+            "prompt_native": "native",
+            "yaml_workflow": "yaml",
+            "harbor": "harbor",
+        }.get(agent.runner, agent.runner)
+        details = [runner]
+        if agent.agent_architecture:
+            details.append(agent.agent_architecture)
+        if agent.required_mcp_servers:
+            details.append("mcp-gated")
+        details_str = ", ".join(details)
+        lines.append(f"- {agent.subagent_type}: {agent.description} [{details_str}]")
+    return "\n".join(lines)
+
+
+def get_coordinator_system_prompt(
+    *,
+    cwd: str | None = None,
+    available_servers: list[str] | None = None,
+) -> str:
     """Return the system prompt injected when running in coordinator mode."""
     is_simple = os.environ.get("CLAUDE_CODE_SIMPLE", "").lower() in {"1", "true", "yes"}
+    agent_catalog = _format_agent_catalog(cwd=cwd, available_servers=available_servers)
 
     if is_simple:
         worker_capabilities = (
@@ -289,6 +333,9 @@ When calling {_AGENT_TOOL_NAME}:
 - Do not set the model parameter. Workers need the default model for the substantive tasks you delegate.
 - Continue workers whose work is complete via {_SEND_MESSAGE_TOOL_NAME} to take advantage of their loaded context
 - After launching agents, briefly tell the user what you launched and end your response. Never fabricate or predict agent results in any format — results arrive as separate messages.
+
+Current agent catalog:
+{agent_catalog}
 
 ### {_AGENT_TOOL_NAME} Results
 
@@ -342,7 +389,7 @@ You:
 
 ## 3. Workers
 
-When calling {_AGENT_TOOL_NAME}, use subagent_type `worker`. Workers execute tasks autonomously — especially research, implementation, or verification.
+When calling {_AGENT_TOOL_NAME}, choose `subagent_type` from the current catalog above. Use the most specific matching specialist. If no specialist is a clear fit, default to `worker` for implementation, `Explore` for read-only codebase search, `Plan` for design work, and `verification` for adversarial QA.
 
 {worker_capabilities}
 

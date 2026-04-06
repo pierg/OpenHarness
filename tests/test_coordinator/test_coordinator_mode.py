@@ -8,6 +8,7 @@ from openharness.coordinator.coordinator_mode import (
     TaskNotification,
     WorkerConfig,
     format_task_notification,
+    get_coordinator_system_prompt,
     get_coordinator_tools,
     get_coordinator_user_context,
     is_coordinator_mode,
@@ -159,7 +160,9 @@ def test_coordinator_user_context_includes_tools(monkeypatch):
     monkeypatch.delenv("CLAUDE_CODE_SIMPLE", raising=False)
     ctx = get_coordinator_user_context()
     assert "workerToolsContext" in ctx
+    assert "availableAgentsContext" in ctx
     assert "bash" in ctx["workerToolsContext"]
+    assert "yaml-default" in ctx["availableAgentsContext"]
 
 
 def test_coordinator_user_context_with_mcp_clients(monkeypatch):
@@ -172,6 +175,13 @@ def test_coordinator_user_context_with_scratchpad(monkeypatch):
     monkeypatch.setenv("CLAUDE_CODE_COORDINATOR_MODE", "1")
     ctx = get_coordinator_user_context(scratchpad_dir="/tmp/scratch")
     assert "/tmp/scratch" in ctx["workerToolsContext"]
+
+
+def test_coordinator_system_prompt_mentions_dynamic_catalog(monkeypatch):
+    monkeypatch.setenv("CLAUDE_CODE_COORDINATOR_MODE", "1")
+    prompt = get_coordinator_system_prompt()
+    assert "Current agent catalog" in prompt
+    assert "yaml-default" in prompt
 
 
 # ---------------------------------------------------------------------------
