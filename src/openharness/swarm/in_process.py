@@ -31,8 +31,11 @@ from contextvars import ContextVar
 from dataclasses import dataclass, field
 from typing import Any, Literal
 
+from openharness.observability import NullTraceObserver, TraceObserver
 from openharness.swarm.mailbox import (
+    MailboxMessage,
     TeammateMailbox,
+    create_user_message,
     create_idle_notification,
 )
 from openharness.swarm.runner import create_teammate_runner
@@ -163,6 +166,18 @@ class TeammateContext:
     total_tokens: int = 0
     """Cumulative token count (input + output) across all query turns."""
 
+    current_message_id: str | None = None
+    """The mailbox message currently being processed, if any."""
+
+    current_correlation_id: str | None = None
+    """Correlation ID for the current mailbox thread, if any."""
+
+    current_message_sender: str | None = None
+    """Sender of the current mailbox message, if any."""
+
+    explicit_reply_sent: bool = False
+    """Whether the current turn already produced an explicit mailbox reply."""
+
     # Backwards-compatible shim so existing code that reads ``cancel_event``
     # continues to work without modification.
     @property
@@ -187,6 +202,70 @@ def get_teammate_context() -> TeammateContext | None:
 def set_teammate_context(ctx: TeammateContext) -> None:
     """Bind *ctx* to the current async context (task-local)."""
     _teammate_context_var.set(ctx)
+
+
+def _preview_text(text: str, *, limit: int = 120) -> str:
+    rendered = " ".join(str(text).split())
+    if len(rendered) <= limit:
+        return rendered
+    return f"{rendered[: max(0, limit - 3)].rstrip()}..."
+
+
+def _trace_mailbox_message(message: MailboxMessage) -> dict[str, Any]:
+    payload: dict[str, Any] = {
+        "id": message.id,
+        "type": message.type,
+        "sender": message.sender,
+        "recipient": message.recipient,
+        "correlation_id": message.correlation_id,
+        "reply_to": message.reply_to,
+        "summary": message.summary,
+    }
+    return {key: value for key, value in payload.items() if value is not None}
+
+
+async def _forward_turn_result(
+    *,
+    ctx: TeammateContext,
+    recipient: str,
+    text: str,
+    trace_observer: TraceObserver,
+    correlation_id: str | None,
+    reply_to: str | None,
+    reason: str,
+) -> None:
+    """Write a synthetic mailbox reply when a turn ends with plain text only."""
+    if not text.strip():
+        return
+
+    recipient_agent_id = recipient if "@" in recipient else f"{recipient}@{ctx.team_name}"
+    forwarded = create_user_message(
+        sender=ctx.agent_id,
+        recipient=recipient_agent_id,
+        content=text.strip(),
+        correlation_id=correlation_id,
+        reply_to=reply_to,
+        summary=_preview_text(text),
+    )
+    forwarded.payload["auto_forwarded"] = True
+    mailbox = TeammateMailbox(team_name=ctx.team_name, agent_id=recipient_agent_id)
+    with trace_observer.span(
+        name="worker:auto_forward_reply",
+        input={"message": _preview_text(text, limit=200)},
+        metadata={
+            "agent_id": ctx.agent_id,
+            "team_name": ctx.team_name,
+            "recipient_agent_id": recipient_agent_id,
+            "correlation_id": correlation_id,
+            "reply_to": reply_to,
+            "reason": reason,
+        },
+    ) as span:
+        await mailbox.write(forwarded)
+        span.update(
+            output={"message_id": forwarded.id},
+            metadata={"auto_forwarded": True},
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -246,6 +325,7 @@ async def start_in_process_teammate(
 
     logger.debug("[in_process] %s: starting", agent_id)
     runner = None
+    worker_trace_observer: TraceObserver = NullTraceObserver()
 
     try:
         ctx.status = "running"
@@ -254,13 +334,50 @@ async def start_in_process_teammate(
             await _run_query_loop(query_context, config, ctx, mailbox)
         else:
             runner = await create_teammate_runner(config)
+            worker_trace_observer = runner.trace_observer
             if config.prompt.strip():
-                initial_result = await runner.run_turn(config.prompt)
+                ctx.explicit_reply_sent = False
+                with worker_trace_observer.span(
+                    name="worker:bootstrap_turn",
+                    input={"message": _preview_text(config.prompt, limit=200)},
+                    metadata={
+                        "agent_id": ctx.agent_id,
+                        "team_name": ctx.team_name,
+                        "runner": config.runner,
+                    },
+                ) as span:
+                    initial_result = await runner.run_turn(config.prompt)
+                    span.update(
+                        output={"text": initial_result.text},
+                        metadata={
+                            "input_tokens": initial_result.input_tokens,
+                            "output_tokens": initial_result.output_tokens,
+                        },
+                    )
                 ctx.total_tokens += initial_result.input_tokens + initial_result.output_tokens
+                if (
+                    initial_result.text.strip()
+                    and not ctx.explicit_reply_sent
+                    and config.parent_session_id is not None
+                ):
+                    await _forward_turn_result(
+                        ctx=ctx,
+                        recipient=config.parent_session_id,
+                        text=initial_result.text,
+                        trace_observer=worker_trace_observer,
+                        correlation_id=None,
+                        reply_to=None,
+                        reason="bootstrap_final_text",
+                    )
+                ctx.explicit_reply_sent = False
 
             ctx.status = "idle"
             while not abort_controller.is_cancelled:
-                should_stop = await _drain_mailbox(mailbox, ctx)
+                should_stop = await _drain_mailbox(
+                    mailbox,
+                    ctx,
+                    trace_observer=worker_trace_observer,
+                )
                 if should_stop:
                     return
 
@@ -271,9 +388,48 @@ async def start_in_process_teammate(
                     continue
 
                 ctx.status = "running"
-                result = await runner.run_turn(queued.text)
-                ctx.total_tokens += result.input_tokens + result.output_tokens
-                ctx.status = "idle"
+                ctx.current_message_id = queued.message_id
+                ctx.current_correlation_id = queued.correlation_id or queued.message_id
+                ctx.current_message_sender = queued.from_agent
+                ctx.explicit_reply_sent = False
+                try:
+                    with worker_trace_observer.span(
+                        name="worker:process_message",
+                        input={"message": _preview_text(queued.text, limit=200)},
+                        metadata={
+                            "agent_id": ctx.agent_id,
+                            "team_name": ctx.team_name,
+                            "sender_agent_id": queued.from_agent,
+                            "message_id": queued.message_id,
+                            "correlation_id": queued.correlation_id,
+                            "reply_to": queued.reply_to,
+                        },
+                    ) as span:
+                        result = await runner.run_turn(queued.text)
+                        span.update(
+                            output={"text": result.text},
+                            metadata={
+                                "input_tokens": result.input_tokens,
+                                "output_tokens": result.output_tokens,
+                            },
+                        )
+                    ctx.total_tokens += result.input_tokens + result.output_tokens
+                    if result.text.strip() and not ctx.explicit_reply_sent:
+                        await _forward_turn_result(
+                            ctx=ctx,
+                            recipient=queued.from_agent,
+                            text=result.text,
+                            trace_observer=worker_trace_observer,
+                            correlation_id=queued.correlation_id or queued.message_id,
+                            reply_to=queued.message_id,
+                            reason="turn_final_text",
+                        )
+                finally:
+                    ctx.current_message_id = None
+                    ctx.current_correlation_id = None
+                    ctx.current_message_sender = None
+                    ctx.explicit_reply_sent = False
+                    ctx.status = "idle"
 
     except asyncio.CancelledError:
         logger.debug("[in_process] %s: task cancelled", agent_id)
@@ -306,6 +462,8 @@ async def start_in_process_teammate(
 async def _drain_mailbox(
     mailbox: TeammateMailbox,
     ctx: TeammateContext,
+    *,
+    trace_observer: TraceObserver | None = None,
 ) -> bool:
     """Read pending mailbox messages and handle shutdown / user messages.
 
@@ -316,6 +474,23 @@ async def _drain_mailbox(
         pending = await mailbox.read_all(unread_only=True)
     except Exception:
         pending = []
+
+    if pending and trace_observer is not None:
+        with trace_observer.span(
+            name="worker:mailbox_batch",
+            input={"messages": [_trace_mailbox_message(message) for message in pending]},
+            metadata={
+                "agent_id": ctx.agent_id,
+                "team_name": ctx.team_name,
+                "message_count": len(pending),
+            },
+        ) as span:
+            span.update(
+                metadata={
+                    "message_types": sorted({message.type for message in pending}),
+                    "sender_ids": sorted({message.sender for message in pending}),
+                }
+            )
 
     for msg in pending:
         try:
@@ -335,8 +510,12 @@ async def _drain_mailbox(
             teammate_msg = TeammateMessage(
                 text=content,
                 from_agent=msg.sender,
+                message_id=msg.id,
+                correlation_id=msg.correlation_id,
+                reply_to=msg.reply_to,
                 color=msg.payload.get("color") if isinstance(msg.payload, dict) else None,
                 timestamp=str(msg.timestamp),
+                summary=msg.summary,
             )
             await ctx.message_queue.put(teammate_msg)
 
@@ -522,8 +701,10 @@ class InProcessBackend:
 
         from openharness.swarm.mailbox import MailboxMessage
 
+        message_id = message.message_id or str(uuid.uuid4())
+        correlation_id = message.correlation_id or message_id
         msg = MailboxMessage(
-            id=str(uuid.uuid4()),
+            id=message_id,
             type="user_message",
             sender=message.from_agent,
             recipient=agent_id,
@@ -532,6 +713,9 @@ class InProcessBackend:
                 **({"color": message.color} if message.color else {}),
             },
             timestamp=message.timestamp and float(message.timestamp) or time.time(),
+            correlation_id=correlation_id,
+            reply_to=message.reply_to,
+            summary=message.summary or _preview_text(message.text),
         )
         mailbox = TeammateMailbox(team_name=team_name, agent_id=agent_name)
         await mailbox.write(msg)

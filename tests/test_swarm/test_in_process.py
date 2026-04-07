@@ -2,16 +2,20 @@
 
 from __future__ import annotations
 
+import asyncio
 from pathlib import Path
 
 import pytest
 
+from openharness.observability import NullTraceObserver
 from openharness.swarm.in_process import (
     InProcessBackend,
     TeammateContext,
     get_teammate_context,
     set_teammate_context,
 )
+from openharness.swarm.mailbox import TeammateMailbox
+from openharness.swarm.runner import TeammateTurnResult
 from openharness.swarm.types import TeammateMessage, TeammateSpawnConfig
 
 
@@ -137,7 +141,13 @@ async def test_send_message_writes_to_mailbox(backend, tmp_path, monkeypatch):
     )
     await backend.spawn(config)
 
-    msg = TeammateMessage(text="work on it", from_agent="leader")
+    msg = TeammateMessage(
+        text="work on it",
+        from_agent="leader",
+        message_id="msg-123",
+        correlation_id="corr-123",
+        reply_to="msg-parent",
+    )
     # Should not raise
     await backend.send_message("rcvr@myteam", msg)
 
@@ -146,6 +156,9 @@ async def test_send_message_writes_to_mailbox(backend, tmp_path, monkeypatch):
     mailbox = TeammateMailbox(team_name="myteam", agent_id="rcvr")
     messages = await mailbox.read_all(unread_only=False)
     assert any(m.payload.get("content") == "work on it" for m in messages)
+    assert any(m.id == "msg-123" for m in messages)
+    assert any(m.correlation_id == "corr-123" for m in messages)
+    assert any(m.reply_to == "msg-parent" for m in messages)
 
     await backend.shutdown("rcvr@myteam", force=True)
 
@@ -153,6 +166,76 @@ async def test_send_message_writes_to_mailbox(backend, tmp_path, monkeypatch):
 async def test_send_message_invalid_agent_id_raises(backend):
     with pytest.raises(ValueError, match="agentName@teamName"):
         await backend.send_message("no-at-sign", TeammateMessage(text="hi", from_agent="l"))
+
+
+class _FakeRunner:
+    def __init__(self, reply_text: str) -> None:
+        self.reply_text = reply_text
+        self.trace_observer = NullTraceObserver()
+
+    async def run_turn(self, message: str) -> TeammateTurnResult:
+        del message
+        return TeammateTurnResult(text=self.reply_text)
+
+    async def close(self) -> None:
+        return None
+
+
+async def test_worker_auto_forwards_final_text_when_no_explicit_reply(
+    backend,
+    tmp_path,
+    monkeypatch,
+):
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+
+    async def _fake_create_runner(config):
+        del config
+        return _FakeRunner("Repair complete.")
+
+    monkeypatch.setattr(
+        "openharness.swarm.in_process.create_teammate_runner",
+        _fake_create_runner,
+    )
+
+    config = TeammateSpawnConfig(
+        name="worker",
+        team="myteam",
+        prompt="",
+        cwd="/tmp",
+        parent_session_id="leader",
+    )
+    await backend.spawn(config)
+
+    await backend.send_message(
+        "worker@myteam",
+        TeammateMessage(
+            text="Please repair the bug.",
+            from_agent="leader",
+            message_id="msg-in",
+            correlation_id="corr-in",
+        ),
+    )
+
+    leader_mailbox = TeammateMailbox(team_name="myteam", agent_id="leader")
+    forwarded = None
+    for _ in range(20):
+        messages = await leader_mailbox.read_all(unread_only=False)
+        forwarded = next(
+            (message for message in messages if message.reply_to == "msg-in"),
+            None,
+        )
+        if forwarded is not None:
+            break
+        await asyncio.sleep(0.05)
+
+    assert forwarded is not None
+    assert forwarded.sender == "worker@myteam"
+    assert forwarded.payload["content"] == "Repair complete."
+    assert forwarded.payload["auto_forwarded"] is True
+    assert forwarded.correlation_id == "corr-in"
+    assert forwarded.reply_to == "msg-in"
+
+    await backend.shutdown("worker@myteam", force=True)
 
 
 # ---------------------------------------------------------------------------

@@ -126,6 +126,9 @@ class SubprocessBackend:
         payload = {
             "text": message.text,
             "from": message.from_agent,
+            "message_id": message.message_id,
+            "correlation_id": message.correlation_id,
+            "reply_to": message.reply_to,
             "timestamp": message.timestamp,
         }
         if message.color:

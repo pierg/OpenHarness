@@ -46,6 +46,9 @@ class MailboxMessage:
     payload: dict[str, Any]
     timestamp: float
     read: bool = False
+    correlation_id: str | None = None
+    reply_to: str | None = None
+    summary: str | None = None
 
     # ------------------------------------------------------------------
     # Serialization helpers
@@ -60,24 +63,43 @@ class MailboxMessage:
             "payload": self.payload,
             "timestamp": self.timestamp,
             "read": self.read,
+            "correlation_id": self.correlation_id,
+            "reply_to": self.reply_to,
+            "summary": self.summary,
         }
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "MailboxMessage":
+        payload = data.get("payload", {})
         return cls(
             id=data["id"],
             type=data["type"],
             sender=data["sender"],
             recipient=data["recipient"],
-            payload=data.get("payload", {}),
+            payload=payload,
             timestamp=data["timestamp"],
             read=data.get("read", False),
+            correlation_id=data.get("correlation_id") or payload.get("correlation_id"),
+            reply_to=data.get("reply_to") or payload.get("reply_to"),
+            summary=data.get("summary") or payload.get("summary"),
         )
 
 
 # ---------------------------------------------------------------------------
 # Directory helpers
 # ---------------------------------------------------------------------------
+
+
+def normalize_mailbox_owner(agent_id: str) -> str:
+    """Return the canonical mailbox owner name for *agent_id*.
+
+    Swarm APIs often refer to agents as ``name@team`` while mailbox storage is
+    keyed only by the per-team owner name. Accepting both forms at the mailbox
+    layer keeps producers and consumers aligned.
+    """
+    if "@" in agent_id:
+        return agent_id.split("@", 1)[0]
+    return agent_id
 
 
 def get_team_dir(team_name: str) -> Path:
@@ -89,7 +111,8 @@ def get_team_dir(team_name: str) -> Path:
 
 def get_agent_mailbox_dir(team_name: str, agent_id: str) -> Path:
     """Return ~/.openharness/teams/<team_name>/agents/<agent_id>/inbox/"""
-    inbox = get_team_dir(team_name) / "agents" / agent_id / "inbox"
+    mailbox_owner = normalize_mailbox_owner(agent_id)
+    inbox = get_team_dir(team_name) / "agents" / mailbox_owner / "inbox"
     inbox.mkdir(parents=True, exist_ok=True)
     return inbox
 
@@ -110,7 +133,7 @@ class TeammateMailbox:
 
     def __init__(self, team_name: str, agent_id: str) -> None:
         self.team_name = team_name
-        self.agent_id = agent_id
+        self.agent_id = normalize_mailbox_owner(agent_id)
 
     # ------------------------------------------------------------------
     # Public API
@@ -134,6 +157,10 @@ class TeammateMailbox:
         acquires an exclusive lock to prevent concurrent write conflicts.
         """
         inbox = self.get_mailbox_dir()
+        if msg.correlation_id is None:
+            msg.correlation_id = msg.id
+        if msg.summary is None:
+            msg.summary = _message_summary(msg)
         filename = f"{msg.timestamp:.6f}_{msg.id}.json"
         final_path = inbox / filename
         tmp_path = inbox / f"{filename}.tmp"
@@ -234,11 +261,34 @@ class TeammateMailbox:
 # ---------------------------------------------------------------------------
 
 
+def _preview_text(text: str, *, limit: int = 120) -> str:
+    rendered = " ".join(str(text).split())
+    if len(rendered) <= limit:
+        return rendered
+    return f"{rendered[: max(0, limit - 3)].rstrip()}..."
+
+
+def _message_summary(msg: MailboxMessage) -> str:
+    if msg.summary:
+        return msg.summary
+
+    for key in ("summary", "content", "text"):
+        value = msg.payload.get(key)
+        if value:
+            return _preview_text(str(value))
+
+    return _preview_text(str(msg.payload))
+
+
 def _make_message(
     msg_type: MessageType,
     sender: str,
     recipient: str,
     payload: dict[str, Any],
+    *,
+    correlation_id: str | None = None,
+    reply_to: str | None = None,
+    summary: str | None = None,
 ) -> MailboxMessage:
     return MailboxMessage(
         id=str(uuid.uuid4()),
@@ -247,12 +297,31 @@ def _make_message(
         recipient=recipient,
         payload=payload,
         timestamp=time.time(),
+        correlation_id=correlation_id,
+        reply_to=reply_to,
+        summary=summary,
     )
 
 
-def create_user_message(sender: str, recipient: str, content: str) -> MailboxMessage:
+def create_user_message(
+    sender: str,
+    recipient: str,
+    content: str,
+    *,
+    correlation_id: str | None = None,
+    reply_to: str | None = None,
+    summary: str | None = None,
+) -> MailboxMessage:
     """Create a plain text user message."""
-    return _make_message("user_message", sender, recipient, {"content": content})
+    return _make_message(
+        "user_message",
+        sender,
+        recipient,
+        {"content": content},
+        correlation_id=correlation_id,
+        reply_to=reply_to,
+        summary=summary or _preview_text(content),
+    )
 
 
 def create_shutdown_request(sender: str, recipient: str) -> MailboxMessage:
@@ -265,7 +334,11 @@ def create_idle_notification(
 ) -> MailboxMessage:
     """Create an idle-notification message with a brief summary."""
     return _make_message(
-        "idle_notification", sender, recipient, {"summary": summary}
+        "idle_notification",
+        sender,
+        recipient,
+        {"summary": summary},
+        summary=summary,
     )
 
 
@@ -517,6 +590,9 @@ async def write_to_mailbox(
             "timestamp": message.get("timestamp"),
         },
         timestamp=time.time(),
+        correlation_id=message.get("correlation_id"),
+        reply_to=message.get("reply_to"),
+        summary=message.get("summary") or _preview_text(text),
     )
     mailbox = TeammateMailbox(team, recipient_name)
     await mailbox.write(msg)

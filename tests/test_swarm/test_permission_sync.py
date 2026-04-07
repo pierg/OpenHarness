@@ -114,6 +114,20 @@ async def test_send_permission_response_writes_to_worker(tmp_path, monkeypatch):
     assert messages[0].payload["allowed"] is True
 
 
+async def test_send_permission_response_accepts_full_worker_id(tmp_path, monkeypatch):
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+    resp = SwarmPermissionResponse(request_id="r1", allowed=True, feedback=None)
+    await send_permission_response(resp, "myteam", "worker1@myteam", "leader")
+
+    from openharness.swarm.mailbox import TeammateMailbox
+
+    mailbox = TeammateMailbox("myteam", "worker1")
+    messages = await mailbox.read_all(unread_only=False)
+    assert len(messages) == 1
+    assert messages[0].recipient == "worker1@myteam"
+    assert messages[0].payload["allowed"] is True
+
+
 # ---------------------------------------------------------------------------
 # handle_permission_request
 # ---------------------------------------------------------------------------

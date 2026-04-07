@@ -27,6 +27,7 @@ class _FakeRegistry:
 
 async def test_send_message_uses_current_worker_identity_from_context(monkeypatch, tmp_path) -> None:
     executor = _FakeExecutor()
+    marks: list[str] = []
     monkeypatch.setattr(
         "openharness.tools.send_message_tool.get_backend_registry",
         lambda: _FakeRegistry(executor),
@@ -34,6 +35,14 @@ async def test_send_message_uses_current_worker_identity_from_context(monkeypatc
     monkeypatch.setattr(
         "openharness.tools.send_message_tool._resolve_sender_agent_id",
         lambda: "implementer@team-demo",
+    )
+    monkeypatch.setattr(
+        "openharness.tools.send_message_tool._resolve_active_thread",
+        lambda: ("msg-parent", "corr-parent"),
+    )
+    monkeypatch.setattr(
+        "openharness.tools.send_message_tool._mark_explicit_reply_sent",
+        lambda: marks.append("marked"),
     )
 
     tool = SendMessageTool()
@@ -45,6 +54,12 @@ async def test_send_message_uses_current_worker_identity_from_context(monkeypatc
     assert result.is_error is False
     assert executor.calls[0][0] == "leader@team-demo"
     assert executor.calls[0][1].from_agent == "implementer@team-demo"
+    assert executor.calls[0][1].reply_to == "msg-parent"
+    assert executor.calls[0][1].correlation_id == "corr-parent"
+    assert result.metadata["delivery_channel"] == "swarm"
+    assert result.metadata["reply_to"] == "msg-parent"
+    assert result.metadata["correlation_id"] == "corr-parent"
+    assert marks == ["marked"]
 
 
 def test_resolve_sender_defaults_to_coordinator(monkeypatch) -> None:

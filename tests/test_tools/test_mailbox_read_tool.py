@@ -12,7 +12,15 @@ from openharness.tools.mailbox_read_tool import MailboxReadTool, MailboxReadTool
 async def test_mailbox_read_reads_and_marks_messages(tmp_path, monkeypatch) -> None:
     monkeypatch.setattr(Path, "home", lambda: tmp_path)
     mailbox = TeammateMailbox(team_name="team-x", agent_id="leader")
-    await mailbox.write(create_user_message("worker", "leader", "done"))
+    await mailbox.write(
+        create_user_message(
+            "worker",
+            "leader",
+            "done",
+            correlation_id="corr-1",
+            reply_to="msg-0",
+        )
+    )
 
     tool = MailboxReadTool()
     result = await tool.execute(
@@ -21,6 +29,10 @@ async def test_mailbox_read_reads_and_marks_messages(tmp_path, monkeypatch) -> N
     )
 
     assert '"content": "done"' in result.output
+    assert '"correlation_id": "corr-1"' in result.output
+    assert result.metadata["mailbox_owner"] == "leader@team-x"
+    assert result.metadata["message_count"] == 1
+    assert result.metadata["correlation_ids"] == ["corr-1"]
     unread = await mailbox.read_all(unread_only=True)
     assert unread == []
 

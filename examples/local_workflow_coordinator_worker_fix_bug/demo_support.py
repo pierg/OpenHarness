@@ -1,4 +1,4 @@
-"""Shared setup helpers for the coordinator/worker workflow demos."""
+"""Shared setup helpers for the coordinator/worker swarm demo."""
 
 from __future__ import annotations
 
@@ -35,7 +35,6 @@ def seed_workspace(
     workspace_dir: Path,
     *,
     model: str,
-    include_workflow_yaml: bool,
 ) -> None:
     """Create the demo workspace and copy the example configs into it."""
     (workspace_dir / "sum_evens.py").write_text(BUGGY_CODE, encoding="utf-8")
@@ -43,11 +42,6 @@ def seed_workspace(
     target_oh_dir = workspace_dir / ".openharness"
     target_oh_dir.mkdir(parents=True, exist_ok=True)
     shutil.copytree(SOURCE_OH_DIR / "agent_configs", target_oh_dir / "agent_configs")
-    if include_workflow_yaml:
-        shutil.copytree(
-            SOURCE_OH_DIR / "workflow_configs",
-            target_oh_dir / "workflow_configs",
-        )
 
     for path in target_oh_dir.rglob("*.yaml"):
         text = path.read_text(encoding="utf-8")
@@ -71,7 +65,8 @@ def format_result_lines(
     *,
     passed: bool,
 ) -> tuple[str, ...]:
-    """Return concise log lines for one workflow run."""
+    """Return concise log lines for one coordinator/worker run."""
+
     def _message_text(message: Any) -> str:
         text = getattr(message, "text", None)
         if text is not None:

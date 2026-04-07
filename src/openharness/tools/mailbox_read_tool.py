@@ -11,6 +11,13 @@ from openharness.swarm.mailbox import TeammateMailbox
 from openharness.tools.base import BaseTool, ToolExecutionContext, ToolResult
 
 
+def _preview_text(text: str, *, limit: int = 120) -> str:
+    rendered = " ".join(str(text).split())
+    if len(rendered) <= limit:
+        return rendered
+    return f"{rendered[: max(0, limit - 3)].rstrip()}..."
+
+
 class MailboxReadToolInput(BaseModel):
     """Arguments for reading a mailbox."""
 
@@ -59,11 +66,33 @@ class MailboxReadTool(BaseTool):
                 "recipient": message.recipient,
                 "timestamp": message.timestamp,
                 "read": message.read,
+                "correlation_id": message.correlation_id,
+                "reply_to": message.reply_to,
+                "summary": message.summary,
                 "payload": message.payload,
             }
             for message in selected
         ]
-        return ToolResult(output=json.dumps(payload, indent=2, sort_keys=True))
+        return ToolResult(
+            output=json.dumps(payload, indent=2, sort_keys=True),
+            metadata={
+                "mailbox_owner": f"{mailbox_name}@{team_name}",
+                "message_count": len(selected),
+                "message_ids": [message.id for message in selected],
+                "message_types": sorted({message.type for message in selected}),
+                "sender_ids": sorted({message.sender for message in selected}),
+                "correlation_ids": [
+                    message.correlation_id
+                    for message in selected
+                    if message.correlation_id is not None
+                ],
+                "summaries": [
+                    message.summary
+                    or _preview_text(message.payload.get("content") or message.payload.get("text") or "")
+                    for message in selected
+                ],
+            },
+        )
 
     def _resolve_mailbox(self, agent_id: str, team: str | None) -> tuple[str, str]:
         if "@" in agent_id:

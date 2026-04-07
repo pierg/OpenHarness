@@ -33,6 +33,10 @@ class TeammateTurnResult:
 class SupportsTeammateTurns(Protocol):
     """A stateful teammate runner."""
 
+    @property
+    def trace_observer(self) -> TraceObserver:
+        """Return the runner's trace observer."""
+
     async def run_turn(self, message: str) -> TeammateTurnResult:
         """Execute one inbound message and return the result."""
 
@@ -106,6 +110,10 @@ class PromptNativeTeammateRunner:
         self._trace_observer = trace_observer
         self._initial_prompt_pending = True
 
+    @property
+    def trace_observer(self) -> TraceObserver:
+        return self._trace_observer
+
     @classmethod
     async def create(cls, config: TeammateSpawnConfig) -> "PromptNativeTeammateRunner":
         allowed_tools = config.allowed_tools
@@ -146,47 +154,34 @@ class PromptNativeTeammateRunner:
             consume=self._initial_prompt_pending,
         )
         self._initial_prompt_pending = False
-        with self._trace_observer.span(
-            name="turn",
-            input={"message": turn_message},
-            metadata={"team": self._config.team, "teammate_name": self._config.name},
-        ) as turn_span:
-            before = self._bundle.engine.total_usage
-            before_total = _usage_total(before)
-            self._bundle.engine.set_system_prompt(
-                _resolve_system_prompt(self._bundle, self._config, turn_message)
-            )
+        before = self._bundle.engine.total_usage
+        before_total = _usage_total(before)
+        self._bundle.engine.set_system_prompt(
+            _resolve_system_prompt(self._bundle, self._config, turn_message)
+        )
 
-            collected = ""
-            final_text = ""
-            async for event in self._bundle.engine.submit_message(turn_message):
-                if isinstance(event, AssistantTextDelta):
-                    collected += event.text
-                elif isinstance(event, AssistantTurnComplete):
-                    final_text = event.message.text.strip()
+        collected = ""
+        final_text = ""
+        async for event in self._bundle.engine.submit_message(turn_message):
+            if isinstance(event, AssistantTextDelta):
+                collected += event.text
+            elif isinstance(event, AssistantTurnComplete):
+                final_text = event.message.text.strip()
 
-            after = self._bundle.engine.total_usage
-            delta_total = max(0, _usage_total(after) - before_total)
-            delta_input = max(
-                0, int(getattr(after, "input_tokens", 0)) - int(getattr(before, "input_tokens", 0))
-            )
-            delta_output = max(
-                0,
-                int(getattr(after, "output_tokens", 0)) - int(getattr(before, "output_tokens", 0)),
-            )
-            result = TeammateTurnResult(
-                text=final_text or collected.strip(),
-                input_tokens=delta_input,
-                output_tokens=delta_output or max(0, delta_total - delta_input),
-            )
-            turn_span.update(
-                output={"text": result.text},
-                metadata={
-                    "input_tokens": result.input_tokens,
-                    "output_tokens": result.output_tokens,
-                },
-            )
-            return result
+        after = self._bundle.engine.total_usage
+        delta_total = max(0, _usage_total(after) - before_total)
+        delta_input = max(
+            0, int(getattr(after, "input_tokens", 0)) - int(getattr(before, "input_tokens", 0))
+        )
+        delta_output = max(
+            0,
+            int(getattr(after, "output_tokens", 0)) - int(getattr(before, "output_tokens", 0)),
+        )
+        return TeammateTurnResult(
+            text=final_text or collected.strip(),
+            input_tokens=delta_input,
+            output_tokens=delta_output or max(0, delta_total - delta_input),
+        )
 
     async def close(self) -> None:
         try:
@@ -229,6 +224,10 @@ class YamlWorkflowTeammateRunner:
         self._initial_prompt_pending = True
         self._history: list[dict[str, str]] = []
 
+    @property
+    def trace_observer(self) -> TraceObserver:
+        return self._trace_observer
+
     async def run_turn(self, message: str) -> TeammateTurnResult:
         turn_message = _combine_initial_prompt(
             self._config,
@@ -236,44 +235,27 @@ class YamlWorkflowTeammateRunner:
             consume=self._initial_prompt_pending,
         )
         self._initial_prompt_pending = False
-        with self._trace_observer.span(
-            name="turn",
-            input={"message": turn_message},
-            metadata={
-                "team": self._config.team,
+        task = TaskDefinition(
+            instruction=turn_message,
+            payload={
+                **self._config.task_payload,
+                "history": list(self._history),
                 "teammate_name": self._config.name,
-                "agent_config_name": self._agent_name,
+                "team_name": self._config.team,
             },
-        ) as turn_span:
-            task = TaskDefinition(
-                instruction=turn_message,
-                payload={
-                    **self._config.task_payload,
-                    "history": list(self._history),
-                    "teammate_name": self._config.name,
-                    "team_name": self._config.team,
-                },
-            )
-            result = await self._workflow.run(
-                task,
-                agent_name=self._agent_name,
-                trace_observer=self._trace_observer,
-            )
-            final_text = result.agent_result.final_text
-            self._history.append({"input": turn_message, "output": final_text})
-            teammate_result = TeammateTurnResult(
-                text=final_text,
-                input_tokens=result.agent_result.input_tokens,
-                output_tokens=result.agent_result.output_tokens,
-            )
-            turn_span.update(
-                output={"text": teammate_result.text},
-                metadata={
-                    "input_tokens": teammate_result.input_tokens,
-                    "output_tokens": teammate_result.output_tokens,
-                },
-            )
-            return teammate_result
+        )
+        result = await self._workflow.run(
+            task,
+            agent_name=self._agent_name,
+            trace_observer=self._trace_observer,
+        )
+        final_text = result.agent_result.final_text
+        self._history.append({"input": turn_message, "output": final_text})
+        return TeammateTurnResult(
+            text=final_text,
+            input_tokens=result.agent_result.input_tokens,
+            output_tokens=result.agent_result.output_tokens,
+        )
 
     async def close(self) -> None:
         self._trace_observer.end_session(

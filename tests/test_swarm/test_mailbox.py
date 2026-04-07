@@ -13,6 +13,7 @@ from openharness.swarm.mailbox import (
     create_idle_notification,
     create_shutdown_request,
     create_user_message,
+    normalize_mailbox_owner,
 )
 
 
@@ -54,6 +55,9 @@ def test_mailbox_message_round_trip():
     assert msg2.sender == msg.sender
     assert msg2.payload == msg.payload
     assert msg2.read is False
+    assert msg2.correlation_id is None
+    assert msg2.reply_to is None
+    assert msg2.summary is None
 
 
 def test_mailbox_message_from_dict_defaults_read_false():
@@ -69,6 +73,11 @@ def test_mailbox_message_from_dict_defaults_read_false():
     assert msg.read is False
 
 
+def test_normalize_mailbox_owner_accepts_full_agent_id():
+    assert normalize_mailbox_owner("worker1@test-team") == "worker1"
+    assert normalize_mailbox_owner("worker1") == "worker1"
+
+
 # ---------------------------------------------------------------------------
 # TeammateMailbox write / read_all
 # ---------------------------------------------------------------------------
@@ -80,6 +89,20 @@ async def test_write_and_read_all(mailbox):
     messages = await mailbox.read_all(unread_only=False)
     assert len(messages) == 1
     assert messages[0].id == "msg-001"
+    assert messages[0].correlation_id == "msg-001"
+    assert messages[0].summary == "hello"
+
+
+async def test_full_agent_id_and_bare_name_share_same_mailbox(tmp_path, monkeypatch):
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+    full_mailbox = TeammateMailbox(team_name="test-team", agent_id="worker1@test-team")
+    bare_mailbox = TeammateMailbox(team_name="test-team", agent_id="worker1")
+
+    await full_mailbox.write(_make_msg(recipient="worker1@test-team"))
+
+    messages = await bare_mailbox.read_all(unread_only=False)
+    assert len(messages) == 1
+    assert messages[0].recipient == "worker1@test-team"
 
 
 async def test_read_all_unread_only_filters(mailbox):
@@ -176,11 +199,20 @@ async def test_clear_on_empty_mailbox_is_noop(mailbox):
 
 
 def test_create_user_message():
-    msg = create_user_message("leader", "worker1", "do stuff")
+    msg = create_user_message(
+        "leader",
+        "worker1",
+        "do stuff",
+        correlation_id="corr-1",
+        reply_to="msg-0",
+    )
     assert msg.type == "user_message"
     assert msg.sender == "leader"
     assert msg.recipient == "worker1"
     assert msg.payload["content"] == "do stuff"
+    assert msg.correlation_id == "corr-1"
+    assert msg.reply_to == "msg-0"
+    assert msg.summary == "do stuff"
     assert msg.id  # has a UUID
 
 

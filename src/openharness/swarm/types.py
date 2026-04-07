@@ -371,6 +371,9 @@ class TeammateMessage:
 
     text: str
     from_agent: str
+    message_id: str | None = None
+    correlation_id: str | None = None
+    reply_to: str | None = None
     color: str | None = None
     timestamp: str | None = None
     summary: str | None = None

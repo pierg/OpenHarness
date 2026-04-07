@@ -76,6 +76,9 @@ def test_teammate_message_required():
     msg = TeammateMessage(text="hello", from_agent="leader")
     assert msg.text == "hello"
     assert msg.from_agent == "leader"
+    assert msg.message_id is None
+    assert msg.correlation_id is None
+    assert msg.reply_to is None
     assert msg.color is None
     assert msg.timestamp is None
     assert msg.summary is None
@@ -85,10 +88,16 @@ def test_teammate_message_full():
     msg = TeammateMessage(
         text="do this",
         from_agent="boss",
+        message_id="msg-123",
+        correlation_id="corr-123",
+        reply_to="msg-001",
         color="green",
         timestamp="2026-01-01T00:00:00",
         summary="a task",
     )
+    assert msg.message_id == "msg-123"
+    assert msg.correlation_id == "corr-123"
+    assert msg.reply_to == "msg-001"
     assert msg.color == "green"
     assert msg.summary == "a task"
 
