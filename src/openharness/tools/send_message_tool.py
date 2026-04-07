@@ -23,8 +23,13 @@ def _preview_text(text: str, *, limit: int = 120) -> str:
     return f"{rendered[: max(0, limit - 3)].rstrip()}..."
 
 
-def _resolve_sender_agent_id() -> str:
-    """Prefer the current worker identity when available."""
+def _resolve_sender_agent_id() -> str | None:
+    """Prefer the current worker identity when available.
+    
+    If no explicit agent ID is set via environment variable (CLAUDE_CODE_AGENT_ID),
+    and no teammate context exists (e.g. running inline), return None to allow
+    callers to define the sender identity themselves.
+    """
     agent_id = os.environ.get("CLAUDE_CODE_AGENT_ID")
     if agent_id:
         return agent_id
@@ -32,11 +37,11 @@ def _resolve_sender_agent_id() -> str:
     try:
         from openharness.swarm.in_process import get_teammate_context  # noqa: PLC0415
     except ImportError:
-        return "coordinator"
+        return None
 
     context = get_teammate_context()
     if context is None:
-        return "coordinator"
+        return None
     return context.agent_id
 
 
@@ -82,7 +87,7 @@ class SendMessageTool(BaseTool):
 
     async def execute(self, arguments: SendMessageToolInput, context: ToolExecutionContext) -> ToolResult:
         del context
-        sender_agent_id = _resolve_sender_agent_id()
+        sender_agent_id = _resolve_sender_agent_id() or "coordinator"
         reply_to, inherited_correlation_id = _resolve_active_thread()
         message_id = uuid4().hex
         correlation_id = inherited_correlation_id or message_id

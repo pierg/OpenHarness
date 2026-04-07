@@ -141,12 +141,19 @@ class TeamOrchestrator:
                 observed.extend(new_messages)
                 seen_message_ids.update(msg.id for msg in new_messages)
                 for message in new_messages:
-                    role_name = self._role_for_sender(message.sender)
-                    if role_name in pending:
+                    if message.sender == "leader":
+                        role_name = "leader"
+                    else:
+                        role_name = self._role_for_sender(message.sender)
+                        
+                    if role_name and role_name in pending:
                         pending.remove(role_name)
+                    # Support legacy agent_id match as fallback
+                    elif message.sender in pending:
+                        pending.remove(message.sender)
                 if not pending:
                     break
-
+            
             if time.monotonic() >= deadline:
                 raise TimeoutError(
                     f"Timed out waiting for worker updates from {', '.join(sorted(pending))}"
@@ -159,26 +166,64 @@ class TeamOrchestrator:
         """Read all messages from the leader mailbox."""
         return await self.leader_mailbox.read_all(unread_only=unread_only)
 
+    async def read_all_mailboxes(self) -> list[MailboxMessage]:
+        """Read all messages from all mailboxes in the team, sorted by timestamp."""
+        all_messages: list[MailboxMessage] = []
+        
+        # Read the leader's mailbox
+        all_messages.extend(await self.leader_mailbox.read_all(unread_only=False))
+        
+        # Read all workers' mailboxes
+        for agent_id in self.workers.values():
+            from openharness.swarm.mailbox import TeammateMailbox
+            worker_mailbox = TeammateMailbox(self.team_name, agent_id)
+            all_messages.extend(await worker_mailbox.read_all(unread_only=False))
+            
+        all_messages.sort(key=lambda m: m.timestamp)
+        return all_messages
+
     async def run_inline(
         self,
         agent_def: AgentDefinition,
         instruction: str,
         payload: dict[str, Any] | None = None,
         api_client: Any | None = None,
+        *,
+        identity: str = "coordinator",
     ) -> Any:
-        """Execute a coordinator or single-run agent inline within the team environment."""
-        workspace = LocalWorkspace(self.workspace_dir)
-        factory = AgentFactory.with_catalog_configs(self.workspace_dir)
-        workflow = AgentWorkflow(workspace, agent_factory=factory)
-        return await workflow.run(
-            TaskDefinition(
-                instruction=instruction,
-                payload=payload or {},
-            ),
-            agent_name=agent_def.agent_config_name or agent_def.name,
-            api_client=api_client,
-            trace_observer=self.trace_observer,
-        )
+        """Execute a coordinator or single-run agent inline within the team environment.
+        
+        Args:
+            agent_def: The definition of the agent to execute inline.
+            instruction: The initial query/prompt to start the agent with.
+            payload: Optional variables rendered into the prompt payload.
+            api_client: Optional API client override.
+            identity: The identity string this inline agent will use when sending 
+                      mailbox messages. Defaults to `"coordinator"`. You must set this
+                      if your workers expect a different sender name (e.g., `"leader"`).
+        """
+        import os
+        previous_identity = os.environ.get("CLAUDE_CODE_AGENT_ID")
+        os.environ["CLAUDE_CODE_AGENT_ID"] = identity
+        
+        try:
+            workspace = LocalWorkspace(self.workspace_dir)
+            factory = AgentFactory.with_catalog_configs(self.workspace_dir)
+            workflow = AgentWorkflow(workspace, agent_factory=factory)
+            return await workflow.run(
+                TaskDefinition(
+                    instruction=instruction,
+                    payload=payload or {},
+                ),
+                agent_name=agent_def.agent_config_name or agent_def.name,
+                api_client=api_client,
+                trace_observer=self.trace_observer,
+            )
+        finally:
+            if previous_identity is not None:
+                os.environ["CLAUDE_CODE_AGENT_ID"] = previous_identity
+            else:
+                os.environ.pop("CLAUDE_CODE_AGENT_ID", None)
 
     async def shutdown_all(self) -> None:
         """Explicitly shut down all spawned workers in the team."""

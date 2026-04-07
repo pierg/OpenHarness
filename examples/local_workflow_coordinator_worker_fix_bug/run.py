@@ -139,10 +139,11 @@ async def main() -> None:
                     instruction=INSTRUCTION,
                     payload={"workflow_context": common_context},
                     api_client=api_client,
+                    identity="leader",
                 )
 
                 passed = script_prints_twelve(workspace_dir)
-                mailbox_messages = await team.read_mailbox(unread_only=False)
+                mailbox_messages = await team.read_all_mailboxes()
         except Exception as exc:
             trace_observer.end_session(
                 output={"error": str(exc)},
