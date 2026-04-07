@@ -24,21 +24,12 @@ def _preview_text(text: str, *, limit: int = 120) -> str:
 
 
 def _resolve_sender_agent_id() -> str | None:
-    """Prefer the current worker identity when available.
-    
-    If no explicit agent ID is set via environment variable (CLAUDE_CODE_AGENT_ID),
-    and no teammate context exists (e.g. running inline), return None to allow
-    callers to define the sender identity themselves.
-    """
+    """Return the current worker identity from the teammate context."""
     from openharness.swarm.in_process import get_teammate_context
     
     context = get_teammate_context()
     if context is not None:
         return context.agent_id
-
-    agent_id = os.environ.get("CLAUDE_CODE_AGENT_ID")
-    if agent_id:
-        return agent_id
 
     return None
 
