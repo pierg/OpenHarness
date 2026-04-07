@@ -130,10 +130,7 @@ class SendMessageTool(BaseTool):
         try:
             executor = registry.get_executor("in_process")
         except KeyError:
-            try:
-                executor = registry.get_executor("subprocess")
-            except KeyError:
-                executor = registry.get_executor()
+            executor = registry.get_executor("subprocess")
 
         teammate_msg = TeammateMessage(
             text=message,
