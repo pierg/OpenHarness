@@ -34,11 +34,8 @@ def _resolve_sender_agent_id() -> str | None:
     if agent_id:
         return agent_id
 
-    try:
-        from openharness.swarm.in_process import get_teammate_context  # noqa: PLC0415
-    except ImportError:
-        return None
-
+    from openharness.swarm.in_process import get_teammate_context
+    
     context = get_teammate_context()
     if context is None:
         return None
@@ -47,11 +44,8 @@ def _resolve_sender_agent_id() -> str | None:
 
 def _resolve_active_thread() -> tuple[str | None, str | None]:
     """Return ``(reply_to, correlation_id)`` for the current worker turn."""
-    try:
-        from openharness.swarm.in_process import get_teammate_context  # noqa: PLC0415
-    except ImportError:
-        return None, None
-
+    from openharness.swarm.in_process import get_teammate_context
+    
     context = get_teammate_context()
     if context is None:
         return None, None
@@ -60,11 +54,8 @@ def _resolve_active_thread() -> tuple[str | None, str | None]:
 
 def _mark_explicit_reply_sent() -> None:
     """Mark the current in-process teammate turn as explicitly replied."""
-    try:
-        from openharness.swarm.in_process import get_teammate_context  # noqa: PLC0415
-    except ImportError:
-        return
-
+    from openharness.swarm.in_process import get_teammate_context
+    
     context = get_teammate_context()
     if context is None:
         return
@@ -87,7 +78,13 @@ class SendMessageTool(BaseTool):
 
     async def execute(self, arguments: SendMessageToolInput, context: ToolExecutionContext) -> ToolResult:
         del context
-        sender_agent_id = _resolve_sender_agent_id() or "coordinator"
+        sender_agent_id = _resolve_sender_agent_id()
+        if not sender_agent_id:
+            raise RuntimeError(
+                "Cannot resolve sender agent ID. CLAUDE_CODE_AGENT_ID environment "
+                "variable is missing and no teammate context is active."
+            )
+
         reply_to, inherited_correlation_id = _resolve_active_thread()
         message_id = uuid4().hex
         correlation_id = inherited_correlation_id or message_id

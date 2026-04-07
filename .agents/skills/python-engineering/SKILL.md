@@ -56,8 +56,9 @@ except Exception:
 2. **Catch the narrowest possible type.** `except ValueError`, `except OSError`, never bare `except Exception` unless you re-raise or it's a documented SDK boundary.
 3. **Never nest try/except.** One level per function. Extract inner logic to a helper if you need more.
 4. **`try/finally` is fine; `try/except/pass` is not.** Cleanup in `finally` always propagates the exception.
-5. **`ImportError` is the only valid broad-ish catch** — and only for optional dependencies at the import site.
-6. **Optional/background subsystems** (tracing, telemetry) may silently degrade on network errors, but must use `exc_info=True` so the traceback is logged:
+5. **`ImportError` is the only valid broad-ish catch** — and ONLY for optional *external* dependencies at the import site. **Never** catch `ImportError` for internal modules within the same project. If there is a circular dependency, fix it or use a local import without a `try/except` block. Fallbacks that hide internal import failures mask architectural issues.
+6. **No silent fallbacks or default values that hide errors.** If a required context, variable, or configuration is missing, fail fast. Do not fall back to generic strings like `"default"` or `"coordinator"` which can cause subtle bugs later.
+7. **Optional/background subsystems** (tracing, telemetry) may silently degrade on network errors, but must use `exc_info=True` so the traceback is logged:
    ```python
    try:
        client.auth_check()
@@ -65,8 +66,8 @@ except Exception:
        log.warning("Auth check failed, tracing disabled: %s", exc, exc_info=True)
        return NullTraceObserver()
    ```
-7. **Config errors must propagate.** A bad `LANGFUSE_SAMPLE_RATE`, a missing env var, a malformed URL — these are user mistakes. Let them crash with a clear message rather than silently defaulting.
-8. **Never re-raise with `raise exc from exc`** — use `raise ... from exc` (original) or `raise` (bare, inside except).
+8. **Config errors must propagate.** A bad `LANGFUSE_SAMPLE_RATE`, a missing env var, a malformed URL — these are user mistakes. Let them crash with a clear message rather than silently defaulting.
+9. **Never re-raise with `raise exc from exc`** — use `raise ... from exc` (original) or `raise` (bare, inside except).
 
 ## Error translation
 

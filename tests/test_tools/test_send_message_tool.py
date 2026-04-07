@@ -62,6 +62,6 @@ async def test_send_message_uses_current_worker_identity_from_context(monkeypatc
     assert marks == ["marked"]
 
 
-def test_resolve_sender_defaults_to_coordinator(monkeypatch) -> None:
+def test_resolve_sender_defaults_to_none(monkeypatch) -> None:
     monkeypatch.delenv("CLAUDE_CODE_AGENT_ID", raising=False)
-    assert _resolve_sender_agent_id() == "coordinator"
+    assert _resolve_sender_agent_id() is None
