@@ -134,6 +134,7 @@ async def test_run_inline_uses_shared_trace_observer(tmp_path: Path, monkeypatch
     result = await orchestrator.run_inline(
         agent_def=_agent_definition(),
         instruction="Fix the bug",
+        identity="coordinator@team-demo",
         payload={"workflow_context": {"role": "coordinator"}},
     )
 

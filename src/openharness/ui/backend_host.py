@@ -33,6 +33,8 @@ from openharness.services.session_backend import SessionBackend
 
 log = logging.getLogger(__name__)
 
+log = logging.getLogger(__name__)
+
 _PROTOCOL_PREFIX = "OHJSON:"
 
 
@@ -103,13 +105,7 @@ class ReactBackendHost:
                 if request.type == "shutdown":
                     await self._emit(BackendEvent(type="shutdown"))
                     break
-                if request.type == "permission_response":
-                    if request.request_id in self._permission_requests:
-                        self._permission_requests[request.request_id].set_result(bool(request.allowed))
-                    continue
-                if request.type == "question_response":
-                    if request.request_id in self._question_requests:
-                        self._question_requests[request.request_id].set_result(request.answer or "")
+                if request.type in ("permission_response", "question_response"):
                     continue
                 if request.type == "list_sessions":
                     await self._handle_list_sessions()
@@ -171,6 +167,16 @@ class ReactBackendHost:
                 request = FrontendRequest.model_validate_json(payload)
             except Exception as exc:  # pragma: no cover - defensive protocol handling
                 await self._emit(BackendEvent(type="error", message=f"Invalid request: {exc}"))
+                continue
+            if request.type == "permission_response" and request.request_id in self._permission_requests:
+                future = self._permission_requests[request.request_id]
+                if not future.done():
+                    future.set_result(bool(request.allowed))
+                continue
+            if request.type == "question_response" and request.request_id in self._question_requests:
+                future = self._question_requests[request.request_id]
+                if not future.done():
+                    future.set_result(request.answer or "")
                 continue
             await self._request_queue.put(request)
 
@@ -685,6 +691,7 @@ class ReactBackendHost:
             self._question_requests.pop(request_id, None)
 
     async def _emit(self, event: BackendEvent) -> None:
+        log.debug("emit event: type=%s tool=%s", event.type, getattr(event, "tool_name", None))
         async with self._write_lock:
             payload = _PROTOCOL_PREFIX + event.model_dump_json() + "\n"
             buffer = getattr(sys.stdout, "buffer", None)

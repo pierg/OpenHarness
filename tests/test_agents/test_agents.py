@@ -333,7 +333,7 @@ async def test_simple_agent_emits_trace_stages(tmp_path: Path):
     assert ("tool", "tool:write_file") in trace_observer.closed
 
 
-def test_trace_model_input_uses_latest_message_only():
+def test_trace_model_input_renders_structured_history():
     messages = [
         ConversationMessage.from_user_text("Original task"),
         ConversationMessage(role="assistant", content=[TextBlock(text="I will inspect the file.")]),
@@ -342,10 +342,15 @@ def test_trace_model_input_uses_latest_message_only():
 
     rendered = _trace_model_input("System prompt", messages)
 
-    assert rendered == "User\nMailbox follow-up"
+    assert rendered == [
+        {"role": "system", "content": "System prompt"},
+        {"role": "user", "content": "Original task"},
+        {"role": "assistant", "content": "I will inspect the file."},
+        {"role": "user", "content": "Mailbox follow-up"},
+    ]
 
 
-def test_trace_model_input_labels_tool_results_as_tool_messages():
+def test_trace_model_input_renders_tool_results_as_tool_messages():
     messages = [
         ConversationMessage.from_user_text("Fix bug"),
         ConversationMessage(
@@ -360,13 +365,29 @@ def test_trace_model_input_labels_tool_results_as_tool_messages():
 
     rendered = _trace_model_input("", messages)
 
-    assert rendered == "Tool result: read_file\ndef main(): pass"
+    assert rendered == [
+        {"role": "user", "content": "Fix bug"},
+        {
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [{"name": "read_file", "arguments": {"path": "main.py"}}],
+        },
+        {
+            "role": "tool",
+            "name": "read_file",
+            "content": "def main(): pass",
+            "is_error": False,
+        },
+    ]
 
 
-def test_trace_model_output_summarizes_tool_calls():
+def test_trace_model_output_renders_structured_tool_calls():
     message = ConversationMessage(
         role="assistant",
         content=[ToolUseBlock(id="tool-1", name="bash", input={"command": "pytest -q"})],
     )
 
-    assert _trace_model_output(message) == 'Requested tools:\n- bash(command=pytest -q)'
+    assert _trace_model_output(message) == {
+        "content": "",
+        "tool_calls": [{"name": "bash", "arguments": {"command": "pytest -q"}}],
+    }

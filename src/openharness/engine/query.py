@@ -12,6 +12,8 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, AsyncIterator, Awaitable, Callable
@@ -39,6 +41,8 @@ from openharness.observability import NullTraceObserver, TraceObserver
 from openharness.permissions.checker import PermissionChecker
 from openharness.tools.base import ToolExecutionContext
 from openharness.tools.base import ToolRegistry
+
+log = logging.getLogger(__name__)
 
 
 PermissionPrompt = Callable[[str, str], Awaitable[bool]]
@@ -322,6 +326,7 @@ async def _execute_tool_call(
                 {"tool_name": tool_name, "tool_input": tool_input, "event": HookEvent.PRE_TOOL_USE.value},
             )
             if pre_hooks.blocked:
+                log.debug("tool call blocked by hook: %s", tool_name)
                 tool_handle.update(
                     output=pre_hooks.reason,
                     metadata={"blocked_by_hook": True},
@@ -334,6 +339,7 @@ async def _execute_tool_call(
 
         tool = context.tool_registry.get(tool_name)
         if tool is None:
+            log.warning("unknown tool: %s", tool_name)
             tool_handle.update(
                 output=f"Unknown tool: {tool_name}",
                 metadata={"is_error": True},
@@ -347,6 +353,7 @@ async def _execute_tool_call(
         try:
             parsed_input = tool.input_model.model_validate(tool_input)
         except Exception as exc:
+            log.warning("invalid input for %s: %s", tool_name, exc)
             tool_handle.update(
                 output=f"Invalid input for {tool_name}: {exc}",
                 metadata={"is_error": True},
@@ -357,12 +364,18 @@ async def _execute_tool_call(
                 is_error=True,
             )
 
-        _file_path = str(tool_input.get("path") or tool_input.get("file_path") or "") or None
-        _command = str(tool_input.get("command", "")) or None
+        log.debug("tool_call start: %s id=%s", tool_name, tool_use_id)
         # Normalize common tool inputs before permission checks so path rules apply
         # consistently across built-in tools that use either `file_path` or `path`.
-        _file_path = _resolve_permission_file_path(context.cwd, tool_input, parsed_input) or _file_path
-        _command = _extract_permission_command(tool_input, parsed_input) or _command
+        _file_path = _resolve_permission_file_path(context.cwd, tool_input, parsed_input)
+        _command = _extract_permission_command(tool_input, parsed_input)
+        log.debug(
+            "permission check: %s read_only=%s path=%s cmd=%s",
+            tool_name,
+            tool.is_read_only(parsed_input),
+            _file_path,
+            _command and _command[:80],
+        )
         decision = context.permission_checker.evaluate(
             tool_name,
             is_read_only=tool.is_read_only(parsed_input),
@@ -371,8 +384,10 @@ async def _execute_tool_call(
         )
         if not decision.allowed:
             if decision.requires_confirmation and context.permission_prompt is not None:
+                log.debug("permission prompt for %s: %s", tool_name, decision.reason)
                 confirmed = await context.permission_prompt(tool_name, decision.reason)
                 if not confirmed:
+                    log.debug("permission denied by user for %s", tool_name)
                     tool_handle.update(
                         output=f"Permission denied for {tool_name}",
                         metadata={"is_error": True, "permission_reason": decision.reason},
@@ -383,6 +398,7 @@ async def _execute_tool_call(
                         is_error=True,
                     )
             else:
+                log.debug("permission blocked for %s: %s", tool_name, decision.reason)
                 tool_handle.update(
                     output=decision.reason or f"Permission denied for {tool_name}",
                     metadata={"is_error": True, "permission_reason": decision.reason},
@@ -393,6 +409,8 @@ async def _execute_tool_call(
                     is_error=True,
                 )
 
+        log.debug("executing %s ...", tool_name)
+        t0 = time.monotonic()
         result = await tool.execute(
             parsed_input,
             ToolExecutionContext(
@@ -404,6 +422,14 @@ async def _execute_tool_call(
                     **(context.tool_metadata or {}),
                 },
             ),
+        )
+        elapsed = time.monotonic() - t0
+        log.debug(
+            "executed %s in %.2fs err=%s output_len=%d",
+            tool_name,
+            elapsed,
+            result.is_error,
+            len(result.output or ""),
         )
         tool_result = ToolResultBlock(
             tool_use_id=tool_use_id,

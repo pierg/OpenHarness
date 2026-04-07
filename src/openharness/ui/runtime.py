@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Awaitable, Callable
@@ -106,7 +107,19 @@ class RuntimeBundle:
 
 def _resolve_api_client_from_settings(settings) -> SupportsStreamingMessages:
     """Build the appropriate API client for the resolved settings."""
-    return create_api_client(settings)
+    try:
+        return create_api_client(settings)
+    except ValueError as exc:
+        message = str(exc)
+        if "No API key found" not in message and "No credentials found" not in message:
+            raise
+        print(
+            "Error: No API key configured.\n"
+            "  Run `oh auth login` to set up authentication, or set the\n"
+            "  ANTHROPIC_API_KEY (or OPENAI_API_KEY) environment variable.",
+            file=sys.stderr,
+        )
+        raise SystemExit(1) from exc
 
 
 async def build_runtime(
@@ -140,6 +153,7 @@ async def build_runtime(
         "api_key": api_key,
         "api_format": api_format,
         "active_profile": active_profile,
+        "permission_mode": permission_mode,
     }
     settings = load_settings().merge_cli_overrides(**settings_overrides)
     runtime_cwd = str(Path(cwd or Path.cwd()).resolve())

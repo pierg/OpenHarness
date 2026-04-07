@@ -146,13 +146,6 @@ def normalize_anthropic_model_name(model: str) -> str:
 def default_provider_profiles() -> dict[str, ProviderProfile]:
     """Return the built-in provider workflow catalog."""
     return {
-        "gemini-api": ProviderProfile(
-            label="Google Gemini API",
-            provider="gemini",
-            api_format="google",
-            auth_source="gemini_api_key",
-            default_model="gemini-2.5-flash",
-        ),
         "claude-api": ProviderProfile(
             label="Anthropic-Compatible API",
             provider="anthropic",
@@ -166,6 +159,13 @@ def default_provider_profiles() -> dict[str, ProviderProfile]:
             api_format="anthropic",
             auth_source="claude_subscription",
             default_model="claude-sonnet-4-6",
+        ),
+        "gemini-api": ProviderProfile(
+            label="Google Gemini API",
+            provider="gemini",
+            api_format="google",
+            auth_source="gemini_api_key",
+            default_model="gemini-2.5-flash",
         ),
         "openai-compatible": ProviderProfile(
             label="OpenAI-Compatible API",
@@ -187,6 +187,14 @@ def default_provider_profiles() -> dict[str, ProviderProfile]:
             api_format="copilot",
             auth_source="copilot_oauth",
             default_model="gpt-5.4",
+        ),
+        "moonshot": ProviderProfile(
+            label="Moonshot (Kimi)",
+            provider="moonshot",
+            api_format="openai",
+            auth_source="moonshot_api_key",
+            default_model="kimi-k2.5",
+            base_url="https://api.moonshot.cn/v1",
         ),
     }
 
@@ -276,6 +284,7 @@ def auth_source_provider_name(auth_source: str) -> str:
         "dashscope_api_key": "dashscope",
         "bedrock_api_key": "bedrock",
         "vertex_api_key": "vertex",
+        "moonshot_api_key": "moonshot",
     }
     return mapping.get(auth_source, auth_source)
 
@@ -313,6 +322,8 @@ def default_auth_source_for_provider(provider: str, api_format: str | None = Non
         return "bedrock_api_key"
     if provider == "vertex":
         return "vertex_api_key"
+    if provider == "moonshot":
+        return "moonshot_api_key"
     if provider == "openai" or api_format == "openai":
         return "openai_api_key"
     return "anthropic_api_key"
@@ -368,12 +379,12 @@ def _profile_from_flat_settings(settings: "Settings") -> tuple[str, ProviderProf
         provider=provider,
         api_format=settings.api_format,
         auth_source=default_auth_source_for_provider(provider, settings.api_format),
-        default_model=settings.model or defaults.get("gemini-api", ProviderProfile(
-            label="Google Gemini API",
-            provider="gemini",
-            api_format="google",
-            auth_source="gemini_api_key",
-            default_model="gemini-2.5-flash",
+        default_model=settings.model or defaults.get("claude-api", ProviderProfile(
+            label="Claude API",
+            provider="anthropic",
+            api_format="anthropic",
+            auth_source="anthropic_api_key",
+            default_model="sonnet",
         )).default_model,
         last_model=settings.model or None,
         base_url=settings.base_url,
@@ -386,12 +397,12 @@ class Settings(BaseModel):
 
     # API configuration
     api_key: str = ""
-    model: str = "gemini-2.5-flash"
+    model: str = "claude-sonnet-4-6"
     max_tokens: int = 16384
     base_url: str | None = None
     api_format: str = "anthropic"  # "anthropic", "openai", or "copilot"
     provider: str = ""
-    active_profile: str = "gemini-api"
+    active_profile: str = "claude-api"
     profiles: dict[str, ProviderProfile] = Field(default_factory=default_provider_profiles)
     max_turns: int = 200
 
@@ -421,16 +432,16 @@ class Settings(BaseModel):
     def merged_profiles(self) -> dict[str, ProviderProfile]:
         """Return the saved profiles merged over the built-in catalog."""
         merged = default_provider_profiles()
-        merged.update(
-            {
-                name: (
-                    profile.model_copy(deep=True)
-                    if isinstance(profile, ProviderProfile)
-                    else ProviderProfile.model_validate(profile)
-                )
-                for name, profile in self.profiles.items()
-            }
-        )
+        for name, raw_profile in self.profiles.items():
+            profile = (
+                raw_profile.model_copy(deep=True)
+                if isinstance(raw_profile, ProviderProfile)
+                else ProviderProfile.model_validate(raw_profile)
+            )
+            builtin = merged.get(name)
+            if builtin is not None and profile.base_url is None and builtin.base_url is not None:
+                profile = profile.model_copy(update={"base_url": builtin.base_url})
+            merged[name] = profile
         return merged
 
     def resolve_profile(self, name: str | None = None) -> tuple[str, ProviderProfile]:
@@ -603,28 +614,20 @@ class Settings(BaseModel):
                 state="configured",
             )
 
-        storage_provider = auth_source_provider_name(auth_source)
-        explicit_key = "" if profile.credential_slot else self.api_key
-        if explicit_key:
-            return ResolvedAuth(
-                provider=provider or storage_provider,
-                auth_kind="api_key",
-                value=explicit_key,
-                source="settings_or_env",
-                state="configured",
-            )
-
         from openharness.auth.storage import load_credential
 
         storage_provider = credential_storage_provider_name(profile_name, profile)
         if profile.credential_slot:
-            stored = load_credential(storage_provider, "api_key")
-            if stored:
+            scoped_storage_provider = f"profile:{profile.credential_slot}"
+            scoped = load_credential(scoped_storage_provider, "api_key", use_keyring=False)
+            if scoped is None:
+                scoped = load_credential(scoped_storage_provider, "api_key")
+            if scoped:
                 return ResolvedAuth(
                     provider=provider or auth_source_provider_name(auth_source),
                     auth_kind="api_key",
-                    value=stored,
-                    source=f"file:{storage_provider}",
+                    value=scoped,
+                    source=f"file:{scoped_storage_provider}",
                     state="configured",
                 )
             raise ValueError(
@@ -632,10 +635,13 @@ class Settings(BaseModel):
                 f"Configure a key for profile '{profile_name}' first."
             )
 
+        storage_provider = credential_storage_provider_name(profile_name, profile)
+
         env_var = {
             "anthropic_api_key": "ANTHROPIC_API_KEY",
             "openai_api_key": "OPENAI_API_KEY",
             "dashscope_api_key": "DASHSCOPE_API_KEY",
+            "moonshot_api_key": "MOONSHOT_API_KEY",
         }.get(auth_source)
         if env_var:
             env_value = os.environ.get(env_var, "")
@@ -647,6 +653,16 @@ class Settings(BaseModel):
                     source=f"env:{env_var}",
                     state="configured",
                 )
+
+        explicit_key = "" if profile.credential_slot else self.api_key
+        if explicit_key:
+            return ResolvedAuth(
+                provider=provider or storage_provider,
+                auth_kind="api_key",
+                value=explicit_key,
+                source="settings_or_env",
+                state="configured",
+            )
 
         stored = load_credential(storage_provider, "api_key")
         if stored:
@@ -690,7 +706,11 @@ def _apply_env_overrides(settings: Settings) -> Settings:
     if model:
         updates["model"] = model
 
-    base_url = os.environ.get("ANTHROPIC_BASE_URL") or os.environ.get("OPENHARNESS_BASE_URL")
+    base_url = (
+        os.environ.get("ANTHROPIC_BASE_URL")
+        or os.environ.get("OPENAI_BASE_URL")
+        or os.environ.get("OPENHARNESS_BASE_URL")
+    )
     if base_url:
         updates["base_url"] = base_url
 
@@ -717,10 +737,6 @@ def _apply_env_overrides(settings: Settings) -> Settings:
     max_turns = os.environ.get("OPENHARNESS_MAX_TURNS")
     if max_turns:
         updates["max_turns"] = int(max_turns)
-
-    api_key = os.environ.get("OPENHARNESS_API_KEY")
-    if api_key:
-        updates["api_key"] = api_key
 
     api_format = os.environ.get("OPENHARNESS_API_FORMAT")
     if api_format:

@@ -1,130 +1,43 @@
 ---
 name: python-engineering
 description: >
-  Python conventions and engineering patterns specific to this repo. Use when
-  writing, reviewing, or editing any Python source or test file in OpenHarness.
+  Python conventions and engineering patterns. Use when writing, reviewing,
+  or editing any Python source or test file. Focuses on fail-fast principles,
+  strict exception handling, and robust data modeling.
 ---
 
-# Python Engineering Guidelines — OpenHarness
+# Python Engineering Guidelines
 
-## File header
+## 1. Fail Fast & Explicitly
 
-```python
-"""Module docstring."""
+- **No Silent Fallbacks:** Never use hardcoded fallback values (e.g., `"default"`, `"coordinator"`, `None`) to mask missing configuration, missing environment variables, or broken context. If a required value is missing, raise an exception immediately.
+- **Careful with Default Values:** Only use default arguments if the default is truly universally applicable and safe. Do not use defaults to suppress errors or avoid setting required state.
+- **Validate Early:** Check preconditions at the entry points of functions and fail fast with clear, descriptive error messages if they are not met.
 
-from __future__ import annotations  # always — enables X | Y on Python 3.10
+## 2. Strict Exception Handling (No Excessive Try/Except)
 
-# imports ...
+- **Don't catch what you don't handle:** If you cannot meaningfully recover from an error, let it propagate. The caller deserves to know something failed.
+- **Narrow Exceptions:** Catch the narrowest possible exception type (`KeyError`, `ValueError`, `OSError`). Avoid bare `except Exception:` unless it is at a top-level boundary (like a main loop) where you log it and exit/re-raise.
+- **No Nested Try/Excepts:** Keep error handling flat. One `try/except` level per function. If you need more, extract the inner logic into a helper function.
+- **Do not mask internal architecture issues:** Never use `try...except ImportError` to handle circular dependencies within the same project. Fix the architecture or use local function-level imports instead. `ImportError` catching is ONLY valid for optional *external* dependencies.
+- **No `try/except/pass`:** Never swallow errors silently. If an optional subsystem fails (like tracing or telemetry), log the failure with `exc_info=True`.
+- **Correct Re-raising:** When wrapping exceptions, always use `raise MyError(...) from exc` to preserve the original traceback, or `raise` (bare) to re-raise the exact same exception.
 
-log = logging.getLogger(__name__)   # every module that logs
-```
+## 3. Data Modeling & State
 
-Section banners in files longer than ~100 lines:
-```python
-# ---------------------------------------------------------------------------
-# Internal helpers
-# ---------------------------------------------------------------------------
-```
+- **Immutability First:** Prefer immutable data structures. Use `@dataclass(frozen=True)` for internal data transfer objects (DTOs) and events.
+- **Validation at Boundaries:** Use Pydantic `BaseModel` for external data, settings, or anything requiring strict validation and serialization.
+- **No In-Place Mutation:** When updating models, return a new copy (e.g., `model_copy(update=...)` for Pydantic or `dataclasses.replace()`) rather than mutating fields in place.
 
-## Data modeling — two tiers, choose deliberately
+## 4. Architecture & Dependencies
 
-- **Pydantic `BaseModel`** — settings, messages, anything needing validation or serialization. Use `model_copy(update=...)` as the only mutation primitive (never mutate in place).
-- **`@dataclass(frozen=True)`** — small immutable DTOs (events, requests). No validation needed.
+- **Dependency Inversion:** Use `typing.Protocol` instead of concrete classes or `abc.ABC` to define interfaces for injected dependencies. This keeps modules decoupled.
+- **Error Translation:** Do not let vendor or third-party SDK exceptions leak through your domain boundary. Catch them at the integration point and translate them into domain-specific exceptions.
+- **Lazy Imports for Externals Only:** Only use inline lazy imports (`import foo` inside a function) for truly optional external dependencies.
 
-## Protocol over ABC for dependency inversion
+## 5. Style & Structure
 
-The query engine binds to `SupportsStreamingMessages` (a `Protocol`), not to any concrete client. Follow this pattern for any new provider or injectable dependency.
-
-## Exception handling
-
-**Fail fast. Never mask errors.**
-
-```python
-# ✓ let it propagate — the caller deserves to know
-result = some_operation()
-
-# ✗ never do this — hides bugs and config mistakes
-try:
-    result = some_operation()
-except Exception:
-    pass
-```
-
-**Rules, in order of priority:**
-
-1. **Don't catch what you don't handle.** If you can't meaningfully recover, don't catch.
-2. **Catch the narrowest possible type.** `except ValueError`, `except OSError`, never bare `except Exception` unless you re-raise or it's a documented SDK boundary.
-3. **Never nest try/except.** One level per function. Extract inner logic to a helper if you need more.
-4. **`try/finally` is fine; `try/except/pass` is not.** Cleanup in `finally` always propagates the exception.
-5. **`ImportError` is the only valid broad-ish catch** — and ONLY for optional *external* dependencies at the import site. **Never** catch `ImportError` for internal modules within the same project. If there is a circular dependency, fix it or use a local import without a `try/except` block. Fallbacks that hide internal import failures mask architectural issues.
-6. **No silent fallbacks or default values that hide errors.** If a required context, variable, or configuration is missing, fail fast. Do not fall back to generic strings like `"default"` or `"coordinator"` which can cause subtle bugs later.
-7. **Optional/background subsystems** (tracing, telemetry) may silently degrade on network errors, but must use `exc_info=True` so the traceback is logged:
-   ```python
-   try:
-       client.auth_check()
-   except OSError as exc:
-       log.warning("Auth check failed, tracing disabled: %s", exc, exc_info=True)
-       return NullTraceObserver()
-   ```
-8. **Config errors must propagate.** A bad `LANGFUSE_SAMPLE_RATE`, a missing env var, a malformed URL — these are user mistakes. Let them crash with a clear message rather than silently defaulting.
-9. **Never re-raise with `raise exc from exc`** — use `raise ... from exc` (original) or `raise` (bare, inside except).
-
-## Error translation
-
-Every API client has a `_translate_<provider>_error(exc) -> OpenHarnessApiError` helper. Map vendor exceptions there; never let them leak out. `OpenHarnessApiError` subclasses are always re-raised immediately — never retried.
-
-## Retry loop shape
-
-Public method delegates to `_stream_once`; the loop lives in the public method only:
-
-```python
-for attempt in range(MAX_RETRIES + 1):
-    try:
-        async for event in self._stream_once(request):
-            yield event
-        return
-    except OpenHarnessApiError:
-        raise
-    except Exception as exc:
-        if attempt >= MAX_RETRIES or not _is_retryable(exc):
-            raise _translate_<provider>_error(exc) from exc
-        await asyncio.sleep(_backoff_delay(attempt))
-```
-
-Backoff: `min(BASE_DELAY * 2**attempt, MAX_DELAY) + uniform(0, delay * 0.25)`.
-
-## Lazy imports for optional dependencies
-
-```python
-def __init__(self) -> None:
-    from google import genai  # noqa: PLC0415
-```
-
-Used for optional extras (e.g. `google-genai`). The `noqa` comment is required.
-
-## Settings: API keys are never stored
-
-`resolve_api_key()` resolves lazily from env at call time. Don't write resolved keys back into the `Settings` object or persist them to disk.
-
----
-
-## Testing
-
-**Optional SDK stubbing** — inject the entire module tree into `sys.modules` via an `autouse=True` fixture; don't require the optional package to be installed:
-
-```python
-@pytest.fixture(autouse=True)
-def _stub_genai(monkeypatch):
-    genai = MagicMock(name="google.genai")
-    google = MagicMock(name="google")
-    google.genai = genai
-    monkeypatch.setitem(sys.modules, "google", google)
-    monkeypatch.setitem(sys.modules, "google.genai", genai)
-    return genai
-```
-
-**Streaming fakes** — define local `_chunk(...)`, `_Aiter`, and `_setup_stream(client, *chunks)` helpers rather than inline `MagicMock` chains. Keeps test bodies readable.
-
-**`asyncio_mode = "auto"`** is set in `pyproject.toml` — plain `async def test_*` works, no `@pytest.mark.asyncio` needed.
-
-**Test private helpers directly** — import `_build_gemini_tools`, `_backoff_delay`, etc. in tests to cover internals without going through the full public API.
+- **Modern Type Hinting:** Always include `from __future__ import annotations` at the top of files to enable modern type hinting syntax (`X | Y`).
+- **Clean File Structure:**
+  - Define `log = logging.getLogger(__name__)` at the top of every module that needs logging.
+  - Use visual section banners (e.g., `# --- Internal helpers ---`) to organize files longer than ~100 lines.
