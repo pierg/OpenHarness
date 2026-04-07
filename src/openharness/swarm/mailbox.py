@@ -176,6 +176,18 @@ class TeammateMailbox:
         # Offload blocking I/O to thread pool
         loop = asyncio.get_event_loop()
         await loop.run_in_executor(None, _write_atomic)
+        
+        from loguru import logger as log
+        
+        # Colorize prefix based on sender
+        colors = ["cyan", "magenta", "green", "yellow", "blue", "red"]
+        sender_color = colors[hash(msg.sender) % len(colors)]
+        
+        sender_clean = msg.sender.split('@')[0] if '@' in msg.sender else msg.sender
+        recipient_clean = msg.recipient.split('@')[0] if '@' in msg.recipient else msg.recipient
+        
+        prefix = f"<{sender_color}>[{sender_clean} -> {recipient_clean}]</{sender_color}>"
+        log.opt(colors=True).info(f"{prefix} {msg.summary or '...'}")
 
     async def read_all(self, unread_only: bool = True) -> list[MailboxMessage]:
         """Return messages from the inbox, sorted by timestamp (oldest first).

@@ -8,6 +8,85 @@ The short version:
 - this fork adds execution-time composition, native Gemini and Vertex support, Harbor integration points, and Langfuse observability
 - the merged codebase is upstream-first for orchestration, and fork-first for compositional execution
 
+## Current Sync Status
+
+As of 2026-04-07:
+
+- the active integration branch is `codex/merge-upstream-main`
+- it already merged upstream through commit `aa2e024` (`docs(readme): add chinese translation`) in merge commit `c9e7df1`
+- after fetching the current upstream head `69c85e4` (`fix(ui): avoid blocking paste and permission responses in terminal`), this branch is `32` commits behind upstream and `46` commits ahead
+
+That matters because the hard part is no longer "import upstream's big architecture". That already happened in `c9e7df1`. The remaining upstream delta is mostly hardening and provider/runtime fixes, not another full control-plane rewrite.
+
+## Upstream Features To Adopt, Not Rebuild
+
+The current upstream-only delta is concentrated in a few areas:
+
+- auth and config hardening
+  - profile-scoped credential precedence for custom compatible profiles
+  - `OPENAI_BASE_URL` and related env precedence fixes
+  - better provider inference and newer token-field compatibility
+- provider breadth and compatibility
+  - native Moonshot/Kimi support
+  - follow-up fixes around built-in base URLs for saved profiles
+- runtime and UI robustness
+  - terminal paste / permission-response unblocking
+  - EIO handling and other startup/runtime polish
+- security and reliability
+  - `web_fetch` URL validation + untrusted-content banner
+  - MCP disconnected-server handling
+  - sensitive path protection in `PermissionChecker`
+- `ohmo` follow-up fixes
+  - gateway and session-storage changes layered on top of the earlier upstream import
+
+These are exactly the kinds of changes the fork should pull from upstream rather than re-implement locally.
+
+## Fork Features Still Worth Preserving
+
+The branch-local work that is still genuinely fork-specific is:
+
+- YAML/compositional agent runtime
+- Harbor workspace + Harbor runner integration
+- Langfuse tracing / observability facade
+- native Gemini / Vertex client support
+- run-artifact helpers and fork-specific examples
+- the newer swarm orchestration layer and workflow-to-swarm unification work on this branch
+
+The goal is to keep these execution-time extensions while continuing to consume upstream control-plane fixes.
+
+## Merge Probe Result
+
+A clean merge probe of `upstream/main` into `codex/merge-upstream-main` was run in a temporary worktree on 2026-04-07.
+
+Result:
+
+- the merge is feasible
+- only `4` files hit textual conflicts
+- the rest auto-merged
+
+Conflict files:
+
+- `src/openharness/config/settings.py`
+- `src/openharness/engine/query.py`
+- `src/openharness/ui/runtime.py`
+- `tests/test_config/test_settings.py`
+
+Auto-merged but high-review files:
+
+- `src/openharness/auth/external.py`
+- `src/openharness/auth/manager.py`
+- `src/openharness/api/openai_client.py`
+- `src/openharness/cli.py`
+- `src/openharness/tools/web_fetch_tool.py`
+- `src/openharness/mcp/client.py`
+- `src/openharness/permissions/checker.py`
+- `src/openharness/ui/backend_host.py`
+- `ohmo/gateway/runtime.py`
+- `ohmo/gateway/service.py`
+- `ohmo/session_storage.py`
+
+This is an important signal: the branch is not in a state where a rebase/cherry-pick rewrite is necessary. A normal upstream merge with deliberate conflict resolution is the right move.
+
 ## Integration Strategy
 
 The merge was not handled as two equal systems glued together. The current shape is:
@@ -16,6 +95,64 @@ The merge was not handled as two equal systems glued together. The current shape
 - the fork owns YAML composition, reusable agent architectures, Harbor-related workspace integration, and the repo-local observability layer
 
 This keeps the control plane close to upstream while preserving the fork’s differentiated execution features.
+
+## Practical Merge Playbook
+
+Use this sequence whenever syncing this fork forward:
+
+1. Save local work first.
+   - Do not merge on top of an uncommitted working tree.
+   - This repo currently has local modifications on `codex/merge-upstream-main`, so those should be committed or stashed before doing the real merge.
+
+2. Merge into the integration branch, not directly into `main`.
+   - Start from `codex/merge-upstream-main` or a fresh branch cut from it.
+   - This branch already contains the upstream-first architectural import point (`c9e7df1`), so it is the correct continuation point.
+
+3. Use an upstream-first merge policy for control-plane files.
+   - Prefer upstream behavior in auth, UI runtime, MCP, `ohmo`, permission enforcement, and web fetching.
+   - Re-apply fork hooks only where they extend behavior instead of replacing upstream machinery.
+
+4. Use a fork-first merge policy for execution extensions.
+   - Preserve YAML agent catalogs, Harbor integration, Langfuse observers, Gemini/Vertex support, and swarm orchestration additions.
+
+5. Resolve the four known conflicts with explicit intent.
+   - `src/openharness/config/settings.py`
+     - keep the fork's profile-slot / multi-provider logic
+     - also keep upstream's auth precedence fixes
+   - `src/openharness/engine/query.py`
+     - keep fork tracing and hook integration
+     - also carry upstream logging and permission-flow improvements
+   - `src/openharness/ui/runtime.py`
+     - keep the fork's `create_api_client()` abstraction and tracing hooks
+     - also preserve upstream runtime UX fixes instead of re-expanding provider-specific logic inline
+   - `tests/test_config/test_settings.py`
+     - keep both the fork credential-profile coverage and the upstream env-precedence coverage
+
+6. Review the auto-merged hotspots, especially auth/runtime/security files.
+   - These merged cleanly textually, but they sit on behaviorally sensitive paths.
+
+7. Run targeted validation before promoting the branch.
+   - `tests/test_config/test_settings.py`
+   - `tests/test_auth/test_external.py`
+   - `tests/test_api/test_openai_client.py`
+   - `tests/test_tools/test_web_fetch_tool.py`
+   - `tests/test_mcp/test_client_errors.py`
+   - `tests/test_ohmo/test_gateway.py`
+   - `tests/test_ohmo/test_ohmo_session_storage.py`
+   - `tests/test_permissions/test_checker.py`
+   - fork-specific suites:
+     - `tests/test_agents/test_agents.py`
+     - `tests/test_harbor/test_harbor_runner.py`
+     - `tests/test_observability/test_langfuse.py`
+     - `tests/test_swarm/test_orchestration.py`
+
+8. Only after the integration branch is green should it replace or merge back into fork `main`.
+
+The key discipline is simple:
+
+- consume upstream fixes in the control plane
+- keep fork code concentrated in execution-time extensions
+- avoid parallel local rewrites of auth, runtime, provider plumbing, and security paths when upstream already owns them
 
 ## What Comes From Upstream
 

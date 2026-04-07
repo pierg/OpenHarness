@@ -161,67 +161,42 @@ async def main() -> None:
                 workspace_dir,
                 trace_observer=trace_observer,
             ) as team:
-                log.info("Spawning worker_a...")
-                await team.spawn_worker(
-                    role_name="worker_a",
-                    agent_def=worker_def,
-                    bootstrap_task=(
-                        "You are worker A. Stand by for follow-up instructions from the leader.\n"
-                        "Reply once to the leader mailbox that you are ready."
-                    ),
-                    payload={"workflow_context": common_context},
-                )
-
-                log.info("Spawning worker_b...")
-                await team.spawn_worker(
-                    role_name="worker_b",
-                    agent_def=worker_def,
-                    bootstrap_task=(
-                        "You are worker B. Stand by for follow-up instructions from the leader.\n"
-                        "Reply once to the leader mailbox that you are ready."
-                    ),
-                    payload={"workflow_context": common_context},
-                )
-
-                log.info("Waiting for workers to report ready...")
-                await team.wait_for_updates(["worker_a", "worker_b"], timeout=15.0)
-
-                log.info("Assigning implementation to worker_a...")
-                fix_update = await _assign_and_wait(
-                    team,
-                    "worker_a",
-                    _worker_instruction("worker_a"),
-                    timeout=90.0,
-                )
-                log.info("worker_a: %s", _message_text(fix_update))
-
-                log.info("Assigning verification to worker_b...")
-                verify_update = await _assign_and_wait(
-                    team,
-                    "worker_b",
-                    _worker_instruction("worker_b"),
-                    timeout=60.0,
-                )
-                log.info("worker_b: %s", _message_text(verify_update))
-
-                passed = script_prints_twelve(workspace_dir)
-                if not passed:
-                    log.info("Local verification failed; asking worker_a to repair...")
-                    repair_instruction = (
-                        "The local verification still failed after your first patch.\n\n"
-                        f"Worker B reported: {_message_text(verify_update)}\n\n"
-                        "Re-open `sum_evens.py`, correct the bug, save the file, and send one "
-                        "concise update describing the final fix."
+                try:
+                    log.info("Spawning worker_a...")
+                    await team.spawn_worker(
+                        role_name="worker_a",
+                        agent_def=worker_def,
+                        bootstrap_task=(
+                            "You are worker A. Stand by for follow-up instructions from the leader.\n"
+                            "Reply once to the leader mailbox that you are ready."
+                        ),
+                        payload={"workflow_context": common_context},
                     )
-                    repair_update = await _assign_and_wait(
+
+                    log.info("Spawning worker_b...")
+                    await team.spawn_worker(
+                        role_name="worker_b",
+                        agent_def=worker_def,
+                        bootstrap_task=(
+                            "You are worker B. Stand by for follow-up instructions from the leader.\n"
+                            "Reply once to the leader mailbox that you are ready."
+                        ),
+                        payload={"workflow_context": common_context},
+                    )
+
+                    log.info("Waiting for workers to report ready...")
+                    await team.wait_for_updates(["worker_a", "worker_b"], timeout=15.0)
+
+                    log.info("Assigning implementation to worker_a...")
+                    fix_update = await _assign_and_wait(
                         team,
                         "worker_a",
-                        repair_instruction,
+                        _worker_instruction("worker_a"),
                         timeout=90.0,
                     )
-                    log.info("worker_a repair: %s", _message_text(repair_update))
+                    log.info("worker_a: %s", _message_text(fix_update))
 
-                    log.info("Re-running verification with worker_b...")
+                    log.info("Assigning verification to worker_b...")
                     verify_update = await _assign_and_wait(
                         team,
                         "worker_b",
@@ -229,14 +204,43 @@ async def main() -> None:
                         timeout=60.0,
                     )
                     log.info("worker_b: %s", _message_text(verify_update))
-                    passed = script_prints_twelve(workspace_dir)
 
-                mailbox_messages = await team.read_mailbox(unread_only=False)
-                final_text = (
-                    "Programmatic coordinator completed the fix and verification flow."
-                    if passed
-                    else "Programmatic coordinator exhausted the repair loop without a passing result."
-                )
+                    passed = script_prints_twelve(workspace_dir)
+                    if not passed:
+                        log.info("Local verification failed; asking worker_a to repair...")
+                        repair_instruction = (
+                            "The local verification still failed after your first patch.\n\n"
+                            f"Worker B reported: {_message_text(verify_update)}\n\n"
+                            "Re-open `sum_evens.py`, correct the bug, save the file, and send one "
+                            "concise update describing the final fix."
+                        )
+                        repair_update = await _assign_and_wait(
+                            team,
+                            "worker_a",
+                            repair_instruction,
+                            timeout=90.0,
+                        )
+                        log.info("worker_a repair: %s", _message_text(repair_update))
+
+                        log.info("Re-running verification with worker_b...")
+                        verify_update = await _assign_and_wait(
+                            team,
+                            "worker_b",
+                            _worker_instruction("worker_b"),
+                            timeout=60.0,
+                        )
+                        log.info("worker_b: %s", _message_text(verify_update))
+                        passed = script_prints_twelve(workspace_dir)
+
+                    mailbox_messages = await team.read_all_mailboxes()
+                    final_text = (
+                        "Programmatic coordinator completed the fix and verification flow."
+                        if passed
+                        else "Programmatic coordinator exhausted the repair loop without a passing result."
+                    )
+                finally:
+                    pass
+                    
         except Exception as exc:
             trace_observer.end_session(
                 output={"error": str(exc)},

@@ -51,3 +51,6 @@ def setup_logging(debug: bool = False) -> None:
     
     # Intercept all standard logging messages
     logging.basicConfig(handlers=[InterceptHandler()], level=0, force=True)
+    
+    # Suppress noisy warnings from google.genai
+    logging.getLogger("google_genai._api_client").setLevel(logging.ERROR)

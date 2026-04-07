@@ -186,25 +186,29 @@ class TeamOrchestrator:
         self,
         agent_def: AgentDefinition,
         instruction: str,
+        identity: str,
         payload: dict[str, Any] | None = None,
         api_client: Any | None = None,
-        *,
-        identity: str = "coordinator",
     ) -> Any:
         """Execute a coordinator or single-run agent inline within the team environment.
         
         Args:
             agent_def: The definition of the agent to execute inline.
             instruction: The initial query/prompt to start the agent with.
+            identity: The identity string this inline agent will use when sending 
+                      mailbox messages.
             payload: Optional variables rendered into the prompt payload.
             api_client: Optional API client override.
-            identity: The identity string this inline agent will use when sending 
-                      mailbox messages. Defaults to `"coordinator"`. You must set this
-                      if your workers expect a different sender name (e.g., `"leader"`).
         """
-        import os
-        previous_identity = os.environ.get("CLAUDE_CODE_AGENT_ID")
-        os.environ["CLAUDE_CODE_AGENT_ID"] = identity
+        from openharness.swarm.in_process import TeammateContext, get_teammate_context, set_teammate_context
+        
+        previous_context = get_teammate_context()
+        ctx = TeammateContext(
+            agent_id=identity,
+            agent_name=identity.split("@")[0] if "@" in identity else identity,
+            team_name=self.team_name,
+        )
+        set_teammate_context(ctx)
         
         try:
             workspace = LocalWorkspace(self.workspace_dir)
@@ -220,10 +224,11 @@ class TeamOrchestrator:
                 trace_observer=self.trace_observer,
             )
         finally:
-            if previous_identity is not None:
-                os.environ["CLAUDE_CODE_AGENT_ID"] = previous_identity
+            if previous_context is not None:
+                set_teammate_context(previous_context)
             else:
-                os.environ.pop("CLAUDE_CODE_AGENT_ID", None)
+                from openharness.swarm.in_process import _teammate_context_var
+                _teammate_context_var.set(None)
 
     async def shutdown_all(self) -> None:
         """Explicitly shut down all spawned workers in the team."""
