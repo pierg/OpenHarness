@@ -137,9 +137,9 @@ async def main() -> None:
                 result = await team.run_inline(
                     agent_def=coordinator_def,
                     instruction=INSTRUCTION,
+                    identity=common_context["leader_agent_id"],
                     payload={"workflow_context": common_context},
                     api_client=api_client,
-                    identity="leader",
                 )
 
                 passed = script_prints_twelve(workspace_dir)
