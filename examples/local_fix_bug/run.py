@@ -15,6 +15,7 @@ Usage:
 from __future__ import annotations
 
 import asyncio
+import logging
 import subprocess
 import sys
 import tempfile
@@ -26,6 +27,8 @@ from openharness.agents.contracts import TaskDefinition
 from openharness.agents.factory import AgentFactory
 from openharness.runtime.workflow import Workflow
 from openharness.workspace import LocalWorkspace
+
+log = logging.getLogger(__name__)
 
 _BUGGY_CODE = """\
 def sum_evens(numbers):
@@ -66,7 +69,8 @@ async def run_agent(
 
     with tempfile.TemporaryDirectory(prefix=f"oh-{agent_name}-") as tmpdir:
         workspace_dir = Path(tmpdir)
-        (workspace_dir / "sum_evens.py").write_text(_BUGGY_CODE, encoding="utf-8")
+        script_path = workspace_dir / "sum_evens.py"
+        script_path.write_text(_BUGGY_CODE, encoding="utf-8")
 
         workspace = LocalWorkspace(cwd=workspace_dir)
         workflow = Workflow(workspace, agent_factory=factory)
@@ -77,7 +81,10 @@ async def run_agent(
             result = await workflow.run(task, agent_name=agent_name)
             elapsed = time.perf_counter() - t0
 
-            passed = _check_output(workspace_dir / "sum_evens.py")
+            # Verify the fix
+            proc = subprocess.run([sys.executable, str(script_path)], capture_output=True, text=True, timeout=5)
+            passed = proc.stdout.strip() == "12"
+
             return RunResult(
                 agent_name=agent_name,
                 architecture=config.architecture,
@@ -99,33 +106,24 @@ async def run_agent(
             )
 
 
-def _check_output(script_path: Path) -> bool:
-    """Return True if the script outputs '12'."""
-    try:
-        proc = subprocess.run(
-            [sys.executable, str(script_path)],
-            capture_output=True, text=True, timeout=10,
-        )
-        return proc.stdout.strip() == "12"
-    except Exception:
-        return False
-
-
 def _print_table(results: list[RunResult]) -> None:
     """Pretty-print a comparison table."""
     hdr = f"{'Agent':<30} {'Architecture':<20} {'Pass':>6} {'In Tok':>8} {'Out Tok':>8} {'Time':>7}  Error"
-    print(hdr)
-    print("-" * len(hdr) + "----------")
+    log.info(hdr)
+    log.info("-" * len(hdr) + "----------")
     for r in results:
         status = "✅" if r.passed else "❌"
         err = r.error or ""
-        print(
+        log.info(
             f"{r.agent_name:<30} {r.architecture:<20} {status:>6} "
             f"{r.input_tokens:>8} {r.output_tokens:>8} {r.elapsed_seconds:>6.1f}s  {err}"
         )
 
 
 async def main() -> None:
+    from openharness.observability.logging import setup_logging
+    setup_logging()
+
     factory = AgentFactory.with_default_configs()
     available = factory.list_agents()
 
@@ -134,31 +132,31 @@ async def main() -> None:
     agents_to_run = [a for a in requested if a in available]
 
     if not agents_to_run:
-        print(f"No matching agents. Available: {available}")
+        log.info(f"No matching agents. Available: {available}")
         return
 
-    print(f"Task: Fix sum_evens.py so it returns 12 instead of 9")
-    print(f"Agents to run: {agents_to_run}\n")
+    log.info(f"Task: Fix sum_evens.py so it returns 12 instead of 9")
+    log.info(f"Agents to run: {agents_to_run}\n")
 
     results: list[RunResult] = []
     for agent_name in agents_to_run:
         config = factory.get_config(agent_name)
-        print(f"--- Running: {agent_name} (architecture: {config.architecture}) ---")
+        log.info(f"--- Running: {agent_name} (architecture: {config.architecture}) ---")
         result = await run_agent(agent_name, factory)
         status = "✅ PASS" if result.passed else "❌ FAIL"
-        print(f"    {status}  ({result.elapsed_seconds:.1f}s, {result.input_tokens + result.output_tokens} tokens)")
+        log.info(f"    {status}  ({result.elapsed_seconds:.1f}s, {result.input_tokens + result.output_tokens} tokens)")
         if result.error:
-            print(f"    Error: {result.error}")
-        print()
+            log.info(f"    Error: {result.error}")
+        log.info("")
         results.append(result)
 
-    print("\n" + "=" * 80)
-    print("COMPARISON TABLE")
-    print("=" * 80)
+    log.info("\n" + "=" * 80)
+    log.info("COMPARISON TABLE")
+    log.info("=" * 80)
     _print_table(results)
 
     passed = sum(1 for r in results if r.passed)
-    print(f"\n{passed}/{len(results)} agents solved the task.")
+    log.info(f"\n{passed}/{len(results)} agents solved the task.")
 
 
 if __name__ == "__main__":

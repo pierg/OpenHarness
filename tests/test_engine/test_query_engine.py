@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from openharness.api.client import ApiMessageCompleteEvent, ApiTextDeltaEvent
+from openharness.api.client import ApiMessageCompleteEvent, ApiRetryEvent, ApiTextDeltaEvent
 from openharness.api.usage import UsageSnapshot
 from openharness.config.settings import PermissionSettings
 from openharness.engine.messages import ConversationMessage, TextBlock, ToolUseBlock
@@ -15,10 +15,11 @@ from openharness.engine.query_engine import QueryEngine
 from openharness.engine.stream_events import (
     AssistantTextDelta,
     AssistantTurnComplete,
+    StatusEvent,
     ToolExecutionCompleted,
     ToolExecutionStarted,
 )
-from openharness.permissions import PermissionChecker
+from openharness.permissions import PermissionChecker, PermissionMode
 from openharness.tools import create_default_tool_registry
 from openharness.hooks import HookExecutionContext, HookExecutor, HookEvent
 from openharness.hooks.loader import HookRegistry
@@ -60,6 +61,17 @@ class StaticApiClient:
         del request
         yield ApiMessageCompleteEvent(
             message=ConversationMessage(role="assistant", content=[TextBlock(text=self._text)]),
+            usage=UsageSnapshot(input_tokens=1, output_tokens=1),
+            stop_reason=None,
+        )
+
+
+class RetryThenSuccessApiClient:
+    async def stream_message(self, request):
+        del request
+        yield ApiRetryEvent(message="rate limited", attempt=1, max_attempts=4, delay_seconds=1.5)
+        yield ApiMessageCompleteEvent(
+            message=ConversationMessage(role="assistant", content=[TextBlock(text="after retry")]),
             usage=UsageSnapshot(input_tokens=1, output_tokens=1),
             stop_reason=None,
         )
@@ -143,6 +155,69 @@ async def test_query_engine_executes_tool_calls(tmp_path: Path):
     assert isinstance(events[-1], AssistantTurnComplete)
     assert "alpha and beta" in events[-1].message.text
     assert len(engine.messages) == 4
+
+
+@pytest.mark.asyncio
+async def test_query_engine_allows_unbounded_turns_when_max_turns_is_none(tmp_path: Path):
+    sample = tmp_path / "hello.txt"
+    sample.write_text("alpha\nbeta\n", encoding="utf-8")
+
+    engine = QueryEngine(
+        api_client=FakeApiClient(
+            [
+                _FakeResponse(
+                    message=ConversationMessage(
+                        role="assistant",
+                        content=[
+                            TextBlock(text="I will inspect the file."),
+                            ToolUseBlock(
+                                id="toolu_123",
+                                name="read_file",
+                                input={"path": str(sample), "offset": 0, "limit": 2},
+                            ),
+                        ],
+                    ),
+                    usage=UsageSnapshot(input_tokens=4, output_tokens=3),
+                ),
+                _FakeResponse(
+                    message=ConversationMessage(
+                        role="assistant",
+                        content=[TextBlock(text="The file contains alpha and beta.")],
+                    ),
+                    usage=UsageSnapshot(input_tokens=8, output_tokens=6),
+                ),
+            ]
+        ),
+        tool_registry=create_default_tool_registry(),
+        permission_checker=PermissionChecker(PermissionSettings()),
+        cwd=tmp_path,
+        model="claude-test",
+        system_prompt="system",
+        max_turns=None,
+    )
+
+    events = [event async for event in engine.submit_message("read the file")]
+
+    assert isinstance(events[-1], AssistantTurnComplete)
+    assert "alpha and beta" in events[-1].message.text
+    assert engine.max_turns is None
+
+
+@pytest.mark.asyncio
+async def test_query_engine_surfaces_retry_status_events(tmp_path: Path):
+    engine = QueryEngine(
+        api_client=RetryThenSuccessApiClient(),
+        tool_registry=create_default_tool_registry(),
+        permission_checker=PermissionChecker(PermissionSettings()),
+        cwd=tmp_path,
+        model="claude-test",
+        system_prompt="system",
+    )
+
+    events = [event async for event in engine.submit_message("hello")]
+
+    assert any(isinstance(event, StatusEvent) and "retrying in 1.5s" in event.message for event in events)
+    assert isinstance(events[-1], AssistantTurnComplete)
 
 
 @pytest.mark.asyncio
@@ -249,3 +324,107 @@ async def test_query_engine_executes_ask_user_tool(tmp_path: Path):
     assert tool_results[0].output == "green"
     assert isinstance(events[-1], AssistantTurnComplete)
     assert events[-1].message.text == "Picked green."
+
+
+@pytest.mark.asyncio
+async def test_query_engine_applies_path_rules_to_relative_read_file_targets(tmp_path: Path):
+    blocked_dir = tmp_path / "blocked"
+    blocked_dir.mkdir()
+    secret = blocked_dir / "secret.txt"
+    secret.write_text("top-secret\n", encoding="utf-8")
+
+    engine = QueryEngine(
+        api_client=FakeApiClient(
+            [
+                _FakeResponse(
+                    message=ConversationMessage(
+                        role="assistant",
+                        content=[
+                            ToolUseBlock(
+                                id="toolu_blocked_read",
+                                name="read_file",
+                                input={"path": "blocked/secret.txt", "offset": 0, "limit": 1},
+                            )
+                        ],
+                    ),
+                    usage=UsageSnapshot(input_tokens=1, output_tokens=1),
+                ),
+                _FakeResponse(
+                    message=ConversationMessage(
+                        role="assistant",
+                        content=[TextBlock(text="blocked")],
+                    ),
+                    usage=UsageSnapshot(input_tokens=1, output_tokens=1),
+                ),
+            ]
+        ),
+        tool_registry=create_default_tool_registry(),
+        permission_checker=PermissionChecker(
+            PermissionSettings(
+                mode=PermissionMode.DEFAULT,
+                path_rules=[{"pattern": str((blocked_dir / "*").resolve()), "allow": False}],
+            )
+        ),
+        cwd=tmp_path,
+        model="claude-test",
+        system_prompt="system",
+    )
+
+    events = [event async for event in engine.submit_message("read blocked file")]
+
+    tool_results = [event for event in events if isinstance(event, ToolExecutionCompleted)]
+    assert tool_results
+    assert tool_results[0].is_error is True
+    assert "matches deny rule" in tool_results[0].output
+
+
+@pytest.mark.asyncio
+async def test_query_engine_applies_path_rules_to_write_file_targets_in_full_auto(tmp_path: Path):
+    blocked_dir = tmp_path / "blocked"
+    blocked_dir.mkdir()
+    target = blocked_dir / "output.txt"
+
+    engine = QueryEngine(
+        api_client=FakeApiClient(
+            [
+                _FakeResponse(
+                    message=ConversationMessage(
+                        role="assistant",
+                        content=[
+                            ToolUseBlock(
+                                id="toolu_blocked_write",
+                                name="write_file",
+                                input={"path": "blocked/output.txt", "content": "poc"},
+                            )
+                        ],
+                    ),
+                    usage=UsageSnapshot(input_tokens=1, output_tokens=1),
+                ),
+                _FakeResponse(
+                    message=ConversationMessage(
+                        role="assistant",
+                        content=[TextBlock(text="blocked")],
+                    ),
+                    usage=UsageSnapshot(input_tokens=1, output_tokens=1),
+                ),
+            ]
+        ),
+        tool_registry=create_default_tool_registry(),
+        permission_checker=PermissionChecker(
+            PermissionSettings(
+                mode=PermissionMode.FULL_AUTO,
+                path_rules=[{"pattern": str((blocked_dir / "*").resolve()), "allow": False}],
+            )
+        ),
+        cwd=tmp_path,
+        model="claude-test",
+        system_prompt="system",
+    )
+
+    events = [event async for event in engine.submit_message("write blocked file")]
+
+    tool_results = [event for event in events if isinstance(event, ToolExecutionCompleted)]
+    assert tool_results
+    assert tool_results[0].is_error is True
+    assert "matches deny rule" in tool_results[0].output
+    assert target.exists() is False

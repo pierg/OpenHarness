@@ -11,6 +11,7 @@ from openharness.agents.architectures import (
     ReflectionAgent,
     SimpleAgent,
 )
+from openharness.agents.catalog import iter_catalog_agent_configs
 from openharness.agents.config import AgentConfig
 from openharness.agents.contracts import Agent
 
@@ -44,6 +45,14 @@ class AgentFactory:
         """Return a factory pre-loaded with the framework's default agent configs."""
         default_dir = Path(__file__).resolve().parent / "configs"
         return cls(agents_dir=default_dir)
+
+    @classmethod
+    def with_catalog_configs(cls, cwd: str | Path | None = None) -> AgentFactory:
+        """Return a factory loaded from the merged built-in/user/project catalog."""
+        factory = cls()
+        for item in iter_catalog_agent_configs(cwd):
+            factory.register(item.config)
+        return factory
 
     def load_dir(self, agents_dir: str | Path) -> None:
         """Discover and load all ``*.yaml`` / ``*.yml`` configs in *agents_dir*."""

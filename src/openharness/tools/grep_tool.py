@@ -1,8 +1,10 @@
-"""Content search tool."""
+"""Content search tool with a pure-Python fallback."""
 
 from __future__ import annotations
 
+import asyncio
 import re
+import shutil
 from pathlib import Path
 
 from pydantic import BaseModel, Field
@@ -22,11 +24,7 @@ class GrepToolInput(BaseModel):
 
 
 class GrepTool(BaseTool):
-    """Search text files for a regex pattern.
-
-    Uses a pure-Python scanner for local workspaces and falls back to ``grep``
-    via ``workspace.run_shell`` for remote substrates.
-    """
+    """Search text files for a regex pattern."""
 
     name = "grep"
     description = "Search file contents with a regular expression."
@@ -43,36 +41,50 @@ class GrepTool(BaseTool):
         workspace = self._workspace or LocalWorkspace(context.cwd)
 
         if isinstance(workspace, LocalWorkspace):
-            return self._execute_local(arguments, workspace)
+            root = _resolve_path(Path(workspace.cwd), arguments.root)
+            if root.is_file():
+                display_base = _display_base(root, Path(workspace.cwd))
+                matches = await _rg_grep_file(
+                    path=root,
+                    pattern=arguments.pattern,
+                    case_sensitive=arguments.case_sensitive,
+                    limit=arguments.limit,
+                    display_base=display_base,
+                )
+                if matches is not None:
+                    return ToolResult(output="\n".join(matches) if matches else "(no matches)")
+
+                return ToolResult(
+                    output=_python_grep_files(
+                        paths=[root],
+                        pattern=arguments.pattern,
+                        case_sensitive=arguments.case_sensitive,
+                        limit=arguments.limit,
+                        display_base=display_base,
+                    )
+                )
+
+            matches = await _rg_grep(
+                root=root,
+                pattern=arguments.pattern,
+                file_glob=arguments.file_glob,
+                case_sensitive=arguments.case_sensitive,
+                limit=arguments.limit,
+            )
+            if matches is not None:
+                return ToolResult(output="\n".join(matches) if matches else "(no matches)")
+
+            return ToolResult(
+                output=_python_grep_files(
+                    paths=root.glob(arguments.file_glob),
+                    pattern=arguments.pattern,
+                    case_sensitive=arguments.case_sensitive,
+                    limit=arguments.limit,
+                    display_base=root,
+                )
+            )
+
         return await self._execute_via_shell(arguments, workspace)
-
-    def _execute_local(self, arguments: GrepToolInput, workspace: LocalWorkspace) -> ToolResult:
-        root = _resolve_path(Path(workspace.cwd), arguments.root)
-        flags = 0 if arguments.case_sensitive else re.IGNORECASE
-        pattern = re.compile(arguments.pattern, flags)
-        matches: list[str] = []
-
-        for path in sorted(root.glob(arguments.file_glob)):
-            if len(matches) >= arguments.limit:
-                break
-            if not path.is_file():
-                continue
-            try:
-                raw = path.read_bytes()
-            except OSError:
-                continue
-            if b"\x00" in raw:
-                continue
-            text = raw.decode("utf-8", errors="replace")
-            for line_no, line in enumerate(text.splitlines(), start=1):
-                if pattern.search(line):
-                    matches.append(f"{path.relative_to(root)}:{line_no}:{line}")
-                    if len(matches) >= arguments.limit:
-                        break
-
-        if not matches:
-            return ToolResult(output="(no matches)")
-        return ToolResult(output="\n".join(matches))
 
     async def _execute_via_shell(self, arguments: GrepToolInput, workspace: Workspace) -> ToolResult:
         root = arguments.root or workspace.cwd
@@ -94,6 +106,49 @@ class GrepTool(BaseTool):
         return ToolResult(output="\n".join(relative))
 
 
+def _display_base(path: Path, cwd: Path) -> Path:
+    try:
+        path.relative_to(cwd)
+    except ValueError:
+        return path.parent
+    return cwd
+
+
+def _python_grep_files(
+    *,
+    paths,
+    pattern: str,
+    case_sensitive: bool,
+    limit: int,
+    display_base: Path,
+) -> str:
+    flags = 0 if case_sensitive else re.IGNORECASE
+    compiled = re.compile(pattern, flags)
+    collected: list[str] = []
+
+    for path in paths:
+        if len(collected) >= limit:
+            break
+        if not path.is_file():
+            continue
+        try:
+            raw = path.read_bytes()
+        except OSError:
+            continue
+        if b"\x00" in raw:
+            continue
+        text = raw.decode("utf-8", errors="replace")
+        for line_no, line in enumerate(text.splitlines(), start=1):
+            if compiled.search(line):
+                collected.append(f"{_format_path(path, display_base)}:{line_no}:{line}")
+                if len(collected) >= limit:
+                    break
+
+    if not collected:
+        return "(no matches)"
+    return "\n".join(collected)
+
+
 def _resolve_path(base: Path, candidate: str | None) -> Path:
     path = Path(candidate or ".").expanduser()
     if not path.is_absolute():
@@ -104,3 +159,117 @@ def _resolve_path(base: Path, candidate: str | None) -> Path:
 def _sq(s: str) -> str:
     """Shell-quote a string."""
     return "'" + s.replace("'", "'\\''") + "'"
+
+
+async def _rg_grep(
+    *,
+    root: Path,
+    pattern: str,
+    file_glob: str,
+    case_sensitive: bool,
+    limit: int,
+) -> list[str] | None:
+    """Return matches using ripgrep, or None if ripgrep is unavailable."""
+    rg = shutil.which("rg")
+    if not rg:
+        return None
+
+    include_hidden = (root / ".git").exists() or (root / ".gitignore").exists()
+    cmd: list[str] = [
+        rg,
+        "--no-heading",
+        "--line-number",
+        "--color",
+        "never",
+    ]
+    if include_hidden:
+        cmd.append("--hidden")
+    if not case_sensitive:
+        cmd.append("-i")
+    if file_glob:
+        cmd.extend(["--glob", file_glob])
+    cmd.extend(["--", pattern, "."])
+
+    process = await asyncio.create_subprocess_exec(
+        *cmd,
+        cwd=str(root),
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+    )
+
+    matches: list[str] = []
+    try:
+        assert process.stdout is not None
+        while len(matches) < limit:
+            raw = await process.stdout.readline()
+            if not raw:
+                break
+            line = raw.decode("utf-8", errors="replace").rstrip("\n")
+            if line:
+                matches.append(line)
+    finally:
+        if len(matches) >= limit and process.returncode is None:
+            process.terminate()
+        await process.wait()
+
+    if process.returncode in {0, 1}:
+        return matches
+    return None
+
+
+async def _rg_grep_file(
+    *,
+    path: Path,
+    pattern: str,
+    case_sensitive: bool,
+    limit: int,
+    display_base: Path,
+) -> list[str] | None:
+    rg = shutil.which("rg")
+    if not rg:
+        return None
+
+    cmd: list[str] = [
+        rg,
+        "--no-heading",
+        "--line-number",
+        "--color",
+        "never",
+    ]
+    if not case_sensitive:
+        cmd.append("-i")
+    cmd.extend(["--", pattern, path.name])
+
+    process = await asyncio.create_subprocess_exec(
+        *cmd,
+        cwd=str(path.parent),
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+    )
+
+    matches: list[str] = []
+    try:
+        assert process.stdout is not None
+        while len(matches) < limit:
+            raw = await process.stdout.readline()
+            if not raw:
+                break
+            line = raw.decode("utf-8", errors="replace").rstrip("\n")
+            if not line:
+                continue
+            matches.append(f"{_format_path(path, display_base)}:{line}")
+    finally:
+        if len(matches) >= limit and process.returncode is None:
+            process.terminate()
+        await process.wait()
+
+    if process.returncode in {0, 1}:
+        return matches
+    return None
+
+
+def _format_path(path: Path, display_base: Path) -> str:
+    try:
+        return str(path.relative_to(display_base))
+    except ValueError:
+        return str(path)

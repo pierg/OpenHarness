@@ -7,7 +7,10 @@ import {ModalHost} from './components/ModalHost.js';
 import {PromptInput} from './components/PromptInput.js';
 import {SelectModal, type SelectOption} from './components/SelectModal.js';
 import {StatusBar} from './components/StatusBar.js';
+import {SwarmPanel} from './components/SwarmPanel.js';
+import {TodoPanel} from './components/TodoPanel.js';
 import {useBackendSession} from './hooks/useBackendSession.js';
+import {ThemeProvider, useTheme} from './theme/ThemeContext.js';
 import type {FrontendConfig} from './types.js';
 
 const rawReturnSubmit = process.env.OPENHARNESS_FRONTEND_RAW_RETURN === '1';
@@ -24,11 +27,20 @@ const scriptedSteps = (() => {
 	}
 })();
 
-const PERMISSION_MODES: SelectOption[] = [
-	{value: 'default', label: 'Default', description: 'Ask before write/execute operations'},
-	{value: 'full_auto', label: 'Auto', description: 'Allow all tools automatically'},
-	{value: 'plan', label: 'Plan Mode', description: 'Block all write operations'},
-];
+const SELECTABLE_COMMANDS = new Set([
+	'/provider',
+	'/model',
+	'/theme',
+	'/output-style',
+	'/permissions',
+	'/resume',
+	'/effort',
+	'/passes',
+	'/turns',
+	'/fast',
+	'/vim',
+	'/voice',
+]);
 
 type SelectModalState = {
 	title: string;
@@ -37,7 +49,17 @@ type SelectModalState = {
 } | null;
 
 export function App({config}: {config: FrontendConfig}): React.JSX.Element {
+	const initialTheme = String((config as Record<string, unknown>).theme ?? 'default');
+	return (
+		<ThemeProvider initialTheme={initialTheme}>
+			<AppInner config={config} />
+		</ThemeProvider>
+	);
+}
+
+function AppInner({config}: {config: FrontendConfig}): React.JSX.Element {
 	const {exit} = useApp();
+	const {theme, setThemeName} = useTheme();
 	const [input, setInput] = useState('');
 	const [modalInput, setModalInput] = useState('');
 	const [history, setHistory] = useState<string[]>([]);
@@ -47,6 +69,13 @@ export function App({config}: {config: FrontendConfig}): React.JSX.Element {
 	const [selectModal, setSelectModal] = useState<SelectModalState>(null);
 	const [selectIndex, setSelectIndex] = useState(0);
 	const session = useBackendSession(config, () => exit());
+
+	useEffect(() => {
+		const nextTheme = session.status.theme;
+		if (typeof nextTheme === 'string' && nextTheme) {
+			setThemeName(nextTheme);
+		}
+	}, [session.status.theme, setThemeName]);
 
 	// Current tool name for spinner
 	const currentToolName = useMemo(() => {
@@ -87,12 +116,13 @@ export function App({config}: {config: FrontendConfig}): React.JSX.Element {
 			session.setSelectRequest(null);
 			return;
 		}
-		setSelectIndex(0);
+		const initialIndex = req.options.findIndex((option) => option.active);
+		setSelectIndex(initialIndex >= 0 ? initialIndex : 0);
 		setSelectModal({
 			title: req.title,
-			options: req.options.map((o) => ({value: o.value, label: o.label, description: o.description})),
+			options: req.options.map((o) => ({value: o.value, label: o.label, description: o.description, active: o.active})),
 			onSelect: (value) => {
-				session.sendRequest({type: 'submit_line', line: `${req.submitPrefix}${value}`});
+				session.sendRequest({type: 'apply_select_command', command: req.command, value});
 				session.setBusy(true);
 				setSelectModal(null);
 			},
@@ -104,24 +134,14 @@ export function App({config}: {config: FrontendConfig}): React.JSX.Element {
 	const handleCommand = (cmd: string): boolean => {
 		const trimmed = cmd.trim();
 
+		if (SELECTABLE_COMMANDS.has(trimmed)) {
+			session.sendRequest({type: 'select_command', command: trimmed.slice(1)});
+			return true;
+		}
+
 		// /permissions → show mode picker
 		if (trimmed === '/permissions' || trimmed === '/permissions show') {
-			const currentMode = String(session.status.permission_mode ?? 'default');
-			const options = PERMISSION_MODES.map((opt) => ({
-				...opt,
-				active: opt.value === currentMode,
-			}));
-			const initialIndex = options.findIndex((o) => o.active);
-			setSelectIndex(initialIndex >= 0 ? initialIndex : 0);
-			setSelectModal({
-				title: 'Permission Mode',
-				options,
-				onSelect: (value) => {
-					session.sendRequest({type: 'submit_line', line: `/permissions set ${value}`});
-					session.setBusy(true);
-					setSelectModal(null);
-				},
-			});
+			session.sendRequest({type: 'select_command', command: 'permissions'});
 			return true;
 		}
 
@@ -139,7 +159,7 @@ export function App({config}: {config: FrontendConfig}): React.JSX.Element {
 
 		// /resume → request session list from backend (will trigger select_request)
 		if (trimmed === '/resume') {
-			session.sendRequest({type: 'list_sessions'});
+			session.sendRequest({type: 'select_command', command: 'resume'});
 			return true;
 		}
 
@@ -147,10 +167,17 @@ export function App({config}: {config: FrontendConfig}): React.JSX.Element {
 	};
 
 	useInput((chunk, key) => {
+		const isPaste = chunk.length > 1 && !key.ctrl && !key.meta;
+
 		// Ctrl+C → exit
 		if (key.ctrl && chunk === 'c') {
 			session.sendRequest({type: 'shutdown'});
 			exit();
+			return;
+		}
+
+		// Let ink-text-input handle pasted text directly.
+		if (isPaste) {
 			return;
 		}
 
@@ -205,7 +232,7 @@ export function App({config}: {config: FrontendConfig}): React.JSX.Element {
 			}
 		}
 
-		// --- Permission modal ---
+		// --- Permission modal (MUST be before busy check — modal appears while busy) ---
 		if (session.modal?.kind === 'permission') {
 			if (chunk.toLowerCase() === 'y') {
 				session.sendRequest({
@@ -226,6 +253,11 @@ export function App({config}: {config: FrontendConfig}): React.JSX.Element {
 				return;
 			}
 			return;
+		}
+
+		// --- Question modal (also appears while busy) ---
+		if (session.modal?.kind === 'question') {
+			return; // Let TextInput in ModalHost handle input
 		}
 
 		// --- Ignore input while busy ---
@@ -282,11 +314,8 @@ export function App({config}: {config: FrontendConfig}): React.JSX.Element {
 			return;
 		}
 
-		// --- Submit on Enter ---
-		if (!showPicker && key.return && input.trim()) {
-			onSubmit(input);
-			return;
-		}
+		// Note: normal Enter submission is handled by TextInput's onSubmit in
+		// PromptInput.  Do NOT duplicate it here — that causes double requests.
 	});
 
 	const onSubmit = (value: string): void => {
@@ -300,7 +329,7 @@ export function App({config}: {config: FrontendConfig}): React.JSX.Element {
 			setModalInput('');
 			return;
 		}
-		if (!value.trim() || session.busy) {
+		if (!value.trim() || session.busy || !session.ready) {
 			return;
 		}
 		// Check if it's an interactive command
@@ -340,7 +369,7 @@ export function App({config}: {config: FrontendConfig}): React.JSX.Element {
 				<ConversationView
 					items={session.transcript}
 					assistantBuffer={session.assistantBuffer}
-					showWelcome={true}
+					showWelcome={session.ready}
 				/>
 			</Box>
 
@@ -368,11 +397,27 @@ export function App({config}: {config: FrontendConfig}): React.JSX.Element {
 				<CommandPicker hints={commandHints} selectedIndex={pickerIndex} />
 			) : null}
 
-			{/* Status bar */}
-			<StatusBar status={session.status} tasks={session.tasks} />
+			{/* Todo panel */}
+			{session.ready && session.todoMarkdown ? (
+				<TodoPanel markdown={session.todoMarkdown} />
+			) : null}
 
-			{/* Input */}
-			{session.modal || selectModal ? null : (
+			{/* Swarm panel */}
+			{session.ready && (session.swarmTeammates.length > 0 || session.swarmNotifications.length > 0) ? (
+				<SwarmPanel teammates={session.swarmTeammates} notifications={session.swarmNotifications} />
+			) : null}
+
+			{/* Status bar (only after backend is ready) */}
+			{session.ready ? (
+				<StatusBar status={session.status} tasks={session.tasks} activeToolName={session.busy ? currentToolName : undefined} />
+			) : null}
+
+			{/* Input — show loading indicator until backend is ready */}
+			{!session.ready ? (
+				<Box>
+					<Text color={theme.colors.warning}>Connecting to backend...</Text>
+				</Box>
+			) : session.modal || selectModal ? null : (
 				<PromptInput
 					busy={session.busy}
 					input={input}
@@ -383,14 +428,14 @@ export function App({config}: {config: FrontendConfig}): React.JSX.Element {
 				/>
 			)}
 
-			{/* Keyboard hints */}
-			{!session.modal && !session.busy && !selectModal ? (
+			{/* Keyboard hints (only after backend is ready) */}
+			{session.ready && !session.modal && !session.busy && !selectModal ? (
 				<Box>
 					<Text dimColor>
-						<Text color="cyan">enter</Text> send{'  '}
-						<Text color="cyan">/</Text> commands{'  '}
-						<Text color="cyan">{'\u2191\u2193'}</Text> history{'  '}
-						<Text color="cyan">ctrl+c</Text> exit
+						<Text color={theme.colors.primary}>enter</Text> send{'  '}
+						<Text color={theme.colors.primary}>/</Text> commands{'  '}
+						<Text color={theme.colors.primary}>{'\u2191\u2193'}</Text> history{'  '}
+						<Text color={theme.colors.primary}>ctrl+c</Text> exit
 					</Text>
 				</Box>
 			) : null}

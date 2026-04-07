@@ -72,7 +72,7 @@ class OpenHarnessHarborAgent(BaseAgent):
         )
 
         self._agent_name = agent_name
-        factory = AgentFactory.with_default_configs()
+        factory = AgentFactory.with_catalog_configs()
         config = factory.get_config(agent_name)
 
         overrides: dict[str, Any] = {}

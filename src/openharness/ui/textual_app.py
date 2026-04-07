@@ -19,6 +19,8 @@ from openharness.config.settings import load_settings, save_settings
 from openharness.engine.stream_events import (
     AssistantTextDelta,
     AssistantTurnComplete,
+    ErrorEvent,
+    StatusEvent,
     StreamEvent,
     ToolExecutionCompleted,
     ToolExecutionStarted,
@@ -32,6 +34,7 @@ class AppConfig:
     """Configuration for a terminal app session."""
 
     prompt: str | None = None
+    cwd: str | None = None
     model: str | None = None
     base_url: str | None = None
     system_prompt: str | None = None
@@ -239,6 +242,7 @@ class OpenHarnessTerminalApp(App[None]):
     async def on_mount(self) -> None:
         self._bundle = await build_runtime(
             prompt=self._config.prompt,
+            cwd=self._config.cwd,
             model=self._config.model,
             base_url=self._config.base_url,
             system_prompt=self._config.system_prompt,
@@ -329,6 +333,15 @@ class OpenHarnessTerminalApp(App[None]):
         if isinstance(event, ToolExecutionCompleted):
             prefix = "tool-error>" if event.is_error else "tool-result>"
             self._append_line(f"{prefix} {event.tool_name}: {event.output}")
+            return
+
+        if isinstance(event, ErrorEvent):
+            self._append_line(f"error> {event.message}")
+            self._assistant_buffer = ""
+            self._set_current_response("Ready.")
+            return
+        if isinstance(event, StatusEvent):
+            self._append_line(f"system> {event.message}")
 
     def action_clear_conversation(self) -> None:
         if self._bundle is None:

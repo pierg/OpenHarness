@@ -120,6 +120,11 @@ class AgentRuntime:
         """Return the resolved LLM provider name for the primary model."""
         return self.get_provider_name()
 
+    @property
+    def trace_observer(self) -> TraceObserver:
+        """Return the active trace observer."""
+        return self._trace_observer
+
     # ------------------------------------------------------------------
     # High-level agent execution helpers
     # ------------------------------------------------------------------
@@ -157,22 +162,46 @@ class AgentRuntime:
         validated model instance is returned.
         """
         extra = dict(extra_template_vars or {})
+        with self._trace_observer.span(
+            name=f"agent:{config.name}",
+            input={
+                "instruction": task.instruction,
+                "payload": task.payload,
+            },
+            metadata={
+                "architecture": config.architecture,
+                "model": config.model,
+                "structured_output_type": (
+                    output_type.__name__
+                    if output_type is not None and issubclass(output_type, BaseModel)
+                    else None
+                ),
+            },
+        ) as span:
+            if output_type is not None and issubclass(output_type, BaseModel):
+                schema_json = json.dumps(output_type.model_json_schema(), indent=2)
+                extra["_output_schema_instruction"] = (
+                    "\n\nIMPORTANT: You MUST respond ONLY with a valid JSON object "
+                    f"matching this schema:\n```json\n{schema_json}\n```\n"
+                    "Do not include any text before or after the JSON object."
+                )
 
-        if output_type is not None and issubclass(output_type, BaseModel):
-            schema_json = json.dumps(output_type.model_json_schema(), indent=2)
-            extra["_output_schema_instruction"] = (
-                "\n\nIMPORTANT: You MUST respond ONLY with a valid JSON object "
-                f"matching this schema:\n```json\n{schema_json}\n```\n"
-                "Do not include any text before or after the JSON object."
+            conv = self.create_conversation(config, task, extra or None)
+            text = await conv.run_to_completion()
+
+            if output_type is not None:
+                parsed = _parse_structured_output(text, output_type)
+                span.update(
+                    output=parsed,
+                    metadata={"message_count": len(conv.messages)},
+                )
+                return parsed
+
+            span.update(
+                output=text,
+                metadata={"message_count": len(conv.messages)},
             )
-
-        conv = self.create_conversation(config, task, extra or None)
-        text = await conv.run_to_completion()
-
-        if output_type is not None:
-            return _parse_structured_output(text, output_type)
-
-        return text
+            return text
 
     # ------------------------------------------------------------------
     # Lower-level building blocks (still public for backward compat)
