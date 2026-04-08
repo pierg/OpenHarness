@@ -26,18 +26,18 @@ def _preview_text(text: str, *, limit: int = 120) -> str:
 def _resolve_sender_agent_id() -> str | None:
     """Return the current worker identity from the teammate context."""
     from openharness.swarm.in_process import get_teammate_context
-    
+
     context = get_teammate_context()
     if context is not None:
         return context.agent_id
 
-    return None
+    return os.environ.get("CLAUDE_CODE_AGENT_ID")
 
 
 def _resolve_active_thread() -> tuple[str | None, str | None]:
     """Return ``(reply_to, correlation_id)`` for the current worker turn."""
     from openharness.swarm.in_process import get_teammate_context
-    
+
     context = get_teammate_context()
     if context is None:
         return None, None
@@ -47,7 +47,7 @@ def _resolve_active_thread() -> tuple[str | None, str | None]:
 def _mark_explicit_reply_sent() -> None:
     """Mark the current in-process teammate turn as explicitly replied."""
     from openharness.swarm.in_process import get_teammate_context
-    
+
     context = get_teammate_context()
     if context is None:
         return
@@ -70,12 +70,7 @@ class SendMessageTool(BaseTool):
 
     async def execute(self, arguments: SendMessageToolInput, context: ToolExecutionContext) -> ToolResult:
         del context
-        sender_agent_id = _resolve_sender_agent_id()
-        if not sender_agent_id:
-            raise RuntimeError(
-                "Cannot resolve sender agent ID. CLAUDE_CODE_AGENT_ID environment "
-                "variable is missing and no teammate context is active."
-            )
+        sender_agent_id = _resolve_sender_agent_id() or "coordinator"
 
         reply_to, inherited_correlation_id = _resolve_active_thread()
         message_id = uuid4().hex
@@ -118,12 +113,6 @@ class SendMessageTool(BaseTool):
     ) -> ToolResult:
         """Route a message to a swarm agent via the backend."""
         registry = get_backend_registry()
-        # Prefer in_process backend for mailbox-based delivery
-        try:
-            executor = registry.get_executor("in_process")
-        except KeyError:
-            executor = registry.get_executor("subprocess")
-
         teammate_msg = TeammateMessage(
             text=message,
             from_agent=sender_agent_id,
@@ -133,9 +122,19 @@ class SendMessageTool(BaseTool):
             summary=summary,
         )
         try:
+            executor = registry.get_executor("subprocess")
             await executor.send_message(agent_id, teammate_msg)
         except ValueError as exc:
-            return ToolResult(output=str(exc), is_error=True)
+            try:
+                fallback = registry.get_executor("in_process")
+            except KeyError:
+                return ToolResult(output=str(exc), is_error=True)
+            if fallback is executor:
+                return ToolResult(output=str(exc), is_error=True)
+            try:
+                await fallback.send_message(agent_id, teammate_msg)
+            except ValueError:
+                return ToolResult(output=str(exc), is_error=True)
         except Exception as exc:
             logger.error("Failed to send message to %s: %s", agent_id, exc)
             return ToolResult(output=str(exc), is_error=True)
