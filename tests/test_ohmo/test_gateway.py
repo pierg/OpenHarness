@@ -1,4 +1,5 @@
 import asyncio
+import logging
 from types import SimpleNamespace
 from datetime import datetime
 import json
@@ -8,7 +9,7 @@ import pytest
 from openharness.api.usage import UsageSnapshot
 from openharness.channels.bus.events import InboundMessage
 from openharness.channels.bus.queue import MessageBus
-from openharness.engine.messages import ConversationMessage
+from openharness.engine.messages import ConversationMessage, ImageBlock, TextBlock
 from openharness.engine.stream_events import AssistantTextDelta, ToolExecutionStarted
 
 from ohmo.gateway.bridge import OhmoGatewayBridge, _format_gateway_error
@@ -172,11 +173,113 @@ async def test_runtime_pool_stream_message_emits_progress_and_tool_hint(tmp_path
     updates = [u async for u in pool.stream_message(message, "feishu:c1")]
 
     assert updates[0].kind == "progress"
-    assert updates[0].text == "Thinking..."
+    assert updates[0].text.startswith(("🤔", "🧠", "✨", "🔎", "🪄"))
     assert updates[1].kind == "tool_hint"
-    assert "Using web_fetch" in updates[1].text
+    assert updates[1].text.startswith("🛠️ ")
+    assert "web_fetch" in updates[1].text
     assert updates[-1].kind == "final"
     assert updates[-1].text == "done"
+
+
+@pytest.mark.asyncio
+async def test_runtime_pool_stream_message_uses_english_progress_for_english_input(tmp_path, monkeypatch):
+    workspace = tmp_path / ".ohmo-home"
+    initialize_workspace(workspace)
+
+    async def fake_build_runtime(**kwargs):
+        class FakeEngine:
+            messages = []
+            total_usage = UsageSnapshot()
+
+            def set_system_prompt(self, prompt):
+                return None
+
+            async def submit_message(self, content):
+                yield ToolExecutionStarted(tool_name="web_fetch", tool_input={"url": "https://example.com"})
+                yield AssistantTextDelta(text="done")
+
+        return SimpleNamespace(
+            engine=FakeEngine(),
+            session_id="sess123",
+            current_settings=lambda: SimpleNamespace(model="gpt-5.4"),
+        )
+
+    async def fake_start_runtime(bundle):
+        return None
+
+    monkeypatch.setattr("ohmo.gateway.runtime.build_runtime", fake_build_runtime)
+    monkeypatch.setattr("ohmo.gateway.runtime.start_runtime", fake_start_runtime)
+
+    pool = OhmoSessionRuntimePool(cwd=tmp_path, workspace=workspace, provider_profile="codex")
+    message = InboundMessage(channel="feishu", sender_id="u1", chat_id="c1", content="can you check this")
+    updates = [u async for u in pool.stream_message(message, "feishu:c1")]
+
+    assert updates[0].kind == "progress"
+    assert updates[0].text.startswith(("🤔", "🧠", "✨", "🔎", "🪄"))
+    assert "Thinking" in updates[0].text or "Working" in updates[0].text or "Looking" in updates[0].text or "Following" in updates[0].text or "Pulling" in updates[0].text
+    assert updates[1].kind == "tool_hint"
+    assert updates[1].text.startswith("🛠️ Using web_fetch")
+
+
+@pytest.mark.asyncio
+async def test_runtime_pool_includes_media_paths_in_prompt(tmp_path, monkeypatch):
+    workspace = tmp_path / ".ohmo-home"
+    initialize_workspace(workspace)
+    image_path = tmp_path / "example.png"
+    image_path.write_bytes(
+        b"\x89PNG\r\n\x1a\n"
+        b"\x00\x00\x00\rIHDR"
+        b"\x00\x00\x00\x01\x00\x00\x00\x01\x08\x02\x00\x00\x00"
+        b"\x90wS\xde\x00\x00\x00\nIDATx\x9cc`\x00\x00\x00\x02\x00\x01"
+        b"\xe2!\xbc3\x00\x00\x00\x00IEND\xaeB`\x82"
+    )
+    report_path = tmp_path / "report.txt"
+    report_path.write_text("Quarterly summary\nRevenue up 12%\n", encoding="utf-8")
+    captured: dict[str, object] = {}
+
+    async def fake_build_runtime(**kwargs):
+        class FakeEngine:
+            messages = []
+            total_usage = UsageSnapshot()
+
+            def set_system_prompt(self, prompt):
+                return None
+
+            async def submit_message(self, content):
+                captured["content"] = content
+                yield AssistantTextDelta(text="done")
+
+        return SimpleNamespace(
+            engine=FakeEngine(),
+            session_id="sess123",
+            current_settings=lambda: SimpleNamespace(model="gpt-5.4"),
+        )
+
+    async def fake_start_runtime(bundle):
+        return None
+
+    monkeypatch.setattr("ohmo.gateway.runtime.build_runtime", fake_build_runtime)
+    monkeypatch.setattr("ohmo.gateway.runtime.start_runtime", fake_start_runtime)
+
+    pool = OhmoSessionRuntimePool(cwd=tmp_path, workspace=workspace, provider_profile="codex")
+    message = InboundMessage(
+        channel="feishu",
+        sender_id="u1",
+        chat_id="c1",
+        content="请看这个图片",
+        media=[str(image_path), str(report_path)],
+    )
+    updates = [u async for u in pool.stream_message(message, "feishu:c1")]
+
+    assert updates[-1].text == "done"
+    submitted = captured["content"]
+    assert isinstance(submitted, ConversationMessage)
+    assert any(isinstance(block, ImageBlock) for block in submitted.content)
+    text = "".join(block.text for block in submitted.content if isinstance(block, TextBlock))
+    assert "[Channel attachments]" in text
+    assert f"image: example.png (path: {image_path})" in text
+    assert f"file: report.txt (path: {report_path})" in text
+    assert "text preview: Quarterly summary Revenue up 12%" in text
 
 
 @pytest.mark.asyncio
@@ -185,8 +288,8 @@ async def test_gateway_bridge_publishes_progress_updates():
 
     class FakeRuntimePool:
         async def stream_message(self, message, session_key):
-            yield SimpleNamespace(kind="progress", text="Thinking...", metadata={"_progress": True, "_session_key": session_key})
-            yield SimpleNamespace(kind="tool_hint", text="Using web_fetch: https://example.com", metadata={"_progress": True, "_tool_hint": True, "_session_key": session_key})
+            yield SimpleNamespace(kind="progress", text="🤔 想一想…", metadata={"_progress": True, "_session_key": session_key})
+            yield SimpleNamespace(kind="tool_hint", text="🛠️ 正在使用 web_fetch: https://example.com", metadata={"_progress": True, "_tool_hint": True, "_session_key": session_key})
             yield SimpleNamespace(kind="final", text="Done", metadata={"_session_key": session_key})
 
     bridge = OhmoGatewayBridge(bus=bus, runtime_pool=FakeRuntimePool())
@@ -206,8 +309,81 @@ async def test_gateway_bridge_publishes_progress_updates():
         except asyncio.CancelledError:
             pass
 
-    assert first.content == "Thinking..."
+    assert first.content.startswith(("🤔", "🧠", "✨", "🔎", "🪄"))
     assert first.metadata["_progress"] is True
     assert second.metadata["_tool_hint"] is True
-    assert "Using web_fetch" in second.content
+    assert second.content.startswith("🛠️ ")
+    assert "web_fetch" in second.content
     assert third.content == "Done"
+
+
+@pytest.mark.asyncio
+async def test_gateway_bridge_logs_inbound_and_final(caplog):
+    bus = MessageBus()
+
+    class FakeRuntimePool:
+        async def stream_message(self, message, session_key):
+            yield SimpleNamespace(kind="progress", text="🤔 想一想…", metadata={"_progress": True, "_session_key": session_key})
+            yield SimpleNamespace(kind="final", text="Done", metadata={"_session_key": session_key})
+
+    bridge = OhmoGatewayBridge(bus=bus, runtime_pool=FakeRuntimePool())
+    task = asyncio.create_task(bridge.run())
+    caplog.set_level(logging.INFO)
+    try:
+        await bus.publish_inbound(
+            InboundMessage(channel="feishu", sender_id="u1", chat_id="c1", content="please translate this")
+        )
+        await asyncio.wait_for(bus.consume_outbound(), timeout=1.0)
+        await asyncio.wait_for(bus.consume_outbound(), timeout=1.0)
+    finally:
+        bridge.stop()
+        task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
+
+    assert "ohmo inbound received" in caplog.text
+    assert "ohmo outbound final" in caplog.text
+    assert "please translate this" in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_runtime_pool_logs_session_lifecycle(tmp_path, monkeypatch, caplog):
+    workspace = tmp_path / ".ohmo-home"
+    initialize_workspace(workspace)
+
+    async def fake_build_runtime(**kwargs):
+        class FakeEngine:
+            messages = []
+            total_usage = UsageSnapshot()
+
+            def set_system_prompt(self, prompt):
+                return None
+
+            async def submit_message(self, content):
+                yield ToolExecutionStarted(tool_name="web_fetch", tool_input={"url": "https://example.com"})
+                yield AssistantTextDelta(text="done")
+
+        return SimpleNamespace(
+            engine=FakeEngine(),
+            session_id="sess123",
+            current_settings=lambda: SimpleNamespace(model="gpt-5.4"),
+        )
+
+    async def fake_start_runtime(bundle):
+        return None
+
+    monkeypatch.setattr("ohmo.gateway.runtime.build_runtime", fake_build_runtime)
+    monkeypatch.setattr("ohmo.gateway.runtime.start_runtime", fake_start_runtime)
+
+    pool = OhmoSessionRuntimePool(cwd=tmp_path, workspace=workspace, provider_profile="codex")
+    message = InboundMessage(channel="feishu", sender_id="u1", chat_id="c1", content="check")
+    caplog.set_level(logging.INFO)
+    updates = [u async for u in pool.stream_message(message, "feishu:c1")]
+
+    assert updates[-1].text == "done"
+    assert "ohmo runtime processing start" in caplog.text
+    assert "ohmo runtime tool start" in caplog.text
+    assert "ohmo runtime saved snapshot" in caplog.text
+    assert "ohmo runtime processing complete" in caplog.text

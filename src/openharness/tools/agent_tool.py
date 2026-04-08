@@ -61,18 +61,11 @@ class AgentTool(BaseTool):
         )
         registry = get_backend_registry()
         try:
-            try:
-                if arguments.mode == "in_process_teammate":
-                    executor = registry.get_executor("in_process")
-                elif arguments.mode == "remote_agent":
-                    executor = registry.get_executor("subprocess")
-                else:
-                    try:
-                        executor = registry.get_executor("in_process")
-                    except KeyError:
-                        executor = registry.get_executor("subprocess")
-            except KeyError:
-                executor = registry.get_executor()
+            if arguments.mode == "in_process_teammate":
+                executor = registry.get_executor("in_process")
+            else:
+                # Keep default agents pollable through the task manager.
+                executor = registry.get_executor("subprocess")
 
             config = TeammateSpawnConfig(
                 name=agent_name,
