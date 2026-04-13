@@ -21,6 +21,7 @@ class GrepToolInput(BaseModel):
     file_glob: str = Field(default="**/*")
     case_sensitive: bool = Field(default=True)
     limit: int = Field(default=200, ge=1, le=2000)
+    timeout_seconds: int = Field(default=20, ge=1, le=120)
 
 
 class GrepTool(BaseTool):
@@ -40,51 +41,53 @@ class GrepTool(BaseTool):
     async def execute(self, arguments: GrepToolInput, context: ToolExecutionContext) -> ToolResult:
         workspace = self._workspace or LocalWorkspace(context.cwd)
 
-        if isinstance(workspace, LocalWorkspace):
-            root = _resolve_path(Path(workspace.cwd), arguments.root)
-            if root.is_file():
-                display_base = _display_base(root, Path(workspace.cwd))
-                matches = await _rg_grep_file(
-                    path=root,
+        if not isinstance(workspace, LocalWorkspace):
+            return await self._execute_via_shell(arguments, workspace)
+
+        root = _resolve_path(Path(workspace.cwd), arguments.root)
+        if root.is_file():
+            display_base = _display_base(root, Path(workspace.cwd))
+            matches = await _rg_grep_file(
+                path=root,
+                pattern=arguments.pattern,
+                case_sensitive=arguments.case_sensitive,
+                limit=arguments.limit,
+                display_base=display_base,
+                timeout_seconds=arguments.timeout_seconds,
+            )
+            if matches is not None:
+                return _format_rg_result(matches, arguments.timeout_seconds)
+
+            return ToolResult(
+                output=_python_grep_files(
+                    paths=[root],
                     pattern=arguments.pattern,
                     case_sensitive=arguments.case_sensitive,
                     limit=arguments.limit,
                     display_base=display_base,
                 )
-                if matches is not None:
-                    return ToolResult(output="\n".join(matches) if matches else "(no matches)")
+            )
 
-                return ToolResult(
-                    output=_python_grep_files(
-                        paths=[root],
-                        pattern=arguments.pattern,
-                        case_sensitive=arguments.case_sensitive,
-                        limit=arguments.limit,
-                        display_base=display_base,
-                    )
-                )
+        matches = await _rg_grep(
+            root=root,
+            pattern=arguments.pattern,
+            file_glob=arguments.file_glob,
+            case_sensitive=arguments.case_sensitive,
+            limit=arguments.limit,
+            timeout_seconds=arguments.timeout_seconds,
+        )
+        if matches is not None:
+            return _format_rg_result(matches, arguments.timeout_seconds)
 
-            matches = await _rg_grep(
-                root=root,
+        return ToolResult(
+            output=_python_grep_files(
+                paths=root.glob(arguments.file_glob),
                 pattern=arguments.pattern,
-                file_glob=arguments.file_glob,
                 case_sensitive=arguments.case_sensitive,
                 limit=arguments.limit,
+                display_base=root,
             )
-            if matches is not None:
-                return ToolResult(output="\n".join(matches) if matches else "(no matches)")
-
-            return ToolResult(
-                output=_python_grep_files(
-                    paths=root.glob(arguments.file_glob),
-                    pattern=arguments.pattern,
-                    case_sensitive=arguments.case_sensitive,
-                    limit=arguments.limit,
-                    display_base=root,
-                )
-            )
-
-        return await self._execute_via_shell(arguments, workspace)
+        )
 
     async def _execute_via_shell(self, arguments: GrepToolInput, workspace: Workspace) -> ToolResult:
         root = arguments.root or workspace.cwd
@@ -97,13 +100,13 @@ class GrepTool(BaseTool):
             f"-- {_sq(arguments.pattern)} {_sq(root)} "
             f"2>/dev/null | head -n {arguments.limit}"
         )
-        result = await workspace.run_shell(cmd, cwd=root)
+        result = await workspace.run_shell(cmd, cwd=root, timeout_seconds=arguments.timeout_seconds)
         lines = [ln for ln in result.stdout.strip().splitlines() if ln]
         if not lines:
             return ToolResult(output="(no matches)")
         prefix = root.rstrip("/") + "/"
         relative = [ln[len(prefix):] if ln.startswith(prefix) else ln for ln in lines]
-        return ToolResult(output="\n".join(relative))
+        return ToolResult(output="\n".join(relative), is_error=result.return_code not in {0, 1})
 
 
 def _display_base(path: Path, cwd: Path) -> Path:
@@ -161,6 +164,19 @@ def _sq(s: str) -> str:
     return "'" + s.replace("'", "'\\''") + "'"
 
 
+def _format_rg_result(matches: list[str], timeout_seconds: int) -> ToolResult:
+    timed_out = bool(matches and matches[-1] == _timeout_marker(timeout_seconds))
+    rendered = matches[:-1] if timed_out else matches
+    output = "\n".join(rendered) if rendered else "(no matches)"
+    if timed_out:
+        output = (
+            f"{output}\n\n[grep timed out after {timeout_seconds} seconds]"
+            if output != "(no matches)"
+            else f"[grep timed out after {timeout_seconds} seconds]"
+        )
+    return ToolResult(output=output, is_error=timed_out)
+
+
 async def _rg_grep(
     *,
     root: Path,
@@ -168,6 +184,7 @@ async def _rg_grep(
     file_glob: str,
     case_sensitive: bool,
     limit: int,
+    timeout_seconds: int,
 ) -> list[str] | None:
     """Return matches using ripgrep, or None if ripgrep is unavailable."""
     rg = shutil.which("rg")
@@ -190,29 +207,44 @@ async def _rg_grep(
         cmd.extend(["--glob", file_glob])
     cmd.extend(["--", pattern, "."])
 
-    process = await asyncio.create_subprocess_exec(
-        *cmd,
-        cwd=str(root),
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.PIPE,
-    )
+    from openharness.sandbox.session import get_docker_sandbox
+
+    session = get_docker_sandbox()
+    if session is not None and session.is_running:
+        process = await session.exec_command(
+            cmd,
+            cwd=root,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+    else:
+        process = await asyncio.create_subprocess_exec(
+            *cmd,
+            cwd=str(root),
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+            limit=8 * 1024 * 1024,
+        )
 
     matches: list[str] = []
     try:
-        assert process.stdout is not None
-        while len(matches) < limit:
-            raw = await process.stdout.readline()
-            if not raw:
-                break
-            line = raw.decode("utf-8", errors="replace").rstrip("\n")
-            if line:
-                matches.append(line)
+        await asyncio.wait_for(
+            _collect_rg_matches(process, matches, limit=limit),
+            timeout=timeout_seconds,
+        )
+    except asyncio.TimeoutError:
+        matches.append(_timeout_marker(timeout_seconds))
+        await _terminate_process(process)
+    except asyncio.CancelledError:
+        await _terminate_process(process)
+        raise
     finally:
         if len(matches) >= limit and process.returncode is None:
-            process.terminate()
-        await process.wait()
+            await _terminate_process(process)
+        elif process.returncode is None:
+            await process.wait()
 
-    if process.returncode in {0, 1}:
+    if process.returncode in {0, 1, -15, -9}:
         return matches
     return None
 
@@ -224,6 +256,7 @@ async def _rg_grep_file(
     case_sensitive: bool,
     limit: int,
     display_base: Path,
+    timeout_seconds: int,
 ) -> list[str] | None:
     rg = shutil.which("rg")
     if not rg:
@@ -240,32 +273,108 @@ async def _rg_grep_file(
         cmd.append("-i")
     cmd.extend(["--", pattern, path.name])
 
-    process = await asyncio.create_subprocess_exec(
-        *cmd,
-        cwd=str(path.parent),
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.PIPE,
-    )
+    from openharness.sandbox.session import get_docker_sandbox
+
+    session = get_docker_sandbox()
+    if session is not None and session.is_running:
+        process = await session.exec_command(
+            cmd,
+            cwd=path.parent,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+    else:
+        process = await asyncio.create_subprocess_exec(
+            *cmd,
+            cwd=str(path.parent),
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+            limit=8 * 1024 * 1024,
+        )
 
     matches: list[str] = []
     try:
-        assert process.stdout is not None
-        while len(matches) < limit:
-            raw = await process.stdout.readline()
-            if not raw:
-                break
-            line = raw.decode("utf-8", errors="replace").rstrip("\n")
-            if not line:
-                continue
-            matches.append(f"{_format_path(path, display_base)}:{line}")
+        await asyncio.wait_for(
+            _collect_rg_file_matches(
+                process,
+                matches,
+                limit=limit,
+                path=path,
+                display_base=display_base,
+            ),
+            timeout=timeout_seconds,
+        )
+    except asyncio.TimeoutError:
+        matches.append(_timeout_marker(timeout_seconds))
+        await _terminate_process(process)
+    except asyncio.CancelledError:
+        await _terminate_process(process)
+        raise
     finally:
         if len(matches) >= limit and process.returncode is None:
-            process.terminate()
-        await process.wait()
+            await _terminate_process(process)
+        elif process.returncode is None:
+            await process.wait()
 
-    if process.returncode in {0, 1}:
+    if process.returncode in {0, 1, -15, -9}:
         return matches
     return None
+
+
+def _timeout_marker(timeout_seconds: int) -> str:
+    return f"__OPENHARNESS_GREP_TIMEOUT__:{timeout_seconds}"
+
+
+async def _collect_rg_matches(
+    process: asyncio.subprocess.Process,
+    matches: list[str],
+    *,
+    limit: int,
+) -> None:
+    assert process.stdout is not None
+    while len(matches) < limit:
+        try:
+            raw = await process.stdout.readline()
+        except ValueError:
+            continue
+        if not raw:
+            break
+        line = raw.decode("utf-8", errors="replace").rstrip("\n")
+        if line:
+            matches.append(line)
+
+
+async def _collect_rg_file_matches(
+    process: asyncio.subprocess.Process,
+    matches: list[str],
+    *,
+    limit: int,
+    path: Path,
+    display_base: Path,
+) -> None:
+    assert process.stdout is not None
+    while len(matches) < limit:
+        try:
+            raw = await process.stdout.readline()
+        except ValueError:
+            continue
+        if not raw:
+            break
+        line = raw.decode("utf-8", errors="replace").rstrip("\n")
+        if not line:
+            continue
+        matches.append(f"{_format_path(path, display_base)}:{line}")
+
+
+async def _terminate_process(process: asyncio.subprocess.Process) -> None:
+    if process.returncode is not None:
+        return
+    process.terminate()
+    try:
+        await asyncio.wait_for(process.wait(), timeout=2.0)
+    except asyncio.TimeoutError:
+        process.kill()
+        await process.wait()
 
 
 def _format_path(path: Path, display_base: Path) -> str:

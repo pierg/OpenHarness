@@ -14,7 +14,6 @@ from openharness.api.provider import auth_status, detect_provider
 from openharness.bridge import get_bridge_manager
 from openharness.commands import CommandContext, CommandResult, create_default_command_registry
 from openharness.config import get_config_file_path, load_settings
-from openharness.config.settings import display_model_setting
 from openharness.engine import QueryEngine
 from openharness.engine.messages import ConversationMessage, ToolResultBlock, ToolUseBlock
 from openharness.engine.query import MaxTurnsExceeded
@@ -124,7 +123,8 @@ def _resolve_api_client_from_settings(settings) -> SupportsStreamingMessages:
         print(
             "Error: No API key configured.\n"
             "  Run `oh auth login` to set up authentication, or set the\n"
-            "  ANTHROPIC_API_KEY (or OPENAI_API_KEY) environment variable.",
+            "  GOOGLE_API_KEY, GEMINI_API_KEY, ANTHROPIC_API_KEY, or OPENAI_API_KEY "
+            "environment variable.",
             file=sys.stderr,
         )
         raise SystemExit(1) from exc
@@ -148,6 +148,7 @@ async def build_runtime(
     permission_prompt: PermissionPrompt | None = None,
     ask_user_prompt: AskUserPrompt | None = None,
     restore_messages: list[dict] | None = None,
+    restore_tool_metadata: dict[str, object] | None = None,
     enforce_max_turns: bool = True,
     session_backend: SessionBackend | None = None,
     run_id: str | None = None,
@@ -220,11 +221,12 @@ async def build_runtime(
         run_id=run_context.run_id,
     )
     run_context.bind_trace_observer(resolved_trace_observer)
-    _, active_profile = settings.resolve_profile()
     bridge_manager = get_bridge_manager()
     app_state = AppStateStore(
         AppState(
-            model=display_model_setting(active_profile),
+            # Show the effective runtime model (after CLI/env/profile merges),
+            # not profile.last_model which may be stale.
+            model=settings.model,
             permission_mode=settings.permission.mode.value,
             theme=settings.theme,
             cwd=runtime_cwd,
@@ -262,6 +264,26 @@ async def build_runtime(
         extra_skill_dirs=normalized_skill_dirs,
         extra_plugin_roots=normalized_plugin_roots,
     )
+    restored_metadata = {
+        "permission_mode": settings.permission.mode.value,
+        "read_file_state": [],
+        "invoked_skills": [],
+        "async_agent_state": [],
+        "recent_work_log": [],
+        "recent_verified_work": [],
+        "task_focus_state": {
+            "goal": "",
+            "recent_goals": [],
+            "active_artifacts": [],
+            "verified_state": [],
+            "next_step": "",
+        },
+        "compact_checkpoints": [],
+    }
+    if isinstance(restore_tool_metadata, dict):
+        for key, value in restore_tool_metadata.items():
+            restored_metadata[key] = value
+
     engine = QueryEngine(
         api_client=resolved_api_client,
         tool_registry=tool_registry,
@@ -270,6 +292,11 @@ async def build_runtime(
         model=settings.model,
         system_prompt=system_prompt_text,
         max_tokens=settings.max_tokens,
+        context_window_tokens=settings.context_window_tokens or settings.memory.context_window_tokens,
+        auto_compact_threshold_tokens=(
+            settings.auto_compact_threshold_tokens
+            or settings.memory.auto_compact_threshold_tokens
+        ),
         max_turns=engine_max_turns,
         permission_prompt=permission_prompt,
         ask_user_prompt=ask_user_prompt,
@@ -280,6 +307,8 @@ async def build_runtime(
             "run_context": run_context,
             "extra_skill_dirs": normalized_skill_dirs,
             "extra_plugin_roots": normalized_plugin_roots,
+            "session_id": session_id,
+            **restored_metadata,
         },
         trace_observer=resolved_trace_observer,
     )
@@ -289,6 +318,12 @@ async def build_runtime(
             ConversationMessage.model_validate(m) for m in restore_messages
         ]
         engine.load_messages(restored)
+
+    # Start Docker sandbox if configured
+    if settings.sandbox.enabled and settings.sandbox.backend == "docker":
+        from openharness.sandbox.session import start_docker_sandbox
+
+        await start_docker_sandbox(settings, session_id, Path(runtime_cwd))
 
     return RuntimeBundle(
         api_client=resolved_api_client,
@@ -337,6 +372,16 @@ async def start_runtime(bundle: RuntimeBundle) -> None:
 
 async def close_runtime(bundle: RuntimeBundle) -> None:
     """Close runtime-owned resources."""
+    from openharness.sandbox.session import stop_docker_sandbox
+
+    await stop_docker_sandbox()
+    # Extract local environment rules from session before closing
+    try:
+        from openharness.personalization.session_hook import update_rules_from_session
+        update_rules_from_session(bundle.engine.messages)
+    except Exception:
+        pass  # personalization is best-effort, never block session end
+
     await bundle.mcp_manager.close()
     await bundle.hook_executor.execute(
         HookEvent.SESSION_END,
@@ -473,9 +518,8 @@ def sync_app_state(bundle: RuntimeBundle) -> None:
     if bundle.enforce_max_turns:
         bundle.engine.set_max_turns(settings.max_turns)
     provider = detect_provider(settings)
-    _, active_profile = settings.resolve_profile()
     bundle.app_state.set(
-        model=display_model_setting(active_profile),
+        model=settings.model,
         permission_mode=settings.permission.mode.value,
         theme=settings.theme,
         cwd=bundle.cwd,
@@ -579,6 +623,7 @@ async def handle_line(
                 messages=bundle.engine.messages,
                 usage=bundle.engine.total_usage,
                 session_id=bundle.session_id,
+                tool_metadata=bundle.engine.tool_metadata,
             )
             _sync_run_artifacts(bundle)
         if result.continue_pending:
@@ -609,6 +654,7 @@ async def handle_line(
                 messages=bundle.engine.messages,
                 usage=bundle.engine.total_usage,
                 session_id=bundle.session_id,
+                tool_metadata=bundle.engine.tool_metadata,
             )
             _sync_run_artifacts(bundle)
         sync_app_state(bundle)
@@ -640,6 +686,7 @@ async def handle_line(
             messages=bundle.engine.messages,
             usage=bundle.engine.total_usage,
             session_id=bundle.session_id,
+            tool_metadata=bundle.engine.tool_metadata,
         )
         _sync_run_artifacts(bundle)
         sync_app_state(bundle)
@@ -651,6 +698,7 @@ async def handle_line(
         messages=bundle.engine.messages,
         usage=bundle.engine.total_usage,
         session_id=bundle.session_id,
+        tool_metadata=bundle.engine.tool_metadata,
     )
     _sync_run_artifacts(bundle)
     sync_app_state(bundle)

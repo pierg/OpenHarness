@@ -2,7 +2,7 @@
 
 This repository is a fork of [HKUDS/OpenHarness](https://github.com/HKUDS/OpenHarness).
 
-Upstream OpenHarness provides the base CLI harness: the interactive shell, tool loop, permissions, skills, plugins, coordinator mode, and swarm transport. This fork keeps that foundation and adds a reproducible execution layer for YAML-configured agents, Google Gemini and Vertex AI execution, run artifacts, Langfuse traces, and Harbor evaluation.
+Upstream OpenHarness provides the base CLI harness: the interactive shell, tool loop, permissions, skills, plugins, coordinator mode, swarm transport, ohmo, sandboxing, and the React terminal UI. This fork keeps that foundation and adds a reproducible execution layer for YAML-configured agents, Google Gemini and Vertex AI execution, run artifacts, Langfuse traces, and Harbor evaluation.
 
 ## What This Fork Adds
 
@@ -24,7 +24,7 @@ Requirements:
 - [uv](https://docs.astral.sh/uv/)
 - Google AI Studio or Vertex AI credentials
 - Langfuse credentials for the examples
-- Docker for the Harbor example
+- Docker for the Docker sandbox and Harbor examples
 
 ```bash
 git clone <this-fork-url>
@@ -47,6 +47,7 @@ If neither `LANGFUSE_HOST` nor `LANGFUSE_BASE_URL` is set, examples default to `
 ```bash
 .venv/bin/python examples/local_fix_bug/run.py
 .venv/bin/python examples/local_workflow_coordinator_worker_fix_bug/run.py
+.venv/bin/python examples/local_docker_sandbox_fix_bug/run.py
 .venv/bin/python examples/harbor_fix_bug/run.py
 ```
 

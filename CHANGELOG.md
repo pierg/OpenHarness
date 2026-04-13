@@ -8,28 +8,39 @@ The format is based on Keep a Changelog, and this project currently tracks chang
 
 ### Added
 
+- Docker as an alternative sandbox backend (`sandbox.backend = "docker"`) for stronger execution isolation with configurable resource limits, network isolation, and automatic image management.
+- Built-in Google Gemini provider support from upstream, integrated with this fork's native Gemini and Vertex AI client path.
+- Google Gemini and Vertex AI client support through the shared streaming API client protocol.
+- React TUI assistant messages now render structured Markdown blocks, including headings, lists, code fences, blockquotes, links, and tables.
 - `diagnose` skill: trace agent run failures and regressions using structured evidence from run artifacts.
-- OpenAI-compatible API client (`--api-format openai`) supporting any provider that implements the OpenAI `/v1/chat/completions` format, including Alibaba DashScope, DeepSeek, GitHub Models, Groq, Together AI, Ollama, and more.
+- OpenAI-compatible API client (`--api-format openai`) supporting any provider that implements the OpenAI `/v1/chat/completions` format.
 - `OPENHARNESS_API_FORMAT` environment variable for selecting the API format.
 - `OPENAI_API_KEY` fallback when using OpenAI-format providers.
 - GitHub Actions CI workflow for Python linting, tests, and frontend TypeScript checks.
 - `CONTRIBUTING.md` reframed as fork development notes with setup, checks, example policy, and docs policy.
 - `docs/examples.md` with concrete OpenHarness usage patterns and demo commands.
 - GitHub issue templates and a pull request template.
-- Google Gemini and Vertex AI client support through the shared streaming API client protocol.
 
 ### Fixed
 
-- `BackendHostConfig` was missing the `cwd` field, causing `AttributeError: 'BackendHostConfig' object has no attribute 'cwd'` on startup when `oh` was run after the runtime refactor that added `cwd` support to `build_runtime`.
-- Shell-escape `$ARGUMENTS` substitution in command hooks to prevent shell injection from payload values containing metacharacters like `$(...)` or backticks.
-- Swarm `_READ_ONLY_TOOLS` now uses actual registered tool names (snake_case) instead of PascalCase, fixing read-only auto-approval in `handle_permission_request`.
-- Memory scanner now parses YAML frontmatter (`name`, `description`, `type`) instead of returning raw `---` as description.
-- Memory search matches against body content in addition to metadata, with metadata weighted higher for relevance.
+- `todo_write` tool now updates an existing unchecked item in-place when `checked=True` instead of appending a duplicate `[x]` line.
+- React TUI spinner now stays visible throughout the entire agent turn.
+- Skill loader now uses `yaml.safe_load` to parse SKILL.md frontmatter.
+- Fixed grep crashes on very long ripgrep lines.
+- Fixed React TUI Markdown table sizing with inline formatting.
+- Fixed React TUI exit leaving the shell prompt concatenated with the last TUI line.
+- `BackendHostConfig` was missing the `cwd` field after the runtime refactor that added `cwd` support to `build_runtime`.
+- Shell-escape `$ARGUMENTS` substitution in command hooks to prevent shell injection.
+- Swarm `_READ_ONLY_TOOLS` now uses actual registered tool names.
+- Memory scanner now parses YAML frontmatter.
+- Memory search matches against body content in addition to metadata.
 - Memory search tokenizer handles Han characters for multilingual queries.
-- Fixed duplicate response in React TUI caused by double Enter key submission in the input handler.
-- Fixed concurrent permission modals overwriting each other in TUI default mode when the LLM returns multiple tool calls in one response; `_ask_permission` now serialises callers via an `asyncio.Lock` so each modal is shown and resolved before the next one is emitted.
+- Fixed duplicate response in React TUI caused by double Enter key submission.
+- Fixed concurrent permission modals overwriting each other in TUI default mode.
+
 ### Changed
 
+- React TUI now groups consecutive `tool` and `tool_result` transcript rows into a single compound row.
 - README is now a concise fork overview with setup, example commands, artifact layout, and links into `docs/`.
 - Documentation is reorganized around maintained feature, architecture, run, and example guides.
 - Example documentation now lists only examples that demonstrate distinct end-to-end behavior.
