@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import importlib
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -11,9 +12,11 @@ import pytest
 from openharness.api.client import ApiMessageCompleteEvent
 from openharness.api.usage import UsageSnapshot
 from openharness.engine.messages import ConversationMessage, TextBlock, ToolUseBlock
-from openharness.harbor import OpenHarnessHarborAgent
-from harbor.environments.base import ExecResult
-from harbor.models.agent.context import AgentContext
+
+pytest.importorskip("harbor", reason="Install Harbor test dependencies with `uv sync --extra harbor`.")
+ExecResult = pytest.importorskip("harbor.environments.base").ExecResult
+AgentContext = pytest.importorskip("harbor.models.agent.context").AgentContext
+OpenHarnessHarborAgent = importlib.import_module("openharness.harbor").OpenHarnessHarborAgent
 
 
 @dataclass

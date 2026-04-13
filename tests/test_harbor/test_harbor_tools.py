@@ -7,9 +7,11 @@ from pathlib import Path
 import pytest
 
 from openharness.tools import WorkspaceToolRegistryFactory
-from harbor.environments.base import ExecResult
 from openharness.tools.base import ToolExecutionContext
 from openharness.workspace.harbor import HarborWorkspace
+
+pytest.importorskip("harbor", reason="Install Harbor test dependencies with `uv sync --extra harbor`.")
+ExecResult = pytest.importorskip("harbor.environments.base").ExecResult
 
 
 class FakeEnvironment:
