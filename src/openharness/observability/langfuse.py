@@ -5,7 +5,8 @@ The module exposes two concrete classes:
 - ``NullTraceObserver`` — disabled backend; all methods are no-ops.
 - ``LangfuseTraceObserver`` — sends structured observations to a Langfuse
   project.  The ``langfuse`` package is imported lazily inside
-  ``create_trace_observer`` so it remains an optional dependency.
+  ``create_trace_observer`` so callers can still force-disable tracing for
+  hermetic tests.
 
 Use ``create_trace_observer`` to get the right observer from environment
 variables without any caller-side branching.
@@ -17,7 +18,7 @@ import getpass
 import logging
 import os
 from contextlib import AbstractContextManager
-from dataclasses import asdict, is_dataclass
+from dataclasses import asdict, dataclass, is_dataclass
 from functools import wraps
 from pathlib import Path
 from typing import Any, Callable, Protocol
@@ -25,6 +26,14 @@ from typing import Any, Callable, Protocol
 from pydantic import BaseModel
 
 log = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True)
+class TraceIdentity:
+    """Deterministic trace identity for a run."""
+
+    trace_id: str | None = None
+    trace_url: str | None = None
 
 
 class ObservationHandle(Protocol):
@@ -61,6 +70,7 @@ class TraceObserver(Protocol):
 
     enabled: bool
     trace_id: str | None
+    trace_url: str | None
     run_id: str | None
     trace_name: str | None
 
@@ -146,8 +156,11 @@ class NullTraceObserver:
 
     enabled = False
     trace_id: str | None = None
-    run_id: str | None = None
-    trace_name: str | None = None
+    trace_url: str | None = None
+
+    def __init__(self, *, run_id: str | None = None, trace_name: str | None = None) -> None:
+        self.run_id = run_id
+        self.trace_name = trace_name or run_id
 
     def start_session(self, *, metadata: dict[str, Any] | None = None) -> None:
         pass
@@ -294,6 +307,7 @@ class LangfuseTraceObserver:
         run_id: str | None = None,
         user_id: str | None = None,
         flush_mode: str = "session_end",
+        trace_url_required: bool = False,
     ) -> None:
         self._client = client
         self._propagate_fn = propagate_fn
@@ -305,10 +319,12 @@ class LangfuseTraceObserver:
         self.run_id = run_id
         self._user_id = user_id
         self._flush_mode = flush_mode
+        self._trace_url_required = trace_url_required
         self._propagation_context: Any | None = None
         self._session_handle: _LangfuseObservationHandle | None = None
         self.trace_name = run_id or f"openharness.{interface}"
         self.trace_id: str | None = None
+        self.trace_url: str | None = None
 
     def start_session(self, *, metadata: dict[str, Any] | None = None) -> None:
         if self._session_handle is not None:
@@ -319,6 +335,7 @@ class LangfuseTraceObserver:
         self.trace_id = self._client.create_trace_id(
             seed=self.run_id or f"{self._interface}:{self._session_id}"
         )
+        self.trace_url = self._resolve_trace_url()
         self._propagation_context = self._propagate_fn(
             user_id=self._user_id,
             session_id=self._session_id,
@@ -440,6 +457,23 @@ class LangfuseTraceObserver:
         if self._flush_mode == "live":
             self.flush()
 
+    def _resolve_trace_url(self) -> str | None:
+        if self.trace_id is None:
+            return None
+        get_trace_url = getattr(self._client, "get_trace_url", None)
+        if not callable(get_trace_url):
+            if self._trace_url_required:
+                raise RuntimeError("The installed Langfuse SDK does not expose get_trace_url().")
+            return None
+        try:
+            trace_url = get_trace_url(trace_id=self.trace_id)
+        except Exception as exc:
+            if self._trace_url_required:
+                raise RuntimeError("Unable to resolve Langfuse trace URL.") from exc
+            log.debug("Unable to resolve Langfuse trace URL: %s", exc, exc_info=True)
+            return None
+        return str(trace_url) if trace_url else None
+
     def _start_observation(
         self,
         *,
@@ -535,6 +569,7 @@ def create_trace_observer(
     model: str,
     provider: str | None = None,
     run_id: str | None = None,
+    required: bool | None = None,
 ) -> TraceObserver:
     """Return a ``LangfuseTraceObserver`` when the environment is configured, else a ``NullTraceObserver``.
 
@@ -548,25 +583,44 @@ def create_trace_observer(
       Defaults to the Langfuse cloud endpoint when unset.
     - ``LANGFUSE_ENVIRONMENT``, ``LANGFUSE_RELEASE``, ``LANGFUSE_SAMPLE_RATE`` — forwarded to the SDK.
     - ``OPENHARNESS_LANGFUSE_ENABLED=0`` — force-disable tracing regardless of other variables.
+    - ``OPENHARNESS_LANGFUSE_REQUIRED=1`` — raise a clear startup error instead
+      of falling back to ``NullTraceObserver`` when Langfuse is unavailable.
     - ``OPENHARNESS_LANGFUSE_VERIFY=0`` — skip the auth check on startup (useful for CI).
     - ``OPENHARNESS_LANGFUSE_FLUSH_MODE=live`` — flush observations as spans close so
       traces become visible during long-running local runs.
     - ``OPENHARNESS_RUN_ID`` — when set (or when ``run_id`` is passed explicitly),
       Langfuse traces use that value as the trace name and deterministic trace seed.
     """
+    resolved_run_id = run_id or os.environ.get("OPENHARNESS_RUN_ID")
+    required = (
+        _env_truthy(os.environ.get("OPENHARNESS_LANGFUSE_REQUIRED", "0"))
+        if required is None
+        else required
+    )
+
+    def unavailable(message: str, *, cause: BaseException | None = None) -> TraceObserver:
+        if required:
+            raise RuntimeError(message) from cause
+        log.warning(message, exc_info=cause is not None)
+        return NullTraceObserver(run_id=resolved_run_id)
+
     if not _env_truthy(os.environ.get("OPENHARNESS_LANGFUSE_ENABLED", "1")):
-        return NullTraceObserver()
+        return NullTraceObserver(run_id=resolved_run_id)
     if not os.environ.get("LANGFUSE_PUBLIC_KEY") or not os.environ.get("LANGFUSE_SECRET_KEY"):
-        return NullTraceObserver()
+        return unavailable(
+            "Langfuse tracing is enabled but LANGFUSE_PUBLIC_KEY and "
+            "LANGFUSE_SECRET_KEY are not set. Start local Langfuse, create a "
+            "project, and export its keys."
+        )
 
     try:
         from langfuse import Langfuse, propagate_attributes  # noqa: PLC0415
-    except ImportError:
-        log.warning(
-            "langfuse package not installed, tracing disabled. "
-            "Install the optional dependency with: uv pip install --python .venv/bin/python 'langfuse>=2.0'"
+    except ImportError as exc:
+        return unavailable(
+            "langfuse package not installed. "
+            "Install project dependencies with: uv pip install --python .venv/bin/python -e .",
+            cause=exc,
         )
-        return NullTraceObserver()
 
     client = Langfuse(
         public_key=os.environ["LANGFUSE_PUBLIC_KEY"],
@@ -581,11 +635,12 @@ def create_trace_observer(
     if _env_truthy(os.environ.get("OPENHARNESS_LANGFUSE_VERIFY", "1")):
         try:
             if not client.auth_check():
-                log.warning("Langfuse auth check failed, tracing disabled.")
-                return NullTraceObserver()
+                return unavailable("Langfuse auth check failed.")
         except OSError as exc:
-            log.warning("Langfuse auth check failed, tracing disabled: %s", exc, exc_info=True)
-            return NullTraceObserver()
+            return unavailable(
+                f"Langfuse auth check failed: {exc}",
+                cause=exc,
+            )
 
     try:
         user_id = (
@@ -593,8 +648,6 @@ def create_trace_observer(
         )
     except OSError:
         user_id = None
-    resolved_run_id = run_id or os.environ.get("OPENHARNESS_RUN_ID")
-
     return LangfuseTraceObserver(
         client=client,
         propagate_fn=propagate_attributes,
@@ -606,4 +659,68 @@ def create_trace_observer(
         run_id=resolved_run_id,
         user_id=user_id,
         flush_mode=os.environ.get("OPENHARNESS_LANGFUSE_FLUSH_MODE", "session_end"),
+        trace_url_required=required,
     )
+
+
+def resolve_langfuse_trace_identity(
+    *,
+    run_id: str,
+    required: bool | None = None,
+) -> TraceIdentity:
+    """Resolve the deterministic Langfuse trace ID and UI URL for a run before it starts."""
+    required = (
+        _env_truthy(os.environ.get("OPENHARNESS_LANGFUSE_REQUIRED", "0"))
+        if required is None
+        else required
+    )
+
+    def unavailable(message: str, *, cause: BaseException | None = None) -> TraceIdentity:
+        if required:
+            raise RuntimeError(message) from cause
+        log.warning(message, exc_info=cause is not None)
+        return TraceIdentity()
+
+    if not _env_truthy(os.environ.get("OPENHARNESS_LANGFUSE_ENABLED", "1")):
+        return TraceIdentity()
+    if not os.environ.get("LANGFUSE_PUBLIC_KEY") or not os.environ.get("LANGFUSE_SECRET_KEY"):
+        return unavailable(
+            "Langfuse tracing is enabled but LANGFUSE_PUBLIC_KEY and "
+            "LANGFUSE_SECRET_KEY are not set. Start local Langfuse, create a "
+            "project, and export its keys."
+        )
+
+    try:
+        from langfuse import Langfuse  # noqa: PLC0415
+    except ImportError as exc:
+        return unavailable(
+            "langfuse package not installed. "
+            "Install project dependencies with: uv pip install --python .venv/bin/python -e .",
+            cause=exc,
+        )
+
+    client = Langfuse(
+        public_key=os.environ["LANGFUSE_PUBLIC_KEY"],
+        secret_key=os.environ["LANGFUSE_SECRET_KEY"],
+        base_url=os.environ.get("LANGFUSE_BASE_URL") or None,
+        host=os.environ.get("LANGFUSE_HOST") or None,
+        environment=os.environ.get("LANGFUSE_ENVIRONMENT") or None,
+        release=os.environ.get("LANGFUSE_RELEASE") or None,
+        sample_rate=float(s) if (s := os.environ.get("LANGFUSE_SAMPLE_RATE")) else None,
+    )
+
+    if _env_truthy(os.environ.get("OPENHARNESS_LANGFUSE_VERIFY", "1")):
+        try:
+            if not client.auth_check():
+                return unavailable("Langfuse auth check failed.")
+        except OSError as exc:
+            return unavailable(f"Langfuse auth check failed: {exc}", cause=exc)
+
+    trace_id = client.create_trace_id(seed=run_id)
+    try:
+        trace_url = client.get_trace_url(trace_id=trace_id)
+    except Exception as exc:
+        return unavailable("Unable to resolve Langfuse trace URL.", cause=exc)
+    if trace_url is None and required:
+        return unavailable("Unable to resolve Langfuse trace URL.")
+    return TraceIdentity(trace_id=trace_id, trace_url=str(trace_url) if trace_url else None)

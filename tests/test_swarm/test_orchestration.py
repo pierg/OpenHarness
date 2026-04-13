@@ -6,6 +6,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 from openharness.agents.contracts import AgentRunResult
+from openharness.runs.context import RunContext
 from openharness.swarm.mailbox import create_user_message
 from openharness.swarm.orchestration import TeamOrchestrator
 from openharness.swarm.types import SpawnResult
@@ -60,6 +61,7 @@ class _FakeWorkflow:
         api_client=None,
         log_paths=None,
         trace_observer=None,
+        run_context=None,
     ):
         del api_client, log_paths
         self.__class__.calls.append(
@@ -67,6 +69,7 @@ class _FakeWorkflow:
                 "task": task,
                 "agent_name": agent_name,
                 "trace_observer": trace_observer,
+                "run_context": run_context,
             }
         )
         return SimpleNamespace(
@@ -117,6 +120,26 @@ async def test_spawn_worker_propagates_run_id(tmp_path: Path) -> None:
     assert config.run_id == "run-root-123"
 
 
+async def test_spawn_worker_propagates_run_root_from_context(tmp_path: Path) -> None:
+    run_context = RunContext.create(tmp_path, interface="test", run_id="run-root-123")
+    orchestrator = TeamOrchestrator(
+        "team-demo",
+        tmp_path,
+        run_context=run_context,
+    )
+    orchestrator.backend = _FakeBackend()
+
+    await orchestrator.spawn_worker(
+        role_name="worker",
+        agent_def=_agent_definition(),
+        bootstrap_task="Stand by",
+    )
+
+    config = orchestrator.backend.spawn_calls[0]
+    assert config.run_id == "run-root-123"
+    assert config.run_root == str(run_context.run_dir)
+
+
 async def test_run_inline_uses_shared_trace_observer(tmp_path: Path, monkeypatch) -> None:
     trace_observer = _TraceObserverStub()
     orchestrator = TeamOrchestrator(
@@ -141,6 +164,29 @@ async def test_run_inline_uses_shared_trace_observer(tmp_path: Path, monkeypatch
     assert result.agent_result.final_text == "done"
     assert len(_FakeWorkflow.calls) == 1
     assert _FakeWorkflow.calls[0]["trace_observer"] is trace_observer
+
+
+async def test_run_inline_uses_shared_run_context(tmp_path: Path, monkeypatch) -> None:
+    run_context = RunContext.create(tmp_path, interface="test", run_id="run-root-123")
+    orchestrator = TeamOrchestrator(
+        "team-demo",
+        tmp_path,
+        run_context=run_context,
+    )
+    monkeypatch.setattr("openharness.swarm.orchestration.AgentWorkflow", _FakeWorkflow)
+    monkeypatch.setattr(
+        "openharness.swarm.orchestration.AgentFactory.with_catalog_configs",
+        lambda _: object(),
+    )
+    _FakeWorkflow.calls.clear()
+
+    await orchestrator.run_inline(
+        agent_def=_agent_definition(),
+        instruction="Fix the bug",
+        identity="coordinator@team-demo",
+    )
+
+    assert _FakeWorkflow.calls[0]["run_context"] is run_context
 
 
 async def test_wait_for_updates_can_leave_messages_unread(

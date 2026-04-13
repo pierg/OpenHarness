@@ -96,10 +96,15 @@ def _chunk(
 
 
 class _Aiter:
-    def __init__(self, items): self._items = list(items)
-    def __aiter__(self): return self
+    def __init__(self, items):
+        self._items = list(items)
+
+    def __aiter__(self):
+        return self
+
     async def __anext__(self):
-        if not self._items: raise StopAsyncIteration
+        if not self._items:
+            raise StopAsyncIteration
         return self._items.pop(0)
 
 

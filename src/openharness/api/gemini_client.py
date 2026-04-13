@@ -5,7 +5,6 @@ Implements the same ``SupportsStreamingMessages`` protocol as
 without any provider-specific logic at the engine layer.
 
 Supports both Google AI Studio (API key) and Vertex AI (project + location).
-The ``google-genai`` package must be installed (``pip install google-genai``).
 """
 
 from __future__ import annotations

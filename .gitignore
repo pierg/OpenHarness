@@ -32,6 +32,10 @@ react_tui_smoke.txt
 
 # Harbor job outputs
 **/harbor_jobs/
+**/harbor_runs/
+/runs/
+examples/**/runs/
+examples/.workspaces/
 
 # OS
 .DS_Store

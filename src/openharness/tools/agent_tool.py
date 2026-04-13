@@ -91,6 +91,7 @@ class AgentTool(BaseTool):
                 disallowed_tools=agent_def.disallowed_tools if agent_def else None,
                 initial_prompt=agent_def.initial_prompt if agent_def else None,
                 max_turns=agent_def.max_turns if agent_def else None,
+                run_id=getattr(context.metadata.get("trace_observer"), "run_id", None),
             )
             result = await executor.spawn(config)
         except Exception as exc:

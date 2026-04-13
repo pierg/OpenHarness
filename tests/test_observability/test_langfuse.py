@@ -5,6 +5,8 @@ from __future__ import annotations
 from contextlib import contextmanager
 from typing import Any
 
+import pytest
+
 from openharness.agents.contracts import TaskDefinition
 from openharness.observability.langfuse import (
     LangfuseTraceObserver,
@@ -34,6 +36,7 @@ class _FakeClient:
         self.started: list[dict] = []
         self.flush_count = 0
         self.trace_id_seeds: list[str | None] = []
+        self.trace_url_ids: list[str | None] = []
 
     def create_trace_id(self, *, seed: str) -> str:
         self.trace_id_seeds.append(seed)
@@ -49,8 +52,34 @@ class _FakeClient:
 
         return _cm()
 
+    def get_trace_url(self, *, trace_id: str | None = None) -> str:
+        self.trace_url_ids.append(trace_id)
+        return f"http://localhost:3000/project/demo/traces/{trace_id}"
+
     def flush(self) -> None:
         self.flush_count += 1
+
+
+class _FakeClientWithoutTraceUrl:
+    def __init__(self) -> None:
+        self.started: list[dict] = []
+
+    def create_trace_id(self, *, seed: str) -> str:
+        del seed
+        return "trace-123"
+
+    def start_as_current_observation(self, **kwargs: Any):
+        obs = _Observation()
+        self.started.append({"kwargs": kwargs, "obs": obs})
+
+        @contextmanager
+        def _cm():
+            yield obs
+
+        return _cm()
+
+    def flush(self) -> None:
+        pass
 
 
 @contextmanager
@@ -92,6 +121,7 @@ def test_null_observer_is_disabled():
     obs = NullTraceObserver()
     assert obs.enabled is False
     assert obs.trace_id is None
+    assert obs.trace_url is None
 
 
 def test_null_observer_methods_are_noop():
@@ -114,6 +144,17 @@ def test_start_session_sets_trace_id():
     observer = _make_observer()
     observer.start_session()
     assert observer.trace_id == "trace-123"
+    assert observer.trace_url == "http://localhost:3000/project/demo/traces/trace-123"
+
+
+def test_required_trace_url_raises_when_sdk_cannot_build_url():
+    observer = _make_observer(
+        client=_FakeClientWithoutTraceUrl(),
+        trace_url_required=True,
+    )
+
+    with pytest.raises(RuntimeError, match="get_trace_url"):
+        observer.start_session()
 
 
 def test_start_session_uses_run_id_as_trace_seed_and_name():
@@ -281,13 +322,32 @@ async def test_trace_agent_run_wraps_agent_boundary():
 
 
 def test_returns_null_when_keys_missing(monkeypatch):
+    monkeypatch.setenv("OPENHARNESS_LANGFUSE_ENABLED", "1")
     monkeypatch.delenv("LANGFUSE_PUBLIC_KEY", raising=False)
     monkeypatch.delenv("LANGFUSE_SECRET_KEY", raising=False)
-    observer = create_trace_observer(session_id="s", interface="i", cwd="/", model="m")
+    observer = create_trace_observer(
+        session_id="s",
+        interface="i",
+        cwd="/",
+        model="m",
+        run_id="run-abc123def456",
+    )
     assert isinstance(observer, NullTraceObserver)
+    assert observer.run_id == "run-abc123def456"
+
+
+def test_required_langfuse_raises_when_keys_missing(monkeypatch):
+    monkeypatch.setenv("OPENHARNESS_LANGFUSE_ENABLED", "1")
+    monkeypatch.setenv("OPENHARNESS_LANGFUSE_REQUIRED", "1")
+    monkeypatch.delenv("LANGFUSE_PUBLIC_KEY", raising=False)
+    monkeypatch.delenv("LANGFUSE_SECRET_KEY", raising=False)
+
+    with pytest.raises(RuntimeError, match="LANGFUSE_PUBLIC_KEY"):
+        create_trace_observer(session_id="s", interface="i", cwd="/", model="m")
 
 
 def test_returns_null_when_explicitly_disabled(monkeypatch):
     monkeypatch.setenv("OPENHARNESS_LANGFUSE_ENABLED", "0")
+    monkeypatch.setenv("OPENHARNESS_LANGFUSE_REQUIRED", "1")
     observer = create_trace_observer(session_id="s", interface="i", cwd="/", model="m")
     assert isinstance(observer, NullTraceObserver)

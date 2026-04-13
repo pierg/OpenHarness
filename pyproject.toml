@@ -31,18 +31,16 @@ dependencies = [
     "watchfiles>=0.20.0",
     "croniter>=2.0.0",
     "loguru>=0.7.0",
+    "google-genai>=1.0",
+    "langfuse>=4.2.0",
 ]
 
 [project.optional-dependencies]
-gemini = [
-    "google-genai>=1.0",
-]
+gemini = []
 harbor = [
     "harbor>=0.3.0",
 ]
-langfuse = [
-    "langfuse>=2.0",
-]
+langfuse = []
 dev = [
     "pexpect>=4.9.0",
     "pytest>=8.0.0",
