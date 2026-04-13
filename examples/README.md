@@ -1,5 +1,7 @@
 # OpenHarness Examples
 
+For the maintained examples guide, see [`../docs/examples.md`](../docs/examples.md).
+
 The examples use one small bug-fix task so the control flow is easy to compare:
 `sum_evens.py` should print `12`, but starts by summing odd numbers.
 
