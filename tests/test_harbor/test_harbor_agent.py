@@ -84,13 +84,28 @@ async def test_openharness_harbor_agent_solves_hello_world(
     ])
     environment = FakeEnvironment()
     context = AgentContext()
-    monkeypatch.setenv("OPENHARNESS_RUN_ID", "run-test123456")
-    monkeypatch.setenv("OPENHARNESS_RUN_ROOT", str(run_root))
     monkeypatch.setenv("OPENHARNESS_LANGFUSE_ENABLED", "0")
     agent = OpenHarnessHarborAgent(
         logs_dir=tmp_path / "agent",
+        agent_name="harbor_test_agent",
         model_name="claude-test",
         api_client=api_client,
+        agent_config_yaml="""\
+name: harbor_test_agent
+architecture: simple
+model: claude-test
+max_turns: 4
+max_tokens: 1024
+tools:
+  - write_file
+prompts:
+  system: |
+    {{ openharness_system_context }}
+  user: |
+    {{ instruction }}
+""",
+        run_id="run-test123456",
+        run_root=run_root,
     )
 
     await agent.run(
@@ -105,6 +120,7 @@ async def test_openharness_harbor_agent_solves_hello_world(
     assert context.metadata is not None
     assert context.metadata["run_id"] == "run-test123456"
     assert context.metadata["run_root"] == str(run_root)
+    assert context.metadata["trace_url"] is None
     assert context.metadata["summary"]["final_text"] == "Done."
     assert json.loads((run_root / "run.json").read_text())["run_id"] == "run-test123456"
 

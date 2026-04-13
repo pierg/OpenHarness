@@ -1,170 +1,181 @@
-"""Architecture comparison via Harbor: all agent configs solve the same bug in Docker.
+"""Run the shared bug-fix task inside Harbor.
 
-Launches each registered agent configuration as a separate Harbor job inside
-its own container.  After all runs complete, prints a comparison table with
-pass/fail, scores, and timing.
+Feature slice:
+- same YAML agent config used by the local example
+- Harbor task/environment wrapper
+- OpenHarness Harbor agent adapter
+- Harbor task source instead of a manually defined inline task
+- runtime-generated run ID propagated into the Harbor job
+- canonical local run artifacts plus Harbor's external `result.json`
 
-Prerequisites
--------------
-- Docker daemon running
-- Harbor CLI:  uv tool install harbor==0.3.0
-- API key exported, e.g.:
-    export ANTHROPIC_API_KEY=sk-ant-...
-  or for Gemini:
-    export GOOGLE_API_KEY=...
+Prerequisites:
+    Docker must be running.
+    uv can install the pinned Harbor CLI tool.
 
-Usage
------
-  cd examples/harbor_fix_bug
-  python run.py                                       # all architectures
-  python run.py default planner_executor_example      # specific ones
+Usage:
+    uv run python examples/harbor_fix_bug/run.py
+    uv run python examples/harbor_fix_bug/run.py --agent bugfix_agent
 """
 
 from __future__ import annotations
 
+import argparse
 import json
 import logging
+import shutil
+import subprocess
 import sys
-import time
-from dataclasses import dataclass
 from pathlib import Path
 
-from openharness.agents.factory import AgentFactory
-from openharness.harbor import (
+EXAMPLES_ROOT = Path(__file__).resolve().parents[1]
+if str(EXAMPLES_ROOT) not in sys.path:
+    sys.path.insert(0, str(EXAMPLES_ROOT))
+
+from _shared.bugfix_task import (  # noqa: E402
+    BUGFIX_AGENT_CONFIG,
+    BUGFIX_AGENT_NAME,
+    EXAMPLE_MODEL,
+    add_common_arguments,
+    install_project_agent_configs,
+    local_langfuse_agent_env_for_harbor,
+    log_run_summary,
+    read_agent_config,
+)
+from openharness.config import load_settings  # noqa: E402
+from openharness.harbor import (  # noqa: E402
+    DEFAULT_HARBOR_VERSION,
     HarborEnvironmentSpec,
+    HarborExistingJobPolicy,
     HarborJobSpec,
-    HarborRunResult,
     HarborTaskSpec,
     HarborToolSpec,
     OpenHarnessHarborAgentSpec,
-    run_harbor_job,
 )
+from openharness.runs import HarborAgentRunSpec, run_harbor_agent  # noqa: E402
+from openharness.services.runs import generate_run_id  # noqa: E402
 
 log = logging.getLogger(__name__)
 
-HERE = Path(__file__).parent
+HERE = Path(__file__).resolve().parent
 TASK_DIR = HERE / "harbor_task"
-JOBS_DIR = HERE / "harbor_jobs"
 OPENHARNESS_DIR = HERE.parent.parent
 
 
-@dataclass
-class RunResult:
-    agent_name: str
-    architecture: str
-    score: float | None
-    status: str | None
-    elapsed_seconds: float
-    job_name: str
-    error: str | None = None
+def _parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description=__doc__,
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    add_common_arguments(parser, include_workspace=False)
+    parser.add_argument("--agent", default=BUGFIX_AGENT_NAME, help="Agent config name to run.")
+    parser.add_argument(
+        "--harbor-version",
+        default=DEFAULT_HARBOR_VERSION,
+        help="Pinned Harbor CLI version.",
+    )
+    return parser.parse_args()
 
 
-def run_agent(agent_name: str, architecture: str) -> RunResult:
-    """Run a single agent configuration as a Harbor job."""
-    t0 = time.perf_counter()
-    try:
-        result: HarborRunResult = run_harbor_job(
-            HarborJobSpec(
-                jobs_dir=JOBS_DIR,
-                tool=HarborToolSpec(
-                    version="0.3.0",
-                    editable_openharness_dir=OPENHARNESS_DIR,
-                ),
-                agent=OpenHarnessHarborAgentSpec(
-                    agent_name=agent_name,
-                    remote_cwd="/app",
-                    max_turns=10,
-                    max_tokens=8192,
-                ),
-                task=HarborTaskSpec(path=TASK_DIR),
-                environment=HarborEnvironmentSpec(type="docker"),
-            )
-        )
-        elapsed = time.perf_counter() - t0
-
-        score = None
-        status = None
-        if result.result_path.exists():
-            data = json.loads(result.result_path.read_text())
-            evals = data.get("stats", {}).get("evals", {})
-            for key, val in evals.items():
-                metrics = val.get("metrics", [])
-                if metrics:
-                    score = metrics[0].get("mean")
-                    status = "PASS" if score and score > 0 else "FAIL"
-                    break
-
-        return RunResult(
-            agent_name=agent_name,
-            architecture=architecture,
-            score=score,
-            status=status,
-            elapsed_seconds=elapsed,
-            job_name=result.job_name,
-        )
-    except Exception as exc:
-        elapsed = time.perf_counter() - t0
-        return RunResult(
-            agent_name=agent_name,
-            architecture=architecture,
-            score=None,
-            status="error",
-            elapsed_seconds=elapsed,
-            job_name="",
-            error=str(exc)[:120],
-        )
+def _harbor_score(path: Path | None) -> float | None:
+    if path is None or not path.exists():
+        return None
+    data = json.loads(path.read_text(encoding="utf-8"))
+    evals = data.get("stats", {}).get("evals", {})
+    for value in evals.values():
+        metrics = value.get("metrics", [])
+        if metrics:
+            return metrics[0].get("mean")
+    return None
 
 
-def _print_table(results: list[RunResult]) -> None:
-    """Pretty-print a comparison table."""
-    hdr = f"{'Agent':<30} {'Architecture':<20} {'Score':>6} {'Status':<10} {'Time':>7}  Error"
-    log.info(hdr)
-    log.info("-" * len(hdr) + "----------")
-    for r in results:
-        score_str = f"{r.score}" if r.score is not None else "N/A"
-        err = r.error or ""
-        log.info(
-            f"{r.agent_name:<30} {r.architecture:<20} {score_str:>6} "
-            f"{(r.status or 'N/A'):<10} {r.elapsed_seconds:>6.1f}s  {err}"
-        )
+def _docker_daemon_available() -> bool:
+    docker = shutil.which("docker")
+    if docker is None:
+        return False
+    result = subprocess.run(
+        [docker, "info"],
+        capture_output=True,
+        text=True,
+        timeout=10,
+        check=False,
+    )
+    return result.returncode == 0
+
+
+def _prepare_harbor_run_workspace() -> tuple[str, Path, Path, Path]:
+    while True:
+        run_id = generate_run_id()
+        run_dir = OPENHARNESS_DIR / "runs" / run_id
+        if not run_dir.exists():
+            break
+    workspace_dir = run_dir / "workspace"
+    shutil.copytree(TASK_DIR, workspace_dir)
+    config_dir = install_project_agent_configs(
+        workspace_dir,
+        (BUGFIX_AGENT_CONFIG,),
+    )
+    return run_id, run_dir, workspace_dir, config_dir / BUGFIX_AGENT_CONFIG
 
 
 def main() -> None:
     from openharness.observability.logging import setup_logging
+
     setup_logging()
+    args = _parse_args()
+    settings = load_settings().merge_cli_overrides(model=EXAMPLE_MODEL)
 
-    factory = AgentFactory.with_default_configs()
-    available = factory.list_agents()
-
-    requested = sys.argv[1:] or available
-    agents_to_run = [a for a in requested if a in available]
-
-    if not agents_to_run:
-        log.info(f"No matching agents. Available: {available}")
+    if not _docker_daemon_available():
+        log.info("Docker daemon is not running. Start Docker to run the Harbor example.")
         return
 
-    log.info(f"Task:   {TASK_DIR}")
-    log.info(f"Agents: {agents_to_run}\n")
+    langfuse_env = local_langfuse_agent_env_for_harbor()
+    run_id, run_dir, workspace_dir, config_path = _prepare_harbor_run_workspace()
+    result = run_harbor_agent(
+        HarborAgentRunSpec(
+            cwd=OPENHARNESS_DIR,
+            run_id=run_id,
+            metadata={"example": "harbor_fix_bug"},
+            job=HarborJobSpec(
+                jobs_dir=run_dir / "harbor_jobs",
+                existing_job_policy=HarborExistingJobPolicy.ERROR,
+                tool=HarborToolSpec(
+                    version=args.harbor_version,
+                    editable_openharness_dir=OPENHARNESS_DIR,
+                ),
+                agent=OpenHarnessHarborAgentSpec(
+                    agent_name=args.agent,
+                    model=settings.model,
+                    remote_cwd="/app",
+                    max_turns=args.max_turns or 10,
+                    max_tokens=8192,
+                    agent_config_yaml=read_agent_config(
+                        BUGFIX_AGENT_CONFIG,
+                    ),
+                    env=langfuse_env,
+                ),
+                task=HarborTaskSpec(path=workspace_dir),
+                environment=HarborEnvironmentSpec(type="docker"),
+            ),
+        )
+    )
+    score = _harbor_score(result.external_result_path)
+    passed = score is not None and score > 0
 
-    results: list[RunResult] = []
-    for agent_name in agents_to_run:
-        config = factory.get_config(agent_name)
-        log.info(f"--- Running: {agent_name} (architecture: {config.architecture}) ---")
-        result = run_agent(agent_name, config.architecture)
-        status_icon = "✅ PASS" if result.score and result.score > 0 else "❌ FAIL"
-        log.info(f"    {status_icon}  score={result.score}  ({result.elapsed_seconds:.1f}s)")
-        if result.error:
-            log.info(f"    Error: {result.error}")
-        log.info("")
-        results.append(result)
-
-    log.info("\n" + "=" * 80)
-    log.info("COMPARISON TABLE")
-    log.info("=" * 80)
-    _print_table(results)
-
-    passed = sum(1 for r in results if r.score and r.score > 0)
-    log.info(f"\n{passed}/{len(results)} agents solved the task.")
+    log_run_summary(
+        log,
+        run_id=result.run_id,
+        workspace=workspace_dir,
+        run_dir=result.run_dir,
+        passed=passed,
+        extra={
+            "Agent": args.agent,
+            "Model": settings.model,
+            "Trace URL": result.trace_url,
+            "Config": config_path,
+            "Score": score,
+            "Harbor": result.external_result_path,
+        },
+    )
 
 
 if __name__ == "__main__":

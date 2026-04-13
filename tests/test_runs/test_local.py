@@ -32,9 +32,13 @@ async def test_run_local_agent_writes_run_artifacts(tmp_path: Path, monkeypatch:
     monkeypatch.setenv("OPENHARNESS_DATA_DIR", str(tmp_path / "data"))
     monkeypatch.setenv("OPENHARNESS_LANGFUSE_ENABLED", "0")
 
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+
     result = await run_local_agent(
         LocalAgentRunSpec(
-            cwd=tmp_path,
+            cwd=workspace,
+            run_cwd=tmp_path,
             task=InlineTaskSpec(instruction="Say hi"),
             agent=AgentSpec(name="default"),
             run_id="run-local123456",
@@ -43,6 +47,7 @@ async def test_run_local_agent_writes_run_artifacts(tmp_path: Path, monkeypatch:
     )
 
     assert result.run_id == "run-local123456"
+    assert result.run_dir == tmp_path / "runs" / "run-local123456"
     assert result.manifest_path.exists()
     assert result.result_path is not None and result.result_path.exists()
     assert result.metrics_path is not None and result.metrics_path.exists()
@@ -52,6 +57,7 @@ async def test_run_local_agent_writes_run_artifacts(tmp_path: Path, monkeypatch:
     manifest = json.loads(result.manifest_path.read_text(encoding="utf-8"))
     assert manifest["status"] == "completed"
     assert manifest["run_id"] == "run-local123456"
+    assert manifest["artifacts"]["workspace_dir"] == str(workspace.resolve())
 
     results = json.loads(result.result_path.read_text(encoding="utf-8"))
     assert results["final_text"] == "done"

@@ -388,11 +388,17 @@ This keeps Langfuse concise while still showing the real control-flow boundaries
 
 ## Examples
 
-The repository includes three useful examples:
+The repository examples use one shared bug-fix task and show distinct feature paths:
 
-- `examples/local_fix_bug/run.py`: smallest local bug-fix example
-- `examples/local_coordinator_swarm_fix_bug/run.py`: upstream-style coordinator and swarm path with a YAML-backed teammate
-- `examples/local_langfuse_live_single_agent/run.py`: single-agent run with live Langfuse updates
+- `examples/local_fix_bug/run.py`: high-level local run API with generated run ID and artifacts
+- `examples/local_workflow_coordinator_worker_fix_bug/run.py`: coordinator plus persistent workers and mailboxes
+- `examples/harbor_fix_bug/run.py`: Harbor Docker task with canonical run artifacts and Harbor result output
+
+`local_fix_bug` and `harbor_fix_bug` both use `examples/_shared/agent_configs/bugfix_agent.yaml`.
+The local example defines the task inline, while Harbor supplies the task from its task directory.
+Examples require local Langfuse keys and print the trace URL for each completed run.
+
+See `examples/README.md` for commands and artifact paths.
 
 ## Practical Mental Model
 

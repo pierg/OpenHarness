@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 from uuid import uuid4
@@ -27,8 +28,9 @@ from openharness.config.paths import get_project_runs_dir
 
 
 def generate_run_id() -> str:
-    """Return a short unique run identifier suitable for folder names and trace IDs."""
-    return f"run-{uuid4().hex[:12]}"
+    """Return a time-sortable run identifier suitable for folder names and trace IDs."""
+    timestamp = datetime.now().strftime("%m%d-%H%M%S")
+    return f"run-oh-{timestamp}-{uuid4().hex[:4]}"
 
 
 @dataclass(frozen=True)
@@ -56,6 +58,7 @@ def create_run_artifacts(
     run_id: str | None = None,
     with_logs: bool = False,
     with_workspace: bool = False,
+    workspace_dir: str | Path | None = None,
 ) -> RunArtifacts:
     """Create the directory layout for one run and return a ``RunArtifacts`` handle.
 
@@ -64,6 +67,7 @@ def create_run_artifacts(
         run_id: Explicit run identifier; a new one is generated when omitted.
         with_logs: Create a ``logs/`` subdirectory inside the run directory.
         with_workspace: Create a ``workspace/`` subdirectory inside the run directory.
+        workspace_dir: Existing workspace directory to record for this run.
     """
     resolved_run_id = run_id or generate_run_id()
     run_dir = get_project_runs_dir(cwd) / resolved_run_id
@@ -74,10 +78,13 @@ def create_run_artifacts(
         logs_dir = run_dir / "logs"
         logs_dir.mkdir(parents=True, exist_ok=True)
 
-    workspace_dir: Path | None = None
-    if with_workspace:
-        workspace_dir = run_dir / "workspace"
-        workspace_dir.mkdir(parents=True, exist_ok=True)
+    resolved_workspace_dir: Path | None = None
+    if workspace_dir is not None:
+        resolved_workspace_dir = Path(workspace_dir).expanduser().resolve()
+        resolved_workspace_dir.mkdir(parents=True, exist_ok=True)
+    elif with_workspace:
+        resolved_workspace_dir = run_dir / "workspace"
+        resolved_workspace_dir.mkdir(parents=True, exist_ok=True)
 
     return RunArtifacts(
         run_id=resolved_run_id,
@@ -87,7 +94,7 @@ def create_run_artifacts(
         results_path=run_dir / "results.json",
         metrics_path=run_dir / "metrics.json",
         logs_dir=logs_dir,
-        workspace_dir=workspace_dir,
+        workspace_dir=resolved_workspace_dir,
     )
 
 

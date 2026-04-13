@@ -228,6 +228,7 @@ Fork-owned modules:
 - `src/openharness/harbor/runner.py`
 - `src/openharness/harbor/specs.py`
 - `examples/harbor_fix_bug/run.py`
+- `examples/README.md`
 
 What this adds:
 
@@ -258,7 +259,8 @@ What this adds:
 
 - one repo-local tracing facade that can degrade to `NullTraceObserver`
 - Langfuse integration for local, runtime, swarm, and Harbor paths
-- optional live flushing for long-running local examples
+- fail-fast required tracing for examples via `OPENHARNESS_LANGFUSE_REQUIRED=1`
+- trace URLs persisted in run manifests when Langfuse is active
 - a minimal span model tailored to this repo
 
 How it integrates with upstream:
@@ -367,23 +369,27 @@ Integrated across all of the above.
 Use these examples to understand the merged system in practice:
 
 - `examples/local_fix_bug/run.py`
-  - simplest local runtime path
-  - no swarm
-  - good for understanding `AgentRuntime` and query flow
+  - simplest local run path
+  - loads the shared YAML bug-fix agent through the workspace catalog
+  - defines the task inline in Python
+  - uses `run_local_agent(...)`
+  - writes canonical artifacts under `runs/<generated-run-id>/`
+  - prints the local Langfuse trace URL
 
-- `examples/local_langfuse_live_single_agent/run.py`
-  - same basic local path
-  - adds live Langfuse visibility
-  - good for understanding the minimal trace model
-
-- `examples/local_coordinator_swarm_fix_bug/run.py`
-  - exercises upstream coordinator/swarm style spawning
-  - resolves a projected YAML definition
-  - routes through `TeammateSpawnConfig`
-  - executes a YAML-backed agent through the swarm runtime
+- `examples/local_workflow_coordinator_worker_fix_bug/run.py`
+  - exercises `TeamOrchestrator`
+  - spawns persistent workers
+  - coordinates through mailboxes
+  - runs an inline coordinator workflow
+  - propagates one generated run ID to the coordinator and workers
+  - prints the local Langfuse trace URL
 
 - `examples/harbor_fix_bug/run.py`
   - demonstrates the Harbor integration layer
+  - uses the same shared YAML bug-fix agent as the local example
+  - receives the task from Harbor's task directory instead of inline Python
+  - links host-side run artifacts to Harbor's external `result.json`
+  - passes local Langfuse credentials into the Harbor agent
   - useful for understanding the Harbor-specific fork surface
 
 ## Current Boundaries And Open Gaps

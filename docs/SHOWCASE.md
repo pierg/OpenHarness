@@ -25,6 +25,11 @@ uv run oh -p "Summarize the purpose of this repository" --output-format json
 uv run oh -p "List files that define the permission system" --output-format stream-json
 ```
 
+Runs write artifacts under `runs/<generated-run-id>/`, including `run.json`,
+`messages.jsonl`, `events.jsonl`, `results.json`, and `metrics.json`.
+Generated run IDs use `run-oh-MMDD-HHMMSS-xxxx`.
+When Langfuse is active, `run.json` also records the trace URL.
+
 ## 3. Skill and plugin playground
 
 OpenHarness can load Markdown skills and Claude-style plugin layouts, which makes it useful for experimentation with custom workflows.
@@ -78,3 +83,5 @@ Good showcase additions are:
 - Short enough to reproduce locally.
 - Honest about prerequisites and limitations.
 - Focused on what OpenHarness makes easier, not on generic LLM claims.
+
+For runnable end-to-end examples, see [`examples/README.md`](../examples/README.md).

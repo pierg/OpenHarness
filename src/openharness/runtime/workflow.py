@@ -12,7 +12,7 @@ from openharness.api.client import SupportsStreamingMessages
 from openharness.api.provider import detect_provider
 from openharness.config import load_settings
 from openharness.observability import create_trace_observer
-from openharness.observability import NullTraceObserver, TraceObserver
+from openharness.observability import TraceObserver
 from openharness.permissions.modes import PermissionMode
 from openharness.runtime.session import AgentLogPaths, AgentRuntime
 from openharness.runs.context import RunContext
@@ -84,6 +84,7 @@ class Workflow:
         run.start(
             metadata={
                 "agent_name": agent_name,
+                "model": agent.config.model,
                 "instruction": task.instruction,
                 "payload_keys": sorted(task.payload.keys()),
             }
@@ -95,6 +96,12 @@ class Workflow:
                     "run_id": run.run_id,
                 }
             )
+            run.set_trace_identity(
+                trace_id=getattr(observer, "trace_id", None),
+                trace_url=getattr(observer, "trace_url", None),
+            )
+            run.save_manifest()
+            run.log_start()
         runtime = AgentRuntime(
             workspace=self.workspace,
             permission_mode=PermissionMode.FULL_AUTO,

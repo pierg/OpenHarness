@@ -5,11 +5,13 @@ from __future__ import annotations
 import json
 import shutil
 import subprocess
+import time
 from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
 from openharness.config.paths import get_project_runs_dir
+from openharness.observability import TraceIdentity, resolve_langfuse_trace_identity
 from openharness.harbor.specs import (
     HarborEnvironmentSpec,
     HarborExistingJobPolicy,
@@ -93,7 +95,7 @@ def build_harbor_run_command(spec: HarborJobSpec) -> list[str]:
     if spec.agent.model is not None:
         command.extend(["--model", spec.agent.model])
 
-    _append_key_value_args(command, "--agent-kwarg", spec.agent.harbor_kwargs())
+    _append_key_value_args(command, "--agent-kwarg", _build_agent_kwargs(spec))
     _append_string_env_args(command, "--agent-env", _build_agent_env(spec))
     _append_environment_args(command, spec.environment)
     _append_task_args(command, spec.task)
@@ -104,17 +106,34 @@ def build_harbor_run_command(spec: HarborJobSpec) -> list[str]:
 def run_harbor_job(spec: HarborJobSpec) -> HarborRunResult:
     """Ensure Harbor is installed, run the Harbor job, and return result metadata."""
     executable = ensure_harbor_tool(spec.tool)
+    started = time.perf_counter()
     resolved_jobs_dir = spec.jobs_dir.expanduser().resolve()
     resolved_jobs_dir.mkdir(parents=True, exist_ok=True)
     resolved_job_name = resolve_harbor_job_name(spec, jobs_dir=resolved_jobs_dir)
     run_base_cwd = spec.run_cwd.expanduser().resolve() if spec.run_cwd is not None else resolved_jobs_dir
+    run_dir = get_project_runs_dir(run_base_cwd) / resolved_job_name
+    workspace_dir = run_dir / "workspace"
+    run_metadata = {
+        **spec.metadata,
+        "agent_name": spec.agent.agent_name,
+        "model": spec.agent.model,
+        "harbor_jobs_dir": str(resolved_jobs_dir),
+    }
+    trace_identity = resolve_langfuse_trace_identity(run_id=resolved_job_name)
+    if trace_identity.trace_id is not None:
+        run_metadata["trace_id"] = trace_identity.trace_id
+    if trace_identity.trace_url is not None:
+        run_metadata["trace_url"] = trace_identity.trace_url
     run_context = RunContext.create(
         run_base_cwd,
         interface="harbor_job",
         run_id=resolved_job_name,
-        metadata={
-            "harbor_jobs_dir": str(resolved_jobs_dir),
-        },
+        workspace_dir=workspace_dir if workspace_dir.exists() else None,
+        metadata=run_metadata,
+    )
+    run_context.set_trace_identity(
+        trace_id=trace_identity.trace_id,
+        trace_url=trace_identity.trace_url,
     )
     run_context.start(
         metadata={
@@ -122,6 +141,7 @@ def run_harbor_job(spec: HarborJobSpec) -> HarborRunResult:
             "harbor_jobs_dir": str(resolved_jobs_dir),
         }
     )
+    run_context.log_start()
 
     command = build_harbor_run_command(
         replace(
@@ -131,6 +151,7 @@ def run_harbor_job(spec: HarborJobSpec) -> HarborRunResult:
         )
     )
     command[0] = executable
+    result_path = resolved_jobs_dir / resolved_job_name / "result.json"
     try:
         subprocess.run(command, check=True)
     except Exception as exc:
@@ -138,17 +159,79 @@ def run_harbor_job(spec: HarborJobSpec) -> HarborRunResult:
             status="failed",
             error=str(exc),
             metadata={"command": command},
+            metrics={"elapsed_seconds": time.perf_counter() - started},
         )
         raise
 
-    run_context.save_manifest()
+    trial_trace_identity = _read_harbor_trial_trace_identity(result_path)
+    if trial_trace_identity.trace_id is not None or trial_trace_identity.trace_url is not None:
+        trace_identity = trial_trace_identity
+        run_context.set_trace_identity(
+            trace_id=trace_identity.trace_id,
+            trace_url=trace_identity.trace_url,
+        )
+
+    run_context.finish(
+        status="completed",
+        metadata={
+            "command": command,
+            "harbor_result_path": str(result_path),
+            "trace_id": trace_identity.trace_id,
+            "trace_url": trace_identity.trace_url,
+        },
+        results={
+            "job_name": resolved_job_name,
+            "harbor_result_path": str(result_path),
+            "harbor_result_exists": result_path.exists(),
+            "trace_id": trace_identity.trace_id,
+            "trace_url": trace_identity.trace_url,
+        },
+        metrics={
+            "elapsed_seconds": time.perf_counter() - started,
+        },
+    )
 
     return HarborRunResult(
         command=tuple(command),
         job_name=resolved_job_name,
         jobs_dir=resolved_jobs_dir,
-        result_path=resolved_jobs_dir / resolved_job_name / "result.json",
+        result_path=result_path,
+        trace_id=trace_identity.trace_id,
+        trace_url=trace_identity.trace_url,
     )
+
+
+def _read_harbor_trial_trace_identity(result_path: Path) -> TraceIdentity:
+    for trial_result_path in sorted(result_path.parent.glob("*/result.json")):
+        try:
+            payload = json.loads(trial_result_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        identity = _find_trace_identity(payload)
+        if identity.trace_id is not None or identity.trace_url is not None:
+            return identity
+    return TraceIdentity()
+
+
+def _find_trace_identity(value: Any) -> TraceIdentity:
+    if isinstance(value, dict):
+        trace_id = value.get("trace_id")
+        trace_url = value.get("trace_url")
+        if isinstance(trace_id, str) or isinstance(trace_url, str):
+            return TraceIdentity(
+                trace_id=trace_id if isinstance(trace_id, str) else None,
+                trace_url=trace_url if isinstance(trace_url, str) else None,
+            )
+        for nested in value.values():
+            found = _find_trace_identity(nested)
+            if found.trace_id is not None or found.trace_url is not None:
+                return found
+    if isinstance(value, list):
+        for nested in value:
+            found = _find_trace_identity(nested)
+            if found.trace_id is not None or found.trace_url is not None:
+                return found
+    return TraceIdentity()
 
 
 def resolve_harbor_job_name(spec: HarborJobSpec, *, jobs_dir: Path | None = None) -> str:
@@ -237,9 +320,17 @@ def _next_available_job_name(jobs_dir: Path, base_name: str) -> str:
 
 
 def _build_agent_env(spec: HarborJobSpec) -> dict[str, str]:
-    base_cwd = spec.run_cwd.expanduser().resolve() if spec.run_cwd is not None else spec.jobs_dir.expanduser().resolve()
+    return dict(spec.agent.env)
+
+
+def _build_agent_kwargs(spec: HarborJobSpec) -> dict[str, Any]:
+    base_cwd = (
+        spec.run_cwd.expanduser().resolve()
+        if spec.run_cwd is not None
+        else spec.jobs_dir.expanduser().resolve()
+    )
     run_root = get_project_runs_dir(base_cwd) / spec.job_name
-    env = dict(spec.agent.env)
-    env["OPENHARNESS_RUN_ID"] = spec.job_name
-    env["OPENHARNESS_RUN_ROOT"] = str(run_root)
-    return env
+    kwargs = spec.agent.harbor_kwargs()
+    kwargs["run_id"] = spec.job_name
+    kwargs["run_root"] = str(run_root)
+    return kwargs

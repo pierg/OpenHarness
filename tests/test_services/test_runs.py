@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 
 from openharness.services.runs import create_run_artifacts, generate_run_id, save_run_manifest
@@ -10,8 +11,7 @@ from openharness.services.runs import create_run_artifacts, generate_run_id, sav
 
 def test_generate_run_id_format():
     run_id = generate_run_id()
-    assert run_id.startswith("run-")
-    assert len(run_id) == 16  # "run-" + 12 hex chars
+    assert re.fullmatch(r"run-oh-\d{4}-\d{6}-[0-9a-f]{4}", run_id)
 
 
 def test_generate_run_id_unique():
@@ -37,6 +37,18 @@ def test_create_run_artifacts_with_logs_and_workspace(tmp_path: Path):
     assert run.workspace_dir == run.run_dir / "workspace"
     assert run.logs_dir is not None and run.logs_dir.is_dir()
     assert run.workspace_dir is not None and run.workspace_dir.is_dir()
+
+
+def test_create_run_artifacts_records_existing_workspace(tmp_path: Path):
+    workspace = tmp_path / "runs" / "run-abc123def456" / "workspace"
+    run = create_run_artifacts(
+        tmp_path,
+        run_id="run-abc123def456",
+        workspace_dir=workspace,
+    )
+
+    assert run.workspace_dir == workspace.resolve()
+    assert run.workspace_dir.is_dir()
 
 
 def test_create_run_artifacts_generates_run_id_when_omitted(tmp_path: Path):

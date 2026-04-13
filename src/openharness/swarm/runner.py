@@ -15,6 +15,7 @@ from openharness.engine.stream_events import AssistantTextDelta, AssistantTurnCo
 from openharness.observability import TraceObserver, create_trace_observer
 from openharness.permissions.modes import PermissionMode
 from openharness.runtime.workflow import Workflow
+from openharness.runs.context import RunContext
 from openharness.swarm.types import TeammateSpawnConfig
 from openharness.ui.runtime import RuntimeBundle, build_runtime, close_runtime, start_runtime
 from openharness.workspace import LocalWorkspace
@@ -240,6 +241,7 @@ class YamlWorkflowTeammateRunner:
             task,
             agent_name=self._agent_name,
             trace_observer=self._trace_observer,
+            run_context=self._run_context(),
         )
         final_text = result.agent_result.final_text
         self._history.append({"input": turn_message, "output": final_text})
@@ -257,6 +259,22 @@ class YamlWorkflowTeammateRunner:
                 "teammate_name": self._config.name,
                 "agent_config_name": self._agent_name,
             }
+        )
+
+    def _run_context(self) -> RunContext | None:
+        if self._config.run_id is None or self._config.run_root is None:
+            return None
+        return RunContext.from_run_root(
+            self._config.run_root,
+            interface="swarm_yaml_workflow",
+            run_id=self._config.run_id,
+            cwd=self._workspace.cwd,
+            metadata={
+                "runner": "yaml_workflow",
+                "team": self._config.team,
+                "teammate_name": self._config.name,
+                "agent_config_name": self._agent_name,
+            },
         )
 
 
