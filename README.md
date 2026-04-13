@@ -2,7 +2,7 @@
 
 This repository is a fork of [HKUDS/OpenHarness](https://github.com/HKUDS/OpenHarness).
 
-Upstream OpenHarness provides the base CLI harness: the interactive shell, tool loop, permissions, skills, plugins, coordinator mode, and swarm transport. This fork keeps that foundation and adds a reproducible execution layer for YAML-configured agents, Google Gemini and Vertex AI execution, run artifacts, Langfuse traces, and Harbor evaluation.
+Upstream OpenHarness provides the base CLI harness: the interactive shell, tool loop, permissions, skills, plugins, coordinator mode, swarm transport, ohmo, sandboxing, and the React terminal UI. This fork keeps that foundation and adds a reproducible execution layer for YAML-configured agents, Google Gemini and Vertex AI execution, run artifacts, Langfuse traces, and Harbor evaluation.
 
 ## What This Fork Adds
 

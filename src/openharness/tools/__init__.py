@@ -1,7 +1,9 @@
 """Built-in tool registration."""
 
+import importlib
 import re
-from collections.abc import Collection
+from collections.abc import Callable, Collection
+from typing import Any
 
 from openharness.tools.ask_user_question_tool import AskUserQuestionTool
 from openharness.tools.agent_tool import AgentTool
@@ -24,7 +26,6 @@ from openharness.tools.glob_tool import GlobTool
 from openharness.tools.grep_tool import GrepTool
 from openharness.tools.list_mcp_resources_tool import ListMcpResourcesTool
 from openharness.tools.lsp_tool import LspTool
-from openharness.tools.mailbox_read_tool import MailboxReadTool
 from openharness.tools.mcp_auth_tool import McpAuthTool
 from openharness.tools.mcp_tool import McpToolAdapter
 from openharness.tools.notebook_edit_tool import NotebookEditTool
@@ -61,10 +62,57 @@ WORKSPACE_TOOLS: dict[str, type[BaseTool]] = {
     "remote_trigger": RemoteTriggerTool,
 }
 
-WORKSPACE_COMPAT_TOOLS: dict[str, type[BaseTool]] = {
+class _LazyTool(BaseTool):
+    """Proxy a tool whose import has heavyweight side effects until first use."""
+
+    def __init__(
+        self,
+        *,
+        name: str,
+        description: str,
+        module_name: str,
+        class_name: str,
+    ) -> None:
+        self.name = name
+        self.description = description
+        self._module_name = module_name
+        self._class_name = class_name
+        self._tool: BaseTool | None = None
+
+    @property
+    def input_model(self) -> Any:
+        return self._load().input_model
+
+    async def execute(self, arguments, context: ToolExecutionContext) -> ToolResult:
+        return await self._load().execute(arguments, context)
+
+    def is_read_only(self, arguments) -> bool:
+        return self._load().is_read_only(arguments)
+
+    def to_api_schema(self) -> dict[str, Any]:
+        return self._load().to_api_schema()
+
+    def _load(self) -> BaseTool:
+        if self._tool is None:
+            module = importlib.import_module(self._module_name)
+            tool_type = getattr(module, self._class_name)
+            self._tool = tool_type()
+        return self._tool
+
+
+def _mailbox_read_tool() -> BaseTool:
+    return _LazyTool(
+        name="mailbox_read",
+        description="Read messages from a swarm mailbox.",
+        module_name="openharness.tools.mailbox_read_tool",
+        class_name="MailboxReadTool",
+    )
+
+
+WORKSPACE_COMPAT_TOOLS: dict[str, Callable[[], BaseTool]] = {
     "agent": AgentTool,
     "send_message": SendMessageTool,
-    "mailbox_read": MailboxReadTool,
+    "mailbox_read": _mailbox_read_tool,
     "task_stop": TaskStopTool,
     "skill": SkillTool,
     "task_create": TaskCreateTool,
@@ -197,9 +245,9 @@ class WorkspaceToolRegistryFactory:
                 for workspace_name, tool_type in WORKSPACE_TOOLS.items():
                     if registry.get(workspace_name) is None:
                         registry.register(tool_type(workspace=workspace))
-                for compat_name, tool_type in WORKSPACE_COMPAT_TOOLS.items():
+                for compat_name, tool_factory in WORKSPACE_COMPAT_TOOLS.items():
                     if registry.get(compat_name) is None:
-                        registry.register(tool_type())
+                        registry.register(tool_factory())
                 continue
             if normalized in WORKSPACE_TOOLS:
                 registry.register(WORKSPACE_TOOLS[normalized](workspace=workspace))
@@ -258,7 +306,7 @@ def create_default_tool_registry(
         TaskUpdateTool(),
         AgentTool(),
         SendMessageTool(),
-        MailboxReadTool(),
+        _mailbox_read_tool(),
         TeamCreateTool(),
         TeamDeleteTool(),
     ):
