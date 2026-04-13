@@ -24,7 +24,7 @@ Requirements:
 - [uv](https://docs.astral.sh/uv/)
 - Google AI Studio or Vertex AI credentials
 - Langfuse credentials for the examples
-- Docker for the Harbor example
+- Docker for the Docker sandbox and Harbor examples
 
 ```bash
 git clone <this-fork-url>
@@ -47,6 +47,7 @@ If neither `LANGFUSE_HOST` nor `LANGFUSE_BASE_URL` is set, examples default to `
 ```bash
 .venv/bin/python examples/local_fix_bug/run.py
 .venv/bin/python examples/local_workflow_coordinator_worker_fix_bug/run.py
+.venv/bin/python examples/local_docker_sandbox_fix_bug/run.py
 .venv/bin/python examples/harbor_fix_bug/run.py
 ```
 

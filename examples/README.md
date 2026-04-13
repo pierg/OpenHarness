@@ -19,10 +19,11 @@ persists it in `run.json`.
 The run ID, run folder, workspace, and trace URL are also logged as soon as the
 run starts so the trace can be opened while the agent is still working.
 
-The local and Harbor examples both use the same YAML-configured agent:
-`examples/_shared/agent_configs/bugfix_agent.yaml`. The difference is the task
-source: `local_fix_bug` passes a manually defined inline task, while
-`harbor_fix_bug` passes a Harbor task directory.
+The single-agent examples use the same YAML-configured agent:
+`examples/_shared/agent_configs/bugfix_agent.yaml`. The difference is the
+execution path: `local_fix_bug` runs directly, `local_docker_sandbox_fix_bug`
+runs local tools through the OpenHarness Docker sandbox, and `harbor_fix_bug`
+passes a Harbor task directory.
 
 All example YAML configs pin `gemini-2.5-flash` directly.
 
@@ -42,7 +43,14 @@ All example YAML configs pin `gemini-2.5-flash` directly.
    - mailbox coordination
    - one run ID propagated through the coordinator and workers
 
-3. `harbor_fix_bug/run.py`
+3. `local_docker_sandbox_fix_bug/run.py`
+   - the same YAML agent config as the local example
+   - OpenHarness Docker sandbox backend for bash tool execution
+   - sandbox session started before the agent run
+   - generated run ID and canonical run artifacts
+   - exits cleanly with a prerequisite message when Docker is not running
+
+4. `harbor_fix_bug/run.py`
    - the same YAML agent config passed into Harbor
    - Harbor Docker execution
    - OpenHarness Harbor agent adapter
@@ -59,6 +67,7 @@ same runs use the generated run ID as the trace identity.
 ```bash
 uv run python examples/local_fix_bug/run.py
 uv run python examples/local_workflow_coordinator_worker_fix_bug/run.py
+uv run python examples/local_docker_sandbox_fix_bug/run.py
 uv run python examples/harbor_fix_bug/run.py
 ```
 
