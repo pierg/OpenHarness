@@ -7,7 +7,11 @@ folder (resolved by ``get_project_runs_dir``).  The layout is:
 
     <cwd>/runs/<run-id>/
         run.json        ← metadata manifest written by save_run_manifest
-        logs/           ← optional, created when with_logs=True
+        messages.jsonl  ← conversation transcript records
+        events.jsonl    ← stream/tool execution records
+        results.json    ← final result payload
+        metrics.json    ← usage + execution summary payload
+        logs/           ← optional auxiliary logs, created when with_logs=True
         workspace/      ← optional, created when with_workspace=True
 """
 
@@ -33,6 +37,10 @@ class RunArtifacts:
 
     run_id: str
     run_dir: Path
+    messages_path: Path
+    events_path: Path
+    results_path: Path
+    metrics_path: Path
     logs_dir: Path | None = None
     workspace_dir: Path | None = None
 
@@ -74,6 +82,10 @@ def create_run_artifacts(
     return RunArtifacts(
         run_id=resolved_run_id,
         run_dir=run_dir,
+        messages_path=run_dir / "messages.jsonl",
+        events_path=run_dir / "events.jsonl",
+        results_path=run_dir / "results.json",
+        metrics_path=run_dir / "metrics.json",
         logs_dir=logs_dir,
         workspace_dir=workspace_dir,
     )

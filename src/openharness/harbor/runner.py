@@ -9,6 +9,7 @@ from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
+from openharness.config.paths import get_project_runs_dir
 from openharness.harbor.specs import (
     HarborEnvironmentSpec,
     HarborExistingJobPolicy,
@@ -17,6 +18,7 @@ from openharness.harbor.specs import (
     HarborTaskSpec,
     HarborToolSpec,
 )
+from openharness.runs.context import RunContext
 
 
 def current_harbor_version(executable: str = "harbor") -> str | None:
@@ -105,6 +107,21 @@ def run_harbor_job(spec: HarborJobSpec) -> HarborRunResult:
     resolved_jobs_dir = spec.jobs_dir.expanduser().resolve()
     resolved_jobs_dir.mkdir(parents=True, exist_ok=True)
     resolved_job_name = resolve_harbor_job_name(spec, jobs_dir=resolved_jobs_dir)
+    run_base_cwd = spec.run_cwd.expanduser().resolve() if spec.run_cwd is not None else resolved_jobs_dir
+    run_context = RunContext.create(
+        run_base_cwd,
+        interface="harbor_job",
+        run_id=resolved_job_name,
+        metadata={
+            "harbor_jobs_dir": str(resolved_jobs_dir),
+        },
+    )
+    run_context.start(
+        metadata={
+            "job_name": resolved_job_name,
+            "harbor_jobs_dir": str(resolved_jobs_dir),
+        }
+    )
 
     command = build_harbor_run_command(
         replace(
@@ -114,7 +131,17 @@ def run_harbor_job(spec: HarborJobSpec) -> HarborRunResult:
         )
     )
     command[0] = executable
-    subprocess.run(command, check=True)
+    try:
+        subprocess.run(command, check=True)
+    except Exception as exc:
+        run_context.finish(
+            status="failed",
+            error=str(exc),
+            metadata={"command": command},
+        )
+        raise
+
+    run_context.save_manifest()
 
     return HarborRunResult(
         command=tuple(command),
@@ -210,7 +237,8 @@ def _next_available_job_name(jobs_dir: Path, base_name: str) -> str:
 
 
 def _build_agent_env(spec: HarborJobSpec) -> dict[str, str]:
-    run_root = spec.jobs_dir.expanduser().resolve() / spec.job_name
+    base_cwd = spec.run_cwd.expanduser().resolve() if spec.run_cwd is not None else spec.jobs_dir.expanduser().resolve()
+    run_root = get_project_runs_dir(base_cwd) / spec.job_name
     env = dict(spec.agent.env)
     env["OPENHARNESS_RUN_ID"] = spec.job_name
     env["OPENHARNESS_RUN_ROOT"] = str(run_root)

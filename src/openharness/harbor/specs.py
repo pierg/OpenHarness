@@ -117,6 +117,7 @@ class HarborJobSpec:
     environment: HarborEnvironmentSpec
     agent: OpenHarnessHarborAgentSpec
     jobs_dir: Path
+    run_cwd: Path | None = None
     job_name: str = field(
         default_factory=lambda: datetime.now().strftime("openharness-harbor-%Y%m%d-%H%M%S-%f")
     )

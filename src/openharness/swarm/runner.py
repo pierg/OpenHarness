@@ -142,6 +142,7 @@ class PromptNativeTeammateRunner:
             allowed_tools=allowed_tools,
             disallowed_tools=config.disallowed_tools,
             enforce_max_turns=True,
+            run_id=config.run_id,
             trace_observer=trace_observer,
         )
         await start_runtime(bundle)
@@ -184,16 +185,7 @@ class PromptNativeTeammateRunner:
         )
 
     async def close(self) -> None:
-        try:
-            await close_runtime(self._bundle)
-        finally:
-            self._trace_observer.end_session(
-                metadata={
-                    "runner": "prompt_native",
-                    "team": self._config.team,
-                    "teammate_name": self._config.name,
-                }
-            )
+        await close_runtime(self._bundle)
 
 
 class YamlWorkflowTeammateRunner:

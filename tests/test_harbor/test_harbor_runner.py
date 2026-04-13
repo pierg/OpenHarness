@@ -55,7 +55,7 @@ def test_build_harbor_run_command_maps_agent_task_and_environment_specs() -> Non
     assert 'remote_cwd="/app"' in command
     assert "--agent-env" in command
     assert "OPENHARNESS_RUN_ID=job-1" in command
-    assert f"OPENHARNESS_RUN_ROOT={Path('/tmp/jobs').resolve() / 'job-1'}" in command
+    assert f"OPENHARNESS_RUN_ROOT={Path('/tmp/jobs').resolve() / 'runs' / 'job-1'}" in command
 
 
 def test_harbor_task_spec_requires_exactly_one_source() -> None:

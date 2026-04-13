@@ -86,6 +86,7 @@ async def test_openharness_harbor_agent_solves_hello_world(
     context = AgentContext()
     monkeypatch.setenv("OPENHARNESS_RUN_ID", "run-test123456")
     monkeypatch.setenv("OPENHARNESS_RUN_ROOT", str(run_root))
+    monkeypatch.setenv("OPENHARNESS_LANGFUSE_ENABLED", "0")
     agent = OpenHarnessHarborAgent(
         logs_dir=tmp_path / "agent",
         model_name="claude-test",
@@ -107,8 +108,8 @@ async def test_openharness_harbor_agent_solves_hello_world(
     assert context.metadata["summary"]["final_text"] == "Done."
     assert json.loads((run_root / "run.json").read_text())["run_id"] == "run-test123456"
 
-    events_path = tmp_path / "agent" / "events.jsonl"
-    messages_path = tmp_path / "agent" / "messages.jsonl"
+    events_path = run_root / "events.jsonl"
+    messages_path = run_root / "messages.jsonl"
     assert events_path.exists()
     assert messages_path.exists()
 

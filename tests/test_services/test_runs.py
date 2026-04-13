@@ -23,6 +23,10 @@ def test_create_run_artifacts_minimal(tmp_path: Path):
     assert run.run_id == "run-abc123def456"
     assert run.run_dir == tmp_path.resolve() / "runs" / "run-abc123def456"
     assert run.run_dir.is_dir()
+    assert run.messages_path == run.run_dir / "messages.jsonl"
+    assert run.events_path == run.run_dir / "events.jsonl"
+    assert run.results_path == run.run_dir / "results.json"
+    assert run.metrics_path == run.run_dir / "metrics.json"
     assert run.logs_dir is None
     assert run.workspace_dir is None
 
