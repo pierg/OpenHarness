@@ -5,8 +5,8 @@
 
 ## Validation
 
-- [ ] `uv run ruff check src tests scripts`
-- [ ] `uv run pytest -q`
+- [ ] `uv run ruff check examples src tests scripts`
+- [ ] `uv sync --extra dev --extra harbor && uv run pytest -q`
 - [ ] `cd frontend/terminal && npx tsc --noEmit` (if frontend touched)
 
 ## Notes

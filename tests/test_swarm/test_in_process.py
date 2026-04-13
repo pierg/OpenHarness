@@ -38,6 +38,15 @@ def spawn_config():
 @pytest.fixture
 def backend(tmp_path, monkeypatch):
     monkeypatch.setattr(Path, "home", lambda: tmp_path)
+
+    async def _fake_create_runner(config):
+        del config
+        return _FakeRunner("")
+
+    monkeypatch.setattr(
+        "openharness.swarm.in_process.create_teammate_runner",
+        _fake_create_runner,
+    )
     return InProcessBackend()
 
 
