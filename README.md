@@ -42,6 +42,15 @@ For Vertex AI, set `VERTEX_PROJECT` or `GOOGLE_CLOUD_PROJECT`, and optionally `V
 
 If neither `LANGFUSE_HOST` nor `LANGFUSE_BASE_URL` is set, examples default to `http://localhost:3000`.
 
+Upstream CLI setup is still available from this fork:
+
+```bash
+oh setup
+# On Windows PowerShell, use: openh setup
+```
+
+Windows support is native. In PowerShell, use `openh` instead of `oh` because `oh` can resolve to the built-in `Out-Host` alias.
+
 ## Run The Examples
 
 ```bash

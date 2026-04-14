@@ -34,14 +34,14 @@ def resolve_shell_command(
     if bash:
         argv = [bash, "-lc", command]
         if prefer_pty:
-            wrapped = _wrap_command_with_script(argv)
+            wrapped = _wrap_command_with_script(argv, platform_name=resolved_platform)
             if wrapped is not None:
                 return wrapped
         return argv
     shell = shutil.which("sh") or os.environ.get("SHELL") or "/bin/sh"
     argv = [shell, "-lc", command]
     if prefer_pty:
-        wrapped = _wrap_command_with_script(argv)
+        wrapped = _wrap_command_with_script(argv, platform_name=resolved_platform)
         if wrapped is not None:
             return wrapped
     return argv
@@ -104,11 +104,13 @@ async def create_shell_subprocess(
     return process
 
 
-def _wrap_command_with_script(argv: list[str]) -> list[str] | None:
+def _wrap_command_with_script(argv: list[str], *, platform_name: PlatformName) -> list[str] | None:
     script = shutil.which("script")
     if script is None:
         return None
     if len(argv) >= 3 and argv[1] == "-lc":
+        if platform_name == "macos":
+            return [script, "-q", "/dev/null", *argv]
         return [script, "-qefc", argv[2], "/dev/null"]
     return None
 
