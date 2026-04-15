@@ -43,7 +43,7 @@ def create_api_client(settings: Settings) -> SupportsStreamingMessages:
             auth_token_resolver=lambda: settings.resolve_auth().value,
         )
 
-    if settings.api_format == "openai":
+    if settings.api_format in ("openai", "openai_compat"):
         auth = settings.resolve_auth()
         return OpenAICompatibleClient(api_key=auth.value, base_url=settings.base_url)
 
