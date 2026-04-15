@@ -121,6 +121,9 @@ class RuntimeBundle:
 
 def _resolve_api_client_from_settings(settings) -> SupportsStreamingMessages:
     """Build the appropriate API client for the resolved settings."""
+    # Ensure profile fields (base_url, model, api_format) are projected to settings
+    settings = settings.materialize_active_profile()
+
     try:
         return create_api_client(settings)
     except ValueError as exc:

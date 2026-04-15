@@ -42,3 +42,5 @@ examples/.workspaces/
 .DS_Store
 Thumbs.db
 uv.lock
+
+.agents/
