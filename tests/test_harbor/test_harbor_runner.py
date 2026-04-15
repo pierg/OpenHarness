@@ -44,9 +44,9 @@ def test_build_harbor_run_command_maps_agent_task_and_environment_specs() -> Non
             jobs_dir=Path("/tmp/jobs"),
             tool=HarborToolSpec(version="0.3.0"),
             agent=OpenHarnessHarborAgentSpec(
-                agent_name="react_example",
+                agent_name="react",
                 model="gemini-2.5-flash-lite",
-                agent_config_yaml="name: react_example\narchitecture: simple\nmodel: gemini-2.5-flash-lite\n",
+                agent_config_yaml="name: react\narchitecture: simple\nmodel: gemini-2.5-flash-lite\n",
             ),
             task=HarborTaskSpec(path=Path("/tmp/task")),
             environment=HarborEnvironmentSpec(type="docker", override_cpus=2),
@@ -62,7 +62,7 @@ def test_build_harbor_run_command_maps_agent_task_and_environment_specs() -> Non
     assert "--env" in command and "docker" in command
     assert "--override-cpus" in command
     assert "--agent-kwarg" in command
-    assert 'agent_name="react_example"' in command
+    assert 'agent_name="react"' in command
     assert 'remote_cwd="/app"' in command
     assert any(item.startswith("agent_config_yaml=") for item in command)
     assert 'run_id="job-1"' in command

@@ -1,19 +1,20 @@
-name: planner_executor_example
-description: An example configuration of a planner-executor agent architecture.
+name: planner_executor
+description: Planner-executor Terminal-Bench baseline agent.
 architecture: planner_executor
+model: gemini-2.5-flash
+max_turns: 30
+max_tokens: 8192
 definition:
   subagent_type: planner-executor
-  description: Multi-stage planner/executor workflow. Use this when the task benefits from an explicit planning pass before implementation.
+  description: Baseline planner/executor workflow for Harbor and Terminal-Bench style tasks.
   runner: yaml_workflow
   color: blue
 
-# The top level model/tools/turns are usually not heavily used by the orchestrator
-# itself unless you want to pass defaults, but subagents define their own rules.
 subagents:
   planner:
     name: planner
-    model: gemini-2.5-flash-lite
-    max_turns: 1
+    model: gemini-2.5-flash
+    max_turns: 2
     max_tokens: 2048
     tools: []
     prompts:
@@ -21,17 +22,18 @@ subagents:
         {{ openharness_system_context }}
         
         # Planner Persona
-        You are a Planner agent. Your job is to read the instruction and break it down
-        into a clear, step-by-step plan for the Executor agent.
-        Do not execute the code yourself, just output a detailed list of steps.
+        You are a planner for Terminal-Bench style tasks.
+        Read the instruction and produce a concise execution plan for a tool-using executor.
+        Focus on filesystem inspection, likely commands to run, minimal edits, and verification.
+        Do not execute the task yourself.
         
       user: |
         {{ instruction }}
 
   executor:
     name: executor
-    model: gemini-2.5-flash-lite
-    max_turns: 10
+    model: gemini-2.5-flash
+    max_turns: 30
     max_tokens: 8192
     tools:
       - bash
@@ -45,9 +47,10 @@ subagents:
         {{ openharness_system_context }}
         
         # Executor Persona
-        You are an Executor agent. You have been given a task and a plan.
-        Execute the plan step-by-step using your tools to accomplish the task.
-        Stop when you are done.
+        You are an executor running inside a task environment.
+        Follow the plan, inspect the filesystem, make the smallest correct changes, and verify with available tests or task-specific checks.
+        Use non-interactive shell commands. Do not ask for human input.
+        Stop only after the task is verified or after you have found a concrete blocker that prevents further progress.
         
         # Plan
         {{ plan }}

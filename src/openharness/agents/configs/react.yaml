@@ -1,24 +1,26 @@
-name: react_example
-description: ReAct architecture — explicit Think / Act / Observe loop.
+name: react
+description: ReAct Terminal-Bench baseline agent.
 architecture: react
-max_turns: 5
+model: gemini-2.5-flash
+max_turns: 15
+max_tokens: 8192
 definition:
   subagent_type: react
-  description: ReAct workflow with explicit reasoning and acting phases. Use this when the task benefits from stepwise tool-driven exploration before answering.
+  description: Baseline ReAct workflow for Harbor and Terminal-Bench style tasks.
   runner: yaml_workflow
   color: green
 
 subagents:
   thinker:
     name: thinker
-    model: gemini-2.5-flash-lite
+    model: gemini-2.5-flash
     max_turns: 1
-    max_tokens: 1024
+    max_tokens: 2048
     tools: []
     prompts:
       system: |
-        You are a reasoning agent using the ReAct framework.
-        You will be given a task and a history of previous observations.
+        You are a reasoning agent using the ReAct framework for Terminal-Bench style tasks.
+        You will be given a task and a history of previous observations from a task environment.
 
         Analyze the current state and decide what to do next.
 
@@ -66,9 +68,9 @@ subagents:
 
   actor:
     name: actor
-    model: gemini-2.5-flash-lite
-    max_turns: 5
-    max_tokens: 4096
+    model: gemini-2.5-flash
+    max_turns: 8
+    max_tokens: 8192
     tools:
       - bash
       - read_file
@@ -81,8 +83,10 @@ subagents:
         {{ openharness_system_context }}
 
         # Actor Persona
-        You are an executor agent. Carry out the action described below
-        using the available tools. Be concise and stop when done.
+        You are an executor running inside a task environment.
+        Carry out the requested action using the available tools.
+        Prefer filesystem inspection before edits, make minimal changes, and verify when the action calls for it.
+        Use non-interactive shell commands. Do not ask for human input.
 
       user: |
         {{ instruction }}

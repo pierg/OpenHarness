@@ -96,7 +96,7 @@ def test_yaml_catalog_agents_are_projected():
 def test_get_agent_definition_matches_subagent_type():
     agent = get_agent_definition("planner-executor")
     assert agent is not None
-    assert agent.name == "planner_executor_example"
+    assert agent.name == "planner_executor"
 
 
 # ---------------------------------------------------------------------------

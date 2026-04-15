@@ -277,4 +277,11 @@ async def test_agent_tool_projects_yaml_definition_into_spawn_config(tmp_path: P
     assert config.runner == "yaml_workflow"
     assert config.agent_config_name == "default"
     assert config.allowed_tools is not None
-    assert "agent" in config.allowed_tools
+    assert set(config.allowed_tools) == {
+        "bash",
+        "read_file",
+        "write_file",
+        "edit_file",
+        "glob",
+        "grep",
+    }
