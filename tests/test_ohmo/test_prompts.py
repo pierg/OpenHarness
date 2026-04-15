@@ -17,7 +17,9 @@ def test_ohmo_prompt_includes_persona_and_memory(tmp_path: Path):
     get_soul_path(workspace).write_text("# soul\nSpeak like a calm operator.\n", encoding="utf-8")
     get_identity_path(workspace).write_text("# identity\nName: ohmo\n", encoding="utf-8")
     get_user_path(workspace).write_text("# user\nPrefers terse answers.\n", encoding="utf-8")
-    get_bootstrap_path(workspace).write_text("# bootstrap\nAsk a few high-value questions.\n", encoding="utf-8")
+    get_bootstrap_path(workspace).write_text(
+        "# bootstrap\nAsk a few high-value questions.\n", encoding="utf-8"
+    )
     add_memory_entry(workspace, "timezone", "The user prefers UTC timestamps.")
 
     prompt = build_ohmo_system_prompt(tmp_path, workspace=workspace)

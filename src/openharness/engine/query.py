@@ -350,7 +350,9 @@ def _record_tool_carryover(
             tool_input=tool_input,
             output=tool_output,
         )
-        description = str(tool_input.get("description") or tool_input.get("prompt") or tool_name).strip()
+        description = str(
+            tool_input.get("description") or tool_input.get("prompt") or tool_name
+        ).strip()
         _remember_verified_work(
             context.tool_metadata,
             f"Confirmed async-agent activity via {tool_name}: {description[:180]}",
@@ -375,7 +377,10 @@ def _record_tool_carryover(
     elif tool_name == "grep":
         pattern = str(tool_input.get("pattern") or "").strip()
         if pattern:
-            _remember_verified_work(context.tool_metadata, f"Checked repository matches for grep pattern {pattern[:180]}")
+            _remember_verified_work(
+                context.tool_metadata,
+                f"Checked repository matches for grep pattern {pattern[:180]}",
+            )
     elif tool_name == "bash":
         command = str(tool_input.get("command") or "").strip()
         summary = tool_output.splitlines()[0].strip() if tool_output.strip() else "no output"
@@ -585,12 +590,15 @@ async def run_query(
                         yield AssistantTextDelta(text=event.text), None
                         continue
                     if isinstance(event, ApiRetryEvent):
-                        yield StatusEvent(
-                            message=(
-                                f"Request failed; retrying in {event.delay_seconds:.1f}s "
-                                f"(attempt {event.attempt + 1} of {event.max_attempts}): {event.message}"
-                            )
-                        ), None
+                        yield (
+                            StatusEvent(
+                                message=(
+                                    f"Request failed; retrying in {event.delay_seconds:.1f}s "
+                                    f"(attempt {event.attempt + 1} of {event.max_attempts}): {event.message}"
+                                )
+                            ),
+                            None,
+                        )
                         continue
 
                     if isinstance(event, ApiMessageCompleteEvent):
@@ -617,16 +625,42 @@ async def run_query(
                 messages, was_compacted = last_compaction_result
                 if was_compacted:
                     continue
-            if "connect" in error_msg.lower() or "timeout" in error_msg.lower() or "network" in error_msg.lower():
-                yield ErrorEvent(message=f"Network error: {error_msg}. Check your internet connection and try again."), None
+            if (
+                "connect" in error_msg.lower()
+                or "timeout" in error_msg.lower()
+                or "network" in error_msg.lower()
+            ):
+                yield (
+                    ErrorEvent(
+                        message=f"Network error: {error_msg}. Check your internet connection and try again."
+                    ),
+                    None,
+                )
             else:
                 yield ErrorEvent(message=f"API error: {error_msg}"), None
             return
 
         coordinator_context_message: ConversationMessage | None = None
         if context.system_prompt.startswith("You are a **coordinator**."):
-            if messages and messages[-1].role == "user" and messages[-1].text.startswith("# Coordinator User Context"):
+            if (
+                messages
+                and messages[-1].role == "user"
+                and messages[-1].text.startswith("# Coordinator User Context")
+            ):
                 coordinator_context_message = messages.pop()
+
+        if final_message.role == "assistant" and final_message.is_effectively_empty():
+            log.warning("dropping empty assistant message from provider response")
+            yield (
+                ErrorEvent(
+                    message=(
+                        "Model returned an empty assistant message. "
+                        "The turn was ignored to keep the session healthy."
+                    )
+                ),
+                usage,
+            )
+            return
 
         messages.append(final_message)
         yield AssistantTurnComplete(message=final_message, usage=usage), usage
@@ -644,11 +678,14 @@ async def run_query(
             tc = tool_calls[0]
             yield ToolExecutionStarted(tool_name=tc.name, tool_input=tc.input), None
             result = await _execute_tool_call(context, tc.name, tc.id, tc.input)
-            yield ToolExecutionCompleted(
-                tool_name=tc.name,
-                output=result.content,
-                is_error=result.is_error,
-            ), None
+            yield (
+                ToolExecutionCompleted(
+                    tool_name=tc.name,
+                    output=result.content,
+                    is_error=result.is_error,
+                ),
+                None,
+            )
             tool_results = [result]
         else:
             # Multiple tools: execute concurrently, emit events after
@@ -658,15 +695,38 @@ async def run_query(
             async def _run(tc):
                 return await _execute_tool_call(context, tc.name, tc.id, tc.input)
 
-            results = await asyncio.gather(*[_run(tc) for tc in tool_calls])
-            tool_results = list(results)
+            # Use return_exceptions=True so a single failing tool does not abandon
+            # its siblings as cancelled coroutines and leave the conversation with
+            # un-replied tool_use blocks (Anthropic's API rejects the next request
+            # on the session if any tool_use is missing a matching tool_result).
+            raw_results = await asyncio.gather(
+                *[_run(tc) for tc in tool_calls], return_exceptions=True
+            )
+            tool_results = []
+            for tc, result in zip(tool_calls, raw_results):
+                if isinstance(result, BaseException):
+                    log.exception(
+                        "tool execution raised: name=%s id=%s",
+                        tc.name,
+                        tc.id,
+                        exc_info=result,
+                    )
+                    result = ToolResultBlock(
+                        tool_use_id=tc.id,
+                        content=f"Tool {tc.name} failed: {type(result).__name__}: {result}",
+                        is_error=True,
+                    )
+                tool_results.append(result)
 
             for tc, result in zip(tool_calls, tool_results):
-                yield ToolExecutionCompleted(
-                    tool_name=tc.name,
-                    output=result.content,
-                    is_error=result.is_error,
-                ), None
+                yield (
+                    ToolExecutionCompleted(
+                        tool_name=tc.name,
+                        output=result.content,
+                        is_error=result.is_error,
+                    ),
+                    None,
+                )
 
         messages.append(ConversationMessage(role="user", content=tool_results))
 
@@ -684,10 +744,9 @@ async def _execute_tools(
         tc = tool_calls[0]
         return (await _execute_tool_call(context, tc.name, tc.id, tc.input),)
 
-    results = await asyncio.gather(*[
-        _execute_tool_call(context, tc.name, tc.id, tc.input)
-        for tc in tool_calls
-    ])
+    results = await asyncio.gather(
+        *[_execute_tool_call(context, tc.name, tc.id, tc.input) for tc in tool_calls]
+    )
     return tuple(results)
 
 
@@ -856,7 +915,9 @@ async def _execute_tool_call(
         return tool_result
 
 
-def _trace_model_input(system_prompt: str, messages: list[ConversationMessage]) -> list[dict[str, Any]]:
+def _trace_model_input(
+    system_prompt: str, messages: list[ConversationMessage]
+) -> list[dict[str, Any]]:
     history: list[dict[str, Any]] = []
     if system_prompt:
         history.append({"role": "system", "content": _truncate_trace_text(system_prompt)})
@@ -903,7 +964,8 @@ def _trace_history_entries(messages: list[ConversationMessage]) -> list[dict[str
             entries.append(
                 {
                     "role": "tool",
-                    "name": _tool_name_for_result(messages, result.tool_use_id) or result.tool_use_id,
+                    "name": _tool_name_for_result(messages, result.tool_use_id)
+                    or result.tool_use_id,
                     "content": _truncate_trace_text(result.content),
                     "is_error": result.is_error,
                 }

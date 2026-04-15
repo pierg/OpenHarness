@@ -33,8 +33,20 @@ class BashTool(BaseTool):
         self._workspace = workspace
 
     async def execute(self, arguments: BashToolInput, context: ToolExecutionContext) -> ToolResult:
+        preflight_error = _preflight_interactive_command(arguments.command)
+        if preflight_error is not None:
+            return ToolResult(
+                output=preflight_error,
+                is_error=True,
+                metadata={"interactive_required": True},
+            )
+
         workspace = self._workspace or LocalWorkspace(context.cwd)
-        cwd = _resolve_path(Path(workspace.cwd), arguments.cwd) if arguments.cwd else Path(workspace.cwd)
+        cwd = (
+            _resolve_path(Path(workspace.cwd), arguments.cwd)
+            if arguments.cwd
+            else Path(workspace.cwd)
+        )
 
         if not isinstance(workspace, LocalWorkspace):
             result = await workspace.run_shell(
@@ -53,6 +65,7 @@ class BashTool(BaseTool):
             process = await create_shell_subprocess(
                 arguments.command,
                 cwd=cwd,
+                prefer_pty=True,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.STDOUT,
             )
@@ -148,11 +161,19 @@ async def _drain_available_output(
 
 
 def _format_output(output_buffer: bytearray) -> str:
-    text = output_buffer.decode("utf-8", errors="replace").replace("\r\n", "\n").strip()
+    text = _strip_terminal_artifacts(
+        output_buffer.decode("utf-8", errors="replace").replace("\r\n", "\n").strip()
+    )
     if not text:
         return "(no output)"
     if len(text) > 12000:
         return f"{text[:12000]}\n...[truncated]..."
+    return text
+
+
+def _strip_terminal_artifacts(text: str) -> str:
+    if text.startswith("^D\b\b"):
+        return text[4:]
     return text
 
 
@@ -165,6 +186,18 @@ def _format_timeout_output(output_buffer: bytearray, *, command: str, timeout_se
     if hint:
         parts.extend(["", hint])
     return "\n".join(parts)
+
+
+def _preflight_interactive_command(command: str) -> str | None:
+    lowered_command = command.lower()
+    if not _looks_like_interactive_scaffold(lowered_command):
+        return None
+    return (
+        "This command appears to require interactive input before it can continue. "
+        "The bash tool is non-interactive, so it cannot answer installer/scaffold prompts live. "
+        "Prefer non-interactive flags (for example --yes, -y, --skip-install, --defaults, --non-interactive), "
+        "or run the scaffolding step once in an external terminal before asking the agent to continue."
+    )
 
 
 def _interactive_command_hint(*, command: str, output: str) -> str | None:

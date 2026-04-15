@@ -17,4 +17,3 @@ def session_key_for_message(message: InboundMessage) -> str:
     if thread_id:
         return f"{message.channel}:{message.chat_id}:{thread_id}"
     return f"{message.channel}:{message.chat_id}"
-

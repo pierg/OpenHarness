@@ -260,7 +260,9 @@ class OpenHarnessTerminalApp(App[None]):
         self.query_one("#composer", Input).focus()
         self._refresh_sidebars(force=True)
         if self._config.prompt:
-            self.call_later(lambda: asyncio.create_task(self._process_line(self._config.prompt or "")))
+            self.call_later(
+                lambda: asyncio.create_task(self._process_line(self._config.prompt or ""))
+            )
 
     async def on_unmount(self) -> None:
         if self._bundle is not None:
@@ -330,7 +332,9 @@ class OpenHarnessTerminalApp(App[None]):
                     self._set_current_response("[dim]Preparing conversation compaction...[/dim]")
             elif event.phase == "compact_start":
                 if event.trigger == "reactive":
-                    self._set_current_response("[dim]Context too large. Compacting and retrying...[/dim]")
+                    self._set_current_response(
+                        "[dim]Context too large. Compacting and retrying...[/dim]"
+                    )
                 else:
                     self._set_current_response("[dim]Compacting conversation memory...[/dim]")
             elif event.phase == "compact_retry":

@@ -73,7 +73,7 @@ class AgentConfig(BaseModel):
         """Validate a raw YAML mapping as an agent configuration."""
         if not isinstance(raw, dict):
             raise ValueError(f"Expected a YAML mapping, got {type(raw).__name__}")
-        
+
         if "name" not in raw:
             raw["name"] = source_name
 

@@ -17,25 +17,21 @@ import logging
 import sys
 import uuid
 from pathlib import Path
-from types import SimpleNamespace
 
 EXAMPLES_ROOT = Path(__file__).resolve().parents[1]
 if str(EXAMPLES_ROOT) not in sys.path:
     sys.path.insert(0, str(EXAMPLES_ROOT))
 
-from _shared.bugfix_task import (  # noqa: E402
-    EXAMPLE_MODEL,
-    INSTRUCTION,
-    configure_local_langfuse,
-    install_project_agent_configs,
-    log_run_summary,
-    prepare_run_workspace,
+from _shared.helpers import (  # noqa: E402
+    get_bugfix_instruction,
+    prepare_bugfix_workspace,
     script_prints_twelve,
 )
 from openharness.api.factory import create_api_client  # noqa: E402
 from openharness.config import load_settings  # noqa: E402
 from openharness.coordinator.agent_definitions import get_agent_definition  # noqa: E402
 from openharness.observability import create_trace_observer  # noqa: E402
+from openharness.experiments.observability import setup_local_langfuse  # noqa: E402
 from openharness.runs.context import RunContext  # noqa: E402
 from openharness.swarm.orchestration import TeamOrchestrator  # noqa: E402
 
@@ -55,28 +51,32 @@ async def main() -> None:
     from openharness.observability.logging import setup_logging
 
     setup_logging()
-    configure_local_langfuse()
-    settings = load_settings().merge_cli_overrides(model=EXAMPLE_MODEL)
+    setup_local_langfuse()
+    settings = load_settings().merge_cli_overrides(model="gemini-2.5-flash")
     api_client = create_api_client(settings)
-    run_workspace = prepare_run_workspace("local_workflow_coordinator_worker_fix_bug")
-    workspace = run_workspace.workspace
-    install_project_agent_configs(
-        workspace.root,
-        ("workflow_coordinator.yaml", "workflow_worker.yaml"),
-    )
+    workspace_dir = prepare_bugfix_workspace()
+
+    # Install configs
+    target_dir = workspace_dir / ".openharness" / "agent_configs"
+    target_dir.mkdir(parents=True, exist_ok=True)
+    shared_dir = Path(__file__).resolve().parents[1] / "_shared" / "agent_configs"
+    for cfg in ("workflow_coordinator.yaml", "workflow_worker.yaml"):
+        (target_dir / cfg).write_text(
+            (shared_dir / cfg).read_text(encoding="utf-8"), encoding="utf-8"
+        )
 
     team_name = f"workflow-team-{uuid.uuid4().hex[:8]}"
     run_context = RunContext.create(
         EXAMPLES_ROOT.parent,
         interface="example_workflow_team",
-        run_id=run_workspace.run_id,
-        workspace_dir=workspace.root,
+        run_id=workspace_dir.parent.name,
+        workspace_dir=workspace_dir,
         metadata={"example": "local_workflow_coordinator_worker_fix_bug"},
     )
     trace_observer = create_trace_observer(
         session_id=uuid.uuid4().hex[:12],
         interface="example_workflow_team",
-        cwd=str(workspace.root),
+        cwd=str(workspace_dir),
         model=settings.model,
         run_id=run_context.run_id,
     )
@@ -101,8 +101,8 @@ async def main() -> None:
     run_context.save_manifest()
     run_context.log_start()
 
-    coordinator_def = get_agent_definition("workflow_coordinator", cwd=str(workspace.root))
-    worker_def = get_agent_definition("workflow_worker", cwd=str(workspace.root))
+    coordinator_def = get_agent_definition("workflow_coordinator", cwd=str(workspace_dir))
+    worker_def = get_agent_definition("workflow_worker", cwd=str(workspace_dir))
     if coordinator_def is None or worker_def is None:
         trace_observer.end_session(metadata={"status": "error"})
         raise RuntimeError("Workflow team agent definitions were not loaded")
@@ -125,7 +125,7 @@ async def main() -> None:
 
         async with TeamOrchestrator(
             team_name,
-            workspace.root,
+            workspace_dir,
             trace_observer=trace_observer,
             run_context=run_context,
         ) as team:
@@ -145,12 +145,12 @@ async def main() -> None:
 
             result = await team.run_inline(
                 agent_def=coordinator_def,
-                instruction=INSTRUCTION,
+                instruction=get_bugfix_instruction(local=True),
                 identity=workflow_context["leader_agent_id"],
                 payload={"workflow_context": workflow_context},
                 api_client=api_client,
             )
-            passed = script_prints_twelve(workspace.root)
+            passed = script_prints_twelve(workspace_dir)
             mailbox_messages = await team.read_all_mailboxes()
     except Exception as exc:
         trace_observer.end_session(output={"error": str(exc)}, metadata={"status": "error"})
@@ -188,26 +188,28 @@ async def main() -> None:
             },
         )
 
-    view = SimpleNamespace(
-        final_text=result.agent_result.final_text if result is not None else "",
-        mailbox_messages=mailbox_messages,
-    )
-    log_run_summary(
-        log,
-        run_id=run_context.run_id,
-        workspace=workspace.root,
-        run_dir=run_context.run_dir,
-        passed=passed,
-        extra={
-            "Team": team_name,
-            "Model": settings.model,
-            "Trace URL": trace_observer.trace_url,
-            "Final": view.final_text,
-        },
-    )
-    if view.mailbox_messages:
+    log.info("Run ID:    %s", run_context.run_id)
+    log.info("Workspace: %s", workspace_dir.resolve())
+    log.info("Run dir:   %s", run_context.run_dir)
+    log.info("Passed:    %s", passed)
+    log.info("Team      : %s", team_name)
+    log.info("Model     : %s", settings.model)
+    log.info("Trace URL : %s", trace_observer.trace_url)
+    log.info("Final     : %s", result.agent_result.final_text if result is not None else "")
+
+    for label, path in {
+        "manifest": run_context.artifacts.metadata_path,
+        "messages": run_context.artifacts.messages_path,
+        "events": run_context.artifacts.events_path,
+        "results": run_context.artifacts.results_path,
+        "metrics": run_context.artifacts.metrics_path,
+    }.items():
+        marker = "yes" if path.exists() else "no"
+        log.info("Artifact:  %-8s %s (%s)", label, path, marker)
+
+    if mailbox_messages:
         log.info("Mailbox:")
-        for message in view.mailbox_messages:
+        for message in mailbox_messages:
             log.info("  %s -> %s: %s", message.sender, message.recipient, _message_text(message))
 
 

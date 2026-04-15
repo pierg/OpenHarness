@@ -8,7 +8,13 @@ from typing import Any
 from openharness.tools.ask_user_question_tool import AskUserQuestionTool
 from openharness.tools.agent_tool import AgentTool
 from openharness.tools.bash_tool import BashTool
-from openharness.tools.base import BaseTool, ToolExecutionContext, ToolRegistry, ToolRegistryFactory, ToolResult
+from openharness.tools.base import (
+    BaseTool,
+    ToolExecutionContext,
+    ToolRegistry,
+    ToolRegistryFactory,
+    ToolResult,
+)
 from openharness.tools.brief_tool import BriefTool
 from openharness.tools.config_tool import ConfigTool
 from openharness.tools.cron_create_tool import CronCreateTool
@@ -61,6 +67,7 @@ WORKSPACE_TOOLS: dict[str, type[BaseTool]] = {
     "exit_worktree": ExitWorktreeTool,
     "remote_trigger": RemoteTriggerTool,
 }
+
 
 class _LazyTool(BaseTool):
     """Proxy a tool whose import has heavyweight side effects until first use."""
@@ -127,7 +134,12 @@ WORKSPACE_COMPAT_TOOLS: dict[str, Callable[[], BaseTool]] = {
 }
 
 DEFAULT_TOOL_NAMES: tuple[str, ...] = (
-    "bash", "read_file", "write_file", "edit_file", "glob", "grep",
+    "bash",
+    "read_file",
+    "write_file",
+    "edit_file",
+    "glob",
+    "grep",
 )
 
 _TOOL_ALIAS_OVERRIDES = {

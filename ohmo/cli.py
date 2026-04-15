@@ -171,8 +171,12 @@ def _prompt_provider_profile(workspace: str | Path) -> str:
                 ]
                 if missing:
                     title.extend([("", "  "), ("fg:#d3869b", missing.strip())])
-            choices.append(questionary.Choice(title=title, value=name, checked=(name == default_value)))
-        result = questionary.select("Choose provider profile for ohmo:", choices=choices, default=default_value).ask()
+            choices.append(
+                questionary.Choice(title=title, value=name, checked=(name == default_value))
+            )
+        result = questionary.select(
+            "Choose provider profile for ohmo:", choices=choices, default=default_value
+        ).ask()
         if result is None:
             raise typer.Abort()
         return str(result)
@@ -252,7 +256,9 @@ def _prompt_channels(existing: GatewayConfig) -> tuple[list[str], dict[str, dict
             )
             config["gateway_url"] = _text_prompt(
                 "Discord gateway URL",
-                default=str(prior.get("gateway_url", "wss://gateway.discord.gg/?v=10&encoding=json")),
+                default=str(
+                    prior.get("gateway_url", "wss://gateway.discord.gg/?v=10&encoding=json")
+                ),
             )
             config["intents"] = int(
                 _text_prompt(
@@ -318,9 +324,7 @@ def _run_gateway_config_wizard(workspace: str | Path) -> GatewayConfig:
             default=default_allowlist,
         )
         allowed_remote_admin_commands = [
-            item.strip().lstrip("/")
-            for item in allowlist_raw.split(",")
-            if item.strip()
+            item.strip().lstrip("/") for item in allowlist_raw.split(",") if item.strip()
         ]
     config = existing.model_copy(
         update={
@@ -382,7 +386,9 @@ def _configure_gateway_logging(workspace: str | Path | None = None) -> None:
 @app.callback(invoke_without_command=True)
 def main(
     ctx: typer.Context,
-    print_mode: str | None = typer.Option(None, "--print", "-p", help="Run a single prompt and exit"),
+    print_mode: str | None = typer.Option(
+        None, "--print", "-p", help="Run a single prompt and exit"
+    ),
     model: str | None = typer.Option(None, "--model", help="Model override for this session"),
     profile: str | None = typer.Option(None, "--profile", help="Provider profile to use"),
     workspace: str | None = typer.Option(None, "--workspace", help=_WORKSPACE_HELP),
@@ -390,7 +396,9 @@ def main(
     cwd: str = typer.Option(str(Path.cwd()), "--cwd", help="Working directory"),
     backend_only: bool = typer.Option(False, "--backend-only", hidden=True),
     resume: str | None = typer.Option(None, "--resume", help="Resume an ohmo session by id"),
-    continue_session: bool = typer.Option(False, "--continue", help="Continue the latest ohmo session"),
+    continue_session: bool = typer.Option(
+        False, "--continue", help="Continue the latest ohmo session"
+    ),
 ) -> None:
     """Launch the ohmo app or invoke a subcommand."""
     if ctx.invoked_subcommand is not None:
@@ -460,7 +468,11 @@ def main(
 
 @app.command("init")
 def init_cmd(
-    cwd: str = typer.Option(str(Path.cwd()), "--cwd", help="Project working directory (reserved for future project overrides)"),
+    cwd: str = typer.Option(
+        str(Path.cwd()),
+        "--cwd",
+        help="Project working directory (reserved for future project overrides)",
+    ),
     workspace: str | None = typer.Option(None, "--workspace", help=_WORKSPACE_HELP),
     interactive: bool = typer.Option(
         True,
@@ -528,7 +540,9 @@ def doctor_cmd(
 
 
 @memory_app.command("list")
-def memory_list_cmd(workspace: str | None = typer.Option(None, "--workspace", help=_WORKSPACE_HELP)) -> None:
+def memory_list_cmd(
+    workspace: str | None = typer.Option(None, "--workspace", help=_WORKSPACE_HELP),
+) -> None:
     for path in list_memory_files(workspace):
         print(path.name)
 
@@ -568,7 +582,9 @@ def _show_or_edit(path: Path, set_text: str | None) -> None:
 
 
 @soul_app.command("show")
-def soul_show_cmd(workspace: str | None = typer.Option(None, "--workspace", help=_WORKSPACE_HELP)) -> None:
+def soul_show_cmd(
+    workspace: str | None = typer.Option(None, "--workspace", help=_WORKSPACE_HELP),
+) -> None:
     _show_or_edit(get_soul_path(workspace), None)
 
 
@@ -581,7 +597,9 @@ def soul_edit_cmd(
 
 
 @user_app.command("show")
-def user_show_cmd(workspace: str | None = typer.Option(None, "--workspace", help=_WORKSPACE_HELP)) -> None:
+def user_show_cmd(
+    workspace: str | None = typer.Option(None, "--workspace", help=_WORKSPACE_HELP),
+) -> None:
     _show_or_edit(get_user_path(workspace), None)
 
 

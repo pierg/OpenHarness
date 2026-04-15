@@ -25,7 +25,9 @@ class _FakeRegistry:
         return self._executor
 
 
-async def test_send_message_uses_current_worker_identity_from_context(monkeypatch, tmp_path) -> None:
+async def test_send_message_uses_current_worker_identity_from_context(
+    monkeypatch, tmp_path
+) -> None:
     executor = _FakeExecutor()
     marks: list[str] = []
     monkeypatch.setattr(

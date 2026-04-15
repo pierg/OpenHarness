@@ -91,9 +91,13 @@ class Conversation:
         for tc in result.tool_calls:
             self._log_event(ToolExecutionStarted(tool_name=tc.name, tool_input=tc.input))
         for tc, tr in zip(result.tool_calls, result.tool_results):
-            self._log_event(ToolExecutionCompleted(
-                tool_name=tc.name, output=tr.content, is_error=tr.is_error,
-            ))
+            self._log_event(
+                ToolExecutionCompleted(
+                    tool_name=tc.name,
+                    output=tr.content,
+                    is_error=tr.is_error,
+                )
+            )
 
         self._final_text = result.text
         if not self._final_text and result.tool_results:
@@ -128,7 +132,7 @@ class Conversation:
                 if on_turn_complete is not None:
                     await on_turn_complete(result, self)
         finally:
-            new_messages = self._messages[self._logged_up_to:]
+            new_messages = self._messages[self._logged_up_to :]
             self._log_messages(new_messages)
             self._logged_up_to = len(self._messages)
 

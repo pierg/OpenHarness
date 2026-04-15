@@ -114,7 +114,7 @@ def test_parse_frontmatter_skips_headings_for_description(tmp_path: Path):
 def test_parse_frontmatter_handles_quoted_values(tmp_path: Path):
     path = tmp_path / "quoted.md"
     path.write_text(
-        '---\nname: "my-project"\ndescription: \'A quoted desc\'\ntype: feedback\n---\nBody.\n',
+        "---\nname: \"my-project\"\ndescription: 'A quoted desc'\ntype: feedback\n---\nBody.\n",
         encoding="utf-8",
     )
 

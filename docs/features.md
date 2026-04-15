@@ -171,6 +171,7 @@ src/openharness/harbor/runner.py
 src/openharness/harbor/specs.py
 src/openharness/workspace/harbor.py
 examples/harbor_fix_bug/run.py
+examples/harbor_registry_task/run.py
 ```
 
 ## 7. Coordinator And Workflow Bridge

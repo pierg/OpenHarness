@@ -55,9 +55,7 @@ class AgentTool(BaseTool):
         # Resolve team and agent name for the swarm backend
         team = arguments.team or "default"
         agent_name = (
-            agent_def.subagent_type
-            if agent_def is not None
-            else arguments.subagent_type or "agent"
+            agent_def.subagent_type if agent_def is not None else arguments.subagent_type or "agent"
         )
         registry = get_backend_registry()
         try:

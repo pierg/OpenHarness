@@ -62,8 +62,14 @@ class PermissionChecker:
         # Parse path rules from settings
         self._path_rules: list[PathRule] = []
         for rule in getattr(settings, "path_rules", []):
-            pattern = getattr(rule, "pattern", None) or (rule.get("pattern") if isinstance(rule, dict) else None)
-            allow = getattr(rule, "allow", True) if not isinstance(rule, dict) else rule.get("allow", True)
+            pattern = getattr(rule, "pattern", None) or (
+                rule.get("pattern") if isinstance(rule, dict) else None
+            )
+            allow = (
+                getattr(rule, "allow", True)
+                if not isinstance(rule, dict)
+                else rule.get("allow", True)
+            )
             if isinstance(pattern, str) and pattern.strip():
                 self._path_rules.append(PathRule(pattern=pattern.strip(), allow=allow))
             else:
@@ -141,14 +147,18 @@ class PermissionChecker:
             )
 
         # Default mode: require confirmation for mutating tools
+        bash_hint = _bash_permission_hint(command)
+        reason = (
+            "Mutating tools require user confirmation in default mode. "
+            "Approve the prompt when asked, or run /permissions full_auto "
+            "if you want to allow them for this session."
+        )
+        if bash_hint:
+            reason = f"{reason} {bash_hint}"
         return PermissionDecision(
             allowed=False,
             requires_confirmation=True,
-            reason=(
-                "Mutating tools require user confirmation in default mode. "
-                "Approve the prompt when asked, or run /permissions full_auto "
-                "if you want to allow them for this session."
-            ),
+            reason=reason,
         )
 
 
@@ -163,3 +173,34 @@ def _policy_match_paths(file_path: str) -> tuple[str, ...]:
     if not normalized:
         return (file_path,)
     return (normalized, normalized + "/")
+
+
+def _bash_permission_hint(command: str | None) -> str:
+    if not command:
+        return ""
+    lowered = command.lower()
+    install_markers = (
+        "npm install",
+        "pnpm install",
+        "yarn install",
+        "bun install",
+        "pip install",
+        "uv pip install",
+        "poetry install",
+        "cargo install",
+        "create-next-app",
+        "npm create ",
+        "pnpm create ",
+        "yarn create ",
+        "bun create ",
+        "npx create-",
+        "npm init ",
+        "pnpm init ",
+        "yarn init ",
+    )
+    if any(marker in lowered for marker in install_markers):
+        return (
+            "Package installation and scaffolding commands change the workspace, "
+            "so they will not run automatically in default mode."
+        )
+    return ""

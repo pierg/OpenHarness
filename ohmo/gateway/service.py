@@ -131,7 +131,11 @@ class OhmoGatewayService:
             chat_id = payload.get("chat_id")
             content = payload.get("content")
             session_key = payload.get("session_key")
-            if not isinstance(channel, str) or not isinstance(chat_id, str) or not isinstance(content, str):
+            if (
+                not isinstance(channel, str)
+                or not isinstance(chat_id, str)
+                or not isinstance(content, str)
+            ):
                 return
             await asyncio.sleep(2.0)
             await self._bus.publish_outbound(
@@ -195,7 +199,9 @@ class OhmoGatewayService:
         return 0
 
 
-def start_gateway_process(cwd: str | Path | None = None, workspace: str | Path | None = None) -> int:
+def start_gateway_process(
+    cwd: str | Path | None = None, workspace: str | Path | None = None
+) -> int:
     """Start the gateway as a detached subprocess."""
     service = OhmoGatewayService(cwd, workspace)
     service.log_file.parent.mkdir(parents=True, exist_ok=True)
@@ -269,7 +275,9 @@ def _iter_workspace_gateway_pids(workspace: str | Path | None = None) -> list[in
     return pids
 
 
-def stop_gateway_process(cwd: str | Path | None = None, workspace: str | Path | None = None) -> bool:
+def stop_gateway_process(
+    cwd: str | Path | None = None, workspace: str | Path | None = None
+) -> bool:
     """Stop the background gateway process if present."""
     service = OhmoGatewayService(cwd, workspace)
     pids: list[int] = []
@@ -294,7 +302,9 @@ def stop_gateway_process(cwd: str | Path | None = None, workspace: str | Path | 
     return True
 
 
-def gateway_status(cwd: str | Path | None = None, workspace: str | Path | None = None) -> GatewayState:
+def gateway_status(
+    cwd: str | Path | None = None, workspace: str | Path | None = None
+) -> GatewayState:
     """Load the last known gateway state."""
     service = OhmoGatewayService(cwd, workspace)
     live_pid: int | None = None

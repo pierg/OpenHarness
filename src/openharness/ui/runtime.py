@@ -15,7 +15,12 @@ from openharness.bridge import get_bridge_manager
 from openharness.commands import CommandContext, CommandResult, create_default_command_registry
 from openharness.config import get_config_file_path, load_settings
 from openharness.engine import QueryEngine
-from openharness.engine.messages import ConversationMessage, ToolResultBlock, ToolUseBlock
+from openharness.engine.messages import (
+    ConversationMessage,
+    ToolResultBlock,
+    ToolUseBlock,
+    sanitize_conversation_messages,
+)
 from openharness.engine.query import MaxTurnsExceeded
 from openharness.engine.stream_events import StreamEvent
 from openharness.hooks import HookEvent, HookExecutionContext, HookExecutor, load_hook_registry
@@ -108,7 +113,9 @@ class RuntimeBundle:
             if status.tools:
                 lines.append(f"  tools: {', '.join(tool.name for tool in status.tools)}")
             if status.resources:
-                lines.append(f"  resources: {', '.join(resource.uri for resource in status.resources)}")
+                lines.append(
+                    f"  resources: {', '.join(resource.uri for resource in status.resources)}"
+                )
         return "\n".join(lines)
 
 
@@ -240,7 +247,9 @@ async def build_runtime(
             fast_mode=settings.fast_mode,
             effort=settings.effort,
             passes=settings.passes,
-            mcp_connected=sum(1 for status in mcp_manager.list_statuses() if status.state == "connected"),
+            mcp_connected=sum(
+                1 for status in mcp_manager.list_statuses() if status.state == "connected"
+            ),
             mcp_failed=sum(1 for status in mcp_manager.list_statuses() if status.state == "failed"),
             bridge_sessions=len(bridge_manager.list_sessions()),
             output_style=settings.output_style,
@@ -249,7 +258,9 @@ async def build_runtime(
     )
     hook_reloader = HookReloader(get_config_file_path())
     hook_executor = HookExecutor(
-        hook_reloader.current_registry() if api_client is None else load_hook_registry(settings, plugins),
+        hook_reloader.current_registry()
+        if api_client is None
+        else load_hook_registry(settings, plugins),
         HookExecutionContext(
             cwd=Path(runtime_cwd).resolve(),
             api_client=resolved_api_client,
@@ -292,10 +303,10 @@ async def build_runtime(
         model=settings.model,
         system_prompt=system_prompt_text,
         max_tokens=settings.max_tokens,
-        context_window_tokens=settings.context_window_tokens or settings.memory.context_window_tokens,
+        context_window_tokens=settings.context_window_tokens
+        or settings.memory.context_window_tokens,
         auto_compact_threshold_tokens=(
-            settings.auto_compact_threshold_tokens
-            or settings.memory.auto_compact_threshold_tokens
+            settings.auto_compact_threshold_tokens or settings.memory.auto_compact_threshold_tokens
         ),
         max_turns=engine_max_turns,
         permission_prompt=permission_prompt,
@@ -314,9 +325,9 @@ async def build_runtime(
     )
     # Restore messages from a saved session if provided
     if restore_messages:
-        restored = [
-            ConversationMessage.model_validate(m) for m in restore_messages
-        ]
+        restored = sanitize_conversation_messages(
+            [ConversationMessage.model_validate(m) for m in restore_messages]
+        )
         engine.load_messages(restored)
 
     # Start Docker sandbox if configured
@@ -335,10 +346,7 @@ async def build_runtime(
         engine=engine,
         commands=create_default_command_registry(
             plugin_commands=[
-                command
-                for plugin in plugins
-                if plugin.enabled
-                for command in plugin.commands
+                command for plugin in plugins if plugin.enabled for command in plugin.commands
             ]
         ),
         external_api_client=api_client is not None,
@@ -378,6 +386,7 @@ async def close_runtime(bundle: RuntimeBundle) -> None:
     # Extract local environment rules from session before closing
     try:
         from openharness.personalization.session_hook import update_rules_from_session
+
         update_rules_from_session(bundle.engine.messages)
     except Exception:
         pass  # personalization is best-effort, never block session end
@@ -429,9 +438,7 @@ def _build_interactive_metrics(bundle: RuntimeBundle) -> dict[str, Any]:
     return {
         "input_tokens": int(getattr(usage, "input_tokens", 0)),
         "output_tokens": int(getattr(usage, "output_tokens", 0)),
-        "cache_creation_input_tokens": int(
-            getattr(usage, "cache_creation_input_tokens", 0)
-        ),
+        "cache_creation_input_tokens": int(getattr(usage, "cache_creation_input_tokens", 0)),
         "cache_read_input_tokens": int(getattr(usage, "cache_read_input_tokens", 0)),
         "total_tokens": int(getattr(usage, "input_tokens", 0))
         + int(getattr(usage, "output_tokens", 0)),
@@ -501,9 +508,7 @@ def _format_pending_tool_results(messages: list[ConversationMessage]) -> str | N
                 f"- {tu.name} {_truncate(raw_input, 200)} -> {_truncate(tr.content.strip(), 400)}"
             )
         else:
-            lines.append(
-                f"- tool_result[{tr.tool_use_id}] -> {_truncate(tr.content.strip(), 400)}"
-            )
+            lines.append(f"- tool_result[{tr.tool_use_id}] -> {_truncate(tr.content.strip(), 400)}")
 
     if len(tool_results) > max_results:
         lines.append(f"(+{len(tool_results) - max_results} more tool results)")
@@ -533,8 +538,12 @@ def sync_app_state(bundle: RuntimeBundle) -> None:
         fast_mode=settings.fast_mode,
         effort=settings.effort,
         passes=settings.passes,
-        mcp_connected=sum(1 for status in bundle.mcp_manager.list_statuses() if status.state == "connected"),
-        mcp_failed=sum(1 for status in bundle.mcp_manager.list_statuses() if status.state == "failed"),
+        mcp_connected=sum(
+            1 for status in bundle.mcp_manager.list_statuses() if status.state == "connected"
+        ),
+        mcp_failed=sum(
+            1 for status in bundle.mcp_manager.list_statuses() if status.state == "failed"
+        ),
         bridge_sessions=len(get_bridge_manager().list_sessions()),
         output_style=settings.output_style,
         keybindings=load_keybindings(),
@@ -638,7 +647,11 @@ async def handle_line(
                 extra_plugin_roots=bundle.extra_plugin_roots,
             )
             bundle.engine.set_system_prompt(system_prompt)
-            turns = result.continue_turns if result.continue_turns is not None else bundle.engine.max_turns
+            turns = (
+                result.continue_turns
+                if result.continue_turns is not None
+                else bundle.engine.max_turns
+            )
             try:
                 async for event in bundle.engine.continue_pending(max_turns=turns):
                     await _render_and_record_event(bundle, event, render_event)

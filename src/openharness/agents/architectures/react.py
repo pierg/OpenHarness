@@ -88,12 +88,14 @@ class ReActAgent:
                 ),
             )
 
-            observations.append({
-                "step": str(step),
-                "reasoning": thought.reasoning,
-                "action": thought.action,
-                "observation": action_result,
-            })
+            observations.append(
+                {
+                    "step": str(step),
+                    "reasoning": thought.reasoning,
+                    "action": thought.action,
+                    "observation": action_result,
+                }
+            )
 
         last_obs = observations[-1]["observation"] if observations else ""
         return runtime.build_result(last_obs)

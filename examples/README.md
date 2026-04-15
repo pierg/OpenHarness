@@ -19,11 +19,13 @@ persists it in `run.json`.
 The run ID, run folder, workspace, and trace URL are also logged as soon as the
 run starts so the trace can be opened while the agent is still working.
 
-The single-agent examples use the same YAML-configured agent:
+The local bug-fix examples use the same YAML-configured agent:
 `examples/_shared/agent_configs/bugfix_agent.yaml`. The difference is the
 execution path: `local_fix_bug` runs directly, `local_docker_sandbox_fix_bug`
 runs local tools through the OpenHarness Docker sandbox, and `harbor_fix_bug`
-passes a Harbor task directory.
+passes a Harbor task directory. `harbor_registry_task` uses
+`examples/_shared/agent_configs/harbor_registry_agent.yaml` to run an existing
+task from the Harbor registry.
 
 All example YAML configs pin `gemini-2.5-flash` directly.
 
@@ -59,6 +61,13 @@ All example YAML configs pin `gemini-2.5-flash` directly.
    - host-side run artifacts linked to Harbor's external `result.json`
    - exits cleanly with a prerequisite message when Docker is not running
 
+5. `harbor_registry_task/run.py`
+   - YAML-defined OpenHarness agent passed into Harbor
+   - existing Harbor registry task source, defaulting to `cookbook/hello-world`
+   - no copied local task directory
+   - host-side run artifacts linked to Harbor's external `result.json`
+   - exits cleanly with a prerequisite message when Docker is not running
+
 Langfuse is not a separate example because it does not change the task flow. The
 same runs use the generated run ID as the trace identity.
 
@@ -69,6 +78,7 @@ uv run python examples/local_fix_bug/run.py
 uv run python examples/local_workflow_coordinator_worker_fix_bug/run.py
 uv run python examples/local_docker_sandbox_fix_bug/run.py
 uv run python examples/harbor_fix_bug/run.py
+uv run python examples/harbor_registry_task/run.py
 ```
 
 After a local run, inspect:

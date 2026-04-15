@@ -29,7 +29,9 @@ def add_memory_entry(cwd: str | Path, title: str, content: str) -> Path:
         atomic_write_text(path, content.strip() + "\n")
 
         entrypoint = get_memory_entrypoint(cwd)
-        existing = entrypoint.read_text(encoding="utf-8") if entrypoint.exists() else "# Memory Index\n"
+        existing = (
+            entrypoint.read_text(encoding="utf-8") if entrypoint.exists() else "# Memory Index\n"
+        )
         if path.name not in existing:
             existing = existing.rstrip() + f"\n- [{title}]({path.name})\n"
             atomic_write_text(entrypoint, existing)

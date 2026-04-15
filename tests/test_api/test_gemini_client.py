@@ -17,7 +17,12 @@ from openharness.api.gemini_client import (
     _is_retryable,
     _translate_gemini_error,
 )
-from openharness.engine.messages import ConversationMessage, TextBlock, ToolResultBlock, ToolUseBlock
+from openharness.engine.messages import (
+    ConversationMessage,
+    TextBlock,
+    ToolResultBlock,
+    ToolUseBlock,
+)
 
 
 # Inject a minimal google.genai stub so the optional SDK is not required.
@@ -113,19 +118,21 @@ def _make_client():
 
 
 def _setup_stream(client, *chunks):
-    client._client.aio.models.generate_content_stream = AsyncMock(
-        return_value=_Aiter(chunks)
-    )
+    client._client.aio.models.generate_content_stream = AsyncMock(return_value=_Aiter(chunks))
 
 
 async def test_stream_text_yields_deltas_and_complete():
     client = _make_client()
     _setup_stream(client, _chunk("Hello"), _chunk(", world"))
 
-    events = [ev async for ev in client.stream_message(
-        ApiMessageRequest(model="gemini-2.0-flash",
-                          messages=[ConversationMessage.from_user_text("hi")])
-    )]
+    events = [
+        ev
+        async for ev in client.stream_message(
+            ApiMessageRequest(
+                model="gemini-2.0-flash", messages=[ConversationMessage.from_user_text("hi")]
+            )
+        )
+    ]
 
     deltas = [e for e in events if isinstance(e, ApiTextDeltaEvent)]
     complete = next(e for e in events if isinstance(e, ApiMessageCompleteEvent))
@@ -138,10 +145,14 @@ async def test_stream_tool_call_in_complete():
     client = _make_client()
     _setup_stream(client, _chunk(func_name="bash", func_args={"command": "ls"}))
 
-    events = [ev async for ev in client.stream_message(
-        ApiMessageRequest(model="gemini-2.0-flash",
-                          messages=[ConversationMessage.from_user_text("hi")])
-    )]
+    events = [
+        ev
+        async for ev in client.stream_message(
+            ApiMessageRequest(
+                model="gemini-2.0-flash", messages=[ConversationMessage.from_user_text("hi")]
+            )
+        )
+    ]
 
     complete = next(e for e in events if isinstance(e, ApiMessageCompleteEvent))
     assert complete.stop_reason == "tool_use"
@@ -167,7 +178,9 @@ def test_build_tools_injects_properties():
 
 def test_build_tools_preserves_properties():
     types = MagicMock()
-    _build_gemini_tools([{"name": "bash", "description": "", "input_schema": {"properties": {"cmd": {}}}}], types)
+    _build_gemini_tools(
+        [{"name": "bash", "description": "", "input_schema": {"properties": {"cmd": {}}}}], types
+    )
     schema = types.FunctionDeclaration.call_args.kwargs["parameters"]
     assert "cmd" in schema["properties"]
 
@@ -180,7 +193,9 @@ def test_build_tools_preserves_properties():
 def test_build_contents_resolves_tool_name():
     types = MagicMock()
     messages = [
-        ConversationMessage(role="assistant", content=[ToolUseBlock(id="c1", name="bash", input={})]),
+        ConversationMessage(
+            role="assistant", content=[ToolUseBlock(id="c1", name="bash", input={})]
+        ),
         ConversationMessage(role="user", content=[ToolResultBlock(tool_use_id="c1", content="ok")]),
     ]
     _build_gemini_contents(messages, types)
@@ -191,7 +206,9 @@ def test_build_contents_assistant_role_is_model():
     types = MagicMock()
     captured = []
     types.Content.side_effect = lambda **kw: captured.append(kw)
-    _build_gemini_contents([ConversationMessage(role="assistant", content=[TextBlock(text="hi")])], types)
+    _build_gemini_contents(
+        [ConversationMessage(role="assistant", content=[TextBlock(text="hi")])], types
+    )
     assert captured[0]["role"] == "model"
 
 
@@ -200,18 +217,23 @@ def test_build_contents_assistant_role_is_model():
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize("msg,retryable", [
-    ("429 quota exceeded", True),
-    ("503 unavailable", True),
-    ("timeout", True),
-    ("not found", False),
-])
+@pytest.mark.parametrize(
+    "msg,retryable",
+    [
+        ("429 quota exceeded", True),
+        ("503 unavailable", True),
+        ("timeout", True),
+        ("not found", False),
+    ],
+)
 def test_is_retryable(msg, retryable):
     assert _is_retryable(RuntimeError(msg)) is retryable
 
 
 def test_translate_error_auth():
-    assert isinstance(_translate_gemini_error(RuntimeError("invalid api_key")), AuthenticationFailure)
+    assert isinstance(
+        _translate_gemini_error(RuntimeError("invalid api_key")), AuthenticationFailure
+    )
 
 
 def test_translate_error_rate_limit():

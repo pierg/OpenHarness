@@ -43,7 +43,9 @@ class ReflectionAgent:
         self._config = config
         self._worker = worker
         if "critic" not in config.subagents:
-            raise ValueError(f"ReflectionAgent config '{config.name}' must define a 'critic' subagent.")
+            raise ValueError(
+                f"ReflectionAgent config '{config.name}' must define a 'critic' subagent."
+            )
         self._critic_config = config.subagents["critic"]
         self._max_attempts = max(1, config.max_turns)
 

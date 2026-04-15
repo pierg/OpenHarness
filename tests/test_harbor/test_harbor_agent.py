@@ -13,7 +13,9 @@ from openharness.api.client import ApiMessageCompleteEvent
 from openharness.api.usage import UsageSnapshot
 from openharness.engine.messages import ConversationMessage, TextBlock, ToolUseBlock
 
-pytest.importorskip("harbor", reason="Install Harbor test dependencies with `uv sync --extra harbor`.")
+pytest.importorskip(
+    "harbor", reason="Install Harbor test dependencies with `uv sync --extra harbor`."
+)
 ExecResult = pytest.importorskip("harbor.environments.base").ExecResult
 AgentContext = pytest.importorskip("harbor.models.agent.context").AgentContext
 OpenHarnessHarborAgent = importlib.import_module("openharness.harbor").OpenHarnessHarborAgent
@@ -67,29 +69,36 @@ async def test_openharness_harbor_agent_solves_hello_world(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    run_root = tmp_path / "run-root"
-    run_root.mkdir()
-    api_client = FakeApiClient([
-        _FakeResponse(
-            message=ConversationMessage(
-                role="assistant",
-                content=[ToolUseBlock(
-                    id="toolu_write", name="write_file",
-                    input={"path": "hello.txt", "content": "Hello, world!\n"},
-                )],
+    trial_dir = tmp_path / "trial-build-foo__abc123"
+    trial_dir.mkdir()
+    logs_dir = trial_dir / "agent"
+    logs_dir.mkdir()
+    api_client = FakeApiClient(
+        [
+            _FakeResponse(
+                message=ConversationMessage(
+                    role="assistant",
+                    content=[
+                        ToolUseBlock(
+                            id="toolu_write",
+                            name="write_file",
+                            input={"path": "hello.txt", "content": "Hello, world!\n"},
+                        )
+                    ],
+                ),
+                usage=UsageSnapshot(input_tokens=11, output_tokens=7),
             ),
-            usage=UsageSnapshot(input_tokens=11, output_tokens=7),
-        ),
-        _FakeResponse(
-            message=ConversationMessage(role="assistant", content=[TextBlock(text="Done.")]),
-            usage=UsageSnapshot(input_tokens=5, output_tokens=3),
-        ),
-    ])
+            _FakeResponse(
+                message=ConversationMessage(role="assistant", content=[TextBlock(text="Done.")]),
+                usage=UsageSnapshot(input_tokens=5, output_tokens=3),
+            ),
+        ]
+    )
     environment = FakeEnvironment()
     context = AgentContext()
     monkeypatch.setenv("OPENHARNESS_LANGFUSE_ENABLED", "0")
     agent = OpenHarnessHarborAgent(
-        logs_dir=tmp_path / "agent",
+        logs_dir=logs_dir,
         agent_name="harbor_test_agent",
         model_name="claude-test",
         api_client=api_client,
@@ -107,8 +116,8 @@ prompts:
   user: |
     {{ instruction }}
 """,
-        run_id="run-test123456",
-        run_root=run_root,
+        run_id="job-test123456",
+        run_root=str(tmp_path),
     )
 
     await agent.run(
@@ -121,14 +130,17 @@ prompts:
     assert context.n_input_tokens == 16
     assert context.n_output_tokens == 10
     assert context.metadata is not None
-    assert context.metadata["run_id"] == "run-test123456"
-    assert context.metadata["run_root"] == str(run_root)
+    assert context.metadata["run_id"] == trial_dir.name
+    assert context.metadata["run_root"] == str(trial_dir)
     assert context.metadata["trace_url"] is None
     assert context.metadata["summary"]["final_text"] == "Done."
-    assert json.loads((run_root / "run.json").read_text())["run_id"] == "run-test123456"
 
-    events_path = run_root / "events.jsonl"
-    messages_path = run_root / "messages.jsonl"
+    manifest = json.loads((trial_dir / "run.json").read_text())
+    assert manifest["run_id"] == trial_dir.name
+    assert manifest["metadata"]["harbor_job_id"] == "job-test123456"
+
+    events_path = trial_dir / "events.jsonl"
+    messages_path = trial_dir / "messages.jsonl"
     assert events_path.exists()
     assert messages_path.exists()
 
@@ -139,3 +151,13 @@ prompts:
     msgs = [json.loads(line) for line in messages_path.read_text().splitlines()]
     assert msgs[0]["role"] == "user"
     assert msgs[-1]["role"] == "assistant"
+
+    trajectory_path = logs_dir / "trajectory.json"
+    assert trajectory_path.exists()
+    trajectory = json.loads(trajectory_path.read_text())
+    assert trajectory["schema_version"] == "ATIF-v1.6"
+    assert trajectory["session_id"] == trial_dir.name
+    assert trajectory["agent"]["name"] == "harbor_test_agent"
+    assert len(trajectory["steps"]) >= 2
+    assert trajectory["steps"][0]["source"] == "user"
+    assert any(s["source"] == "agent" for s in trajectory["steps"])

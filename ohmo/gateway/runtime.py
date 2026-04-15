@@ -25,7 +25,13 @@ from openharness.engine.stream_events import (
     ToolExecutionStarted,
 )
 from openharness.prompts import build_runtime_system_prompt
-from openharness.ui.runtime import RuntimeBundle, _last_user_text, build_runtime, close_runtime, start_runtime
+from openharness.ui.runtime import (
+    RuntimeBundle,
+    _last_user_text,
+    build_runtime,
+    close_runtime,
+    start_runtime,
+)
 
 from ohmo.gateway.config import load_gateway_config
 from ohmo.prompts import build_ohmo_system_prompt
@@ -102,7 +108,9 @@ class OhmoSessionRuntimePool:
         }
         return command.name.lower() in allowed
 
-    async def get_bundle(self, session_key: str, latest_user_prompt: str | None = None) -> RuntimeBundle:
+    async def get_bundle(
+        self, session_key: str, latest_user_prompt: str | None = None
+    ) -> RuntimeBundle:
         """Return an existing bundle or create a new one."""
         bundle = self._bundles.get(session_key)
         if bundle is not None:
@@ -125,7 +133,9 @@ class OhmoSessionRuntimePool:
         bundle = await build_runtime(
             model=self._model,
             max_turns=self._max_turns,
-            system_prompt=build_ohmo_system_prompt(self._cwd, workspace=self._workspace, extra_prompt=None),
+            system_prompt=build_ohmo_system_prompt(
+                self._cwd, workspace=self._workspace, extra_prompt=None
+            ),
             active_profile=self._provider_profile,
             session_backend=self._session_backend,
             enforce_max_turns=self._max_turns is not None,
@@ -265,7 +275,11 @@ class OhmoSessionRuntimePool:
             bundle.engine.set_system_prompt(
                 self._runtime_system_prompt(bundle, _last_user_text(bundle.engine.messages))
             )
-            turns = result.continue_turns if result.continue_turns is not None else bundle.engine.max_turns
+            turns = (
+                result.continue_turns
+                if result.continue_turns is not None
+                else bundle.engine.max_turns
+            )
             reply_parts: list[str] = []
             try:
                 async for event in bundle.engine.continue_pending(max_turns=turns):
@@ -462,7 +476,9 @@ class OhmoSessionRuntimePool:
         if isinstance(event, AssistantTurnComplete) and not reply_parts:
             reply_parts.append(event.message.text.strip())
 
-    async def _save_snapshot(self, bundle: RuntimeBundle, session_key: str, user_prompt: str) -> None:
+    async def _save_snapshot(
+        self, bundle: RuntimeBundle, session_key: str, user_prompt: str
+    ) -> None:
         tool_metadata = getattr(bundle.engine, "tool_metadata", {}) or {}
         self._session_backend.save_snapshot(
             cwd=self._cwd,
@@ -494,7 +510,9 @@ class OhmoSessionRuntimePool:
             cwd=self._cwd,
             model=self._model,
             max_turns=self._max_turns,
-            system_prompt=build_ohmo_system_prompt(self._cwd, workspace=self._workspace, extra_prompt=None),
+            system_prompt=build_ohmo_system_prompt(
+                self._cwd, workspace=self._workspace, extra_prompt=None
+            ),
             active_profile=self._provider_profile,
             session_backend=self._session_backend,
             enforce_max_turns=self._max_turns is not None,
@@ -505,7 +523,9 @@ class OhmoSessionRuntimePool:
         )
         refreshed.session_id = prior_session_id
         await start_runtime(refreshed)
-        refreshed.engine.set_system_prompt(self._runtime_system_prompt(refreshed, latest_user_prompt))
+        refreshed.engine.set_system_prompt(
+            self._runtime_system_prompt(refreshed, latest_user_prompt)
+        )
         self._bundles[session_key] = refreshed
         logger.info(
             "ohmo runtime refreshed session_key=%s session_id=%s message_count=%s",
@@ -623,7 +643,9 @@ def _format_channel_progress(
             if compact_phase == "session_memory_start":
                 return "🧠 Let me quickly condense the earlier parts of this chat, then I’ll keep going."
             if compact_trigger == "reactive":
-                return "🧠 The context is too large for this turn. I’ll compact the memory and retry."
+                return (
+                    "🧠 The context is too large for this turn. I’ll compact the memory and retry."
+                )
             return "🧠 This chat is getting long. I’ll compact the memory and keep going."
         if compact_phase == "compact_retry":
             suffix = f" (attempt {attempt})" if attempt is not None else ""
@@ -761,7 +783,9 @@ def _decode_text_preview(data: bytes) -> str | None:
         decoded = data.decode("utf-8")
     except UnicodeDecodeError:
         return None
-    printable = sum(1 for char in decoded if char in string.printable or char.isprintable() or char in "\n\r\t")
+    printable = sum(
+        1 for char in decoded if char in string.printable or char.isprintable() or char in "\n\r\t"
+    )
     if printable / max(len(decoded), 1) < 0.9:
         return None
     normalized = " ".join(decoded.split())

@@ -89,9 +89,7 @@ async def test_task_update_tool_updates_metadata(tmp_path: Path, monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_agent_tool_uses_subprocess_backend_and_task_is_pollable(
-    tmp_path: Path, monkeypatch
-):
+async def test_agent_tool_uses_subprocess_backend_and_task_is_pollable(tmp_path: Path, monkeypatch):
     """Regression test for #59 / PR #60.
 
     AgentTool must use the subprocess backend so the returned task_id is
@@ -132,6 +130,7 @@ async def test_agent_tool_uses_subprocess_backend_and_task_is_pollable(
     #    can query it without raising ValueError.
     #    Parse task_id from "Spawned agent X (task_id=Y, backend=Z)"
     import re
+
     m = re.search(r"task_id=(\S+?)[,)]", result.output)
     assert m, f"Could not parse task_id from output: {result.output}"
     task_id = m.group(1)
@@ -149,9 +148,7 @@ async def test_agent_tool_uses_subprocess_backend_and_task_is_pollable(
 
 
 @pytest.mark.asyncio
-async def test_send_message_swarm_path_uses_subprocess_backend(
-    tmp_path: Path, monkeypatch
-):
+async def test_send_message_swarm_path_uses_subprocess_backend(tmp_path: Path, monkeypatch):
     """SendMessageTool._send_swarm_message must route via SubprocessBackend.
 
     Before the fix, _send_swarm_message also hardcoded in_process, so even
@@ -188,7 +185,9 @@ async def test_send_message_swarm_path_uses_subprocess_backend(
 
 
 @pytest.mark.asyncio
-async def test_agent_tool_creates_missing_team_when_team_argument_is_provided(tmp_path: Path, monkeypatch):
+async def test_agent_tool_creates_missing_team_when_team_argument_is_provided(
+    tmp_path: Path, monkeypatch
+):
     monkeypatch.setenv("OPENHARNESS_DATA_DIR", str(tmp_path / "data"))
     get_team_registry()._teams.clear()
     context = ToolExecutionContext(cwd=tmp_path)
@@ -199,7 +198,7 @@ async def test_agent_tool_creates_missing_team_when_team_argument_is_provided(tm
             prompt="ready",
             subagent_type="test-worker-team",
             team="design-qa-loop",
-            command="python -u -c \"import sys; print(sys.stdin.readline().strip())\"",
+            command='python -u -c "import sys; print(sys.stdin.readline().strip())"',
         ),
         context,
     )
@@ -222,7 +221,7 @@ async def test_agent_tool_supports_remote_and_teammate_modes(tmp_path: Path, mon
                 prompt="ready",
                 mode=mode,
                 subagent_type=f"test-worker-{i}",
-                command="python -u -c \"import sys; print(sys.stdin.readline().strip())\"",
+                command='python -u -c "import sys; print(sys.stdin.readline().strip())"',
             ),
             context,
         )

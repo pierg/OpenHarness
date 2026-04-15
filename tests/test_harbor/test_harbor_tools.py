@@ -10,7 +10,9 @@ from openharness.tools import WorkspaceToolRegistryFactory
 from openharness.tools.base import ToolExecutionContext
 from openharness.workspace.harbor import HarborWorkspace
 
-pytest.importorskip("harbor", reason="Install Harbor test dependencies with `uv sync --extra harbor`.")
+pytest.importorskip(
+    "harbor", reason="Install Harbor test dependencies with `uv sync --extra harbor`."
+)
 ExecResult = pytest.importorskip("harbor.environments.base").ExecResult
 
 
@@ -48,7 +50,9 @@ async def test_harbor_write_and_read_file(tmp_path: Path) -> None:
 
     write_tool = registry.get("write_file")
     assert write_tool is not None
-    args = write_tool.input_model.model_validate({"path": "hello.txt", "content": "Hello, world!\n"})
+    args = write_tool.input_model.model_validate(
+        {"path": "hello.txt", "content": "Hello, world!\n"}
+    )
     result = await write_tool.execute(args, ctx)
     assert not result.is_error
     assert env.files["/app/hello.txt"] == b"Hello, world!\n"
@@ -86,7 +90,9 @@ async def test_harbor_bash_executes_in_remote_cwd(tmp_path: Path) -> None:
 
     bash_tool = registry.get("bash")
     assert bash_tool is not None
-    args = bash_tool.input_model.model_validate({"command": "pwd", "cwd": "nested", "timeout_seconds": 12})
+    args = bash_tool.input_model.model_validate(
+        {"command": "pwd", "cwd": "nested", "timeout_seconds": 12}
+    )
     result = await bash_tool.execute(args, ctx)
 
     assert not result.is_error

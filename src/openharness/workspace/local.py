@@ -27,7 +27,9 @@ class LocalWorkspace:
     ) -> CommandResult:
         resolved_cwd = cwd or self._cwd
         process = await asyncio.create_subprocess_exec(
-            "/bin/bash", "-lc", command,
+            "/bin/bash",
+            "-lc",
+            command,
             cwd=resolved_cwd,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
@@ -41,7 +43,8 @@ class LocalWorkspace:
             process.kill()
             await process.wait()
             return CommandResult(
-                stdout="", stderr=f"Command timed out after {timeout_seconds}s",
+                stdout="",
+                stderr=f"Command timed out after {timeout_seconds}s",
                 return_code=-1,
             )
         return CommandResult(
@@ -54,7 +57,11 @@ class LocalWorkspace:
         return Path(path).read_bytes()
 
     async def write_file(
-        self, path: str, content: bytes, *, create_directories: bool = True,
+        self,
+        path: str,
+        content: bytes,
+        *,
+        create_directories: bool = True,
     ) -> None:
         p = Path(path)
         if create_directories:

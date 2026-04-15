@@ -41,7 +41,9 @@ class NotebookEditTool(BaseTool):
         workspace = self._workspace or LocalWorkspace(context.cwd)
         path = _resolve(workspace.cwd, arguments.path)
 
-        notebook = await _load_notebook(workspace, path, create_if_missing=arguments.create_if_missing)
+        notebook = await _load_notebook(
+            workspace, path, create_if_missing=arguments.create_if_missing
+        )
         if notebook is None:
             return ToolResult(output=f"Notebook not found: {path}", is_error=True)
 
@@ -57,7 +59,11 @@ class NotebookEditTool(BaseTool):
             cell.setdefault("execution_count", None)
 
         existing = _normalize_source(cell.get("source", ""))
-        updated = arguments.new_source if arguments.mode == "replace" else f"{existing}{arguments.new_source}"
+        updated = (
+            arguments.new_source
+            if arguments.mode == "replace"
+            else f"{existing}{arguments.new_source}"
+        )
         cell["source"] = updated
 
         content = (json.dumps(notebook, indent=2) + "\n").encode("utf-8")
@@ -65,7 +71,9 @@ class NotebookEditTool(BaseTool):
         return ToolResult(output=f"Updated notebook cell {arguments.cell_index} in {path}")
 
 
-async def _load_notebook(workspace: Workspace, path: str, *, create_if_missing: bool) -> dict | None:
+async def _load_notebook(
+    workspace: Workspace, path: str, *, create_if_missing: bool
+) -> dict | None:
     if await workspace.file_exists(path):
         raw = await workspace.read_file(path)
         return json.loads(raw.decode("utf-8"))
