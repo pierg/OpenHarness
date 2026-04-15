@@ -89,7 +89,9 @@ class GrepTool(BaseTool):
             )
         )
 
-    async def _execute_via_shell(self, arguments: GrepToolInput, workspace: Workspace) -> ToolResult:
+    async def _execute_via_shell(
+        self, arguments: GrepToolInput, workspace: Workspace
+    ) -> ToolResult:
         root = arguments.root or workspace.cwd
         flags = "" if arguments.case_sensitive else " -i"
         include = ""
@@ -105,7 +107,7 @@ class GrepTool(BaseTool):
         if not lines:
             return ToolResult(output="(no matches)")
         prefix = root.rstrip("/") + "/"
-        relative = [ln[len(prefix):] if ln.startswith(prefix) else ln for ln in lines]
+        relative = [ln[len(prefix) :] if ln.startswith(prefix) else ln for ln in lines]
         return ToolResult(output="\n".join(relative), is_error=result.return_code not in {0, 1})
 
 

@@ -96,8 +96,7 @@ class AgentFactory:
 def _build_agent(config: AgentConfig) -> Agent:
     """Recursively construct an agent tree from a config."""
     subagents = {
-        sub_name: _build_agent(sub_config)
-        for sub_name, sub_config in config.subagents.items()
+        sub_name: _build_agent(sub_config) for sub_name, sub_config in config.subagents.items()
     }
 
     arch_class = _ARCHITECTURES.get(config.architecture)

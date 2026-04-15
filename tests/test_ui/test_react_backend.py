@@ -127,7 +127,10 @@ async def test_backend_host_processes_command(tmp_path, monkeypatch):
         await close_runtime(host._bundle)
 
     assert should_continue is True
-    assert any(event.type == "transcript_item" and event.item and event.item.role == "user" for event in events)
+    assert any(
+        event.type == "transcript_item" and event.item and event.item.role == "user"
+        for event in events
+    )
     assert any(
         event.type == "transcript_item"
         and event.item
@@ -144,7 +147,9 @@ async def test_backend_host_processes_model_turn(tmp_path, monkeypatch):
     monkeypatch.setenv("OPENHARNESS_CONFIG_DIR", str(tmp_path / "config"))
     monkeypatch.setenv("OPENHARNESS_DATA_DIR", str(tmp_path / "data"))
 
-    host = ReactBackendHost(BackendHostConfig(api_client=StaticApiClient("hello from react backend")))
+    host = ReactBackendHost(
+        BackendHostConfig(api_client=StaticApiClient("hello from react backend"))
+    )
     host._bundle = await build_runtime(api_client=StaticApiClient("hello from react backend"))
     events = []
 
@@ -316,7 +321,9 @@ async def test_backend_host_uses_effective_model_from_env_override(tmp_path, mon
 
 
 @pytest.mark.asyncio
-async def test_build_runtime_leaves_interactive_sessions_unbounded_by_default(tmp_path, monkeypatch):
+async def test_build_runtime_leaves_interactive_sessions_unbounded_by_default(
+    tmp_path, monkeypatch
+):
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("OPENHARNESS_CONFIG_DIR", str(tmp_path / "config"))
     monkeypatch.setenv("OPENHARNESS_DATA_DIR", str(tmp_path / "data"))
@@ -355,7 +362,9 @@ async def test_backend_host_emits_model_select_request(tmp_path, monkeypatch):
     monkeypatch.setenv("OPENHARNESS_DATA_DIR", str(tmp_path / "data"))
 
     host = ReactBackendHost(BackendHostConfig(api_client=StaticApiClient("unused")))
-    host._bundle = await build_runtime(api_client=StaticApiClient("unused"), model="opus", api_format="anthropic")
+    host._bundle = await build_runtime(
+        api_client=StaticApiClient("unused"), model="opus", api_format="anthropic"
+    )
     events = []
 
     async def _emit(event):
@@ -370,7 +379,9 @@ async def test_backend_host_emits_model_select_request(tmp_path, monkeypatch):
 
     event = next(item for item in events if item.type == "select_request")
     assert event.modal["command"] == "model"
-    assert any(option["value"] == "opus" and option.get("active") for option in event.select_options)
+    assert any(
+        option["value"] == "opus" and option.get("active") for option in event.select_options
+    )
     assert any(option["value"] == "default" for option in event.select_options)
 
 
@@ -406,7 +417,9 @@ async def test_backend_host_emits_turns_select_request_with_unlimited_option(tmp
     monkeypatch.setenv("OPENHARNESS_DATA_DIR", str(tmp_path / "data"))
 
     host = ReactBackendHost(BackendHostConfig(api_client=StaticApiClient("unused")))
-    host._bundle = await build_runtime(api_client=StaticApiClient("unused"), enforce_max_turns=False)
+    host._bundle = await build_runtime(
+        api_client=StaticApiClient("unused"), enforce_max_turns=False
+    )
     events = []
 
     async def _emit(event):
@@ -421,7 +434,9 @@ async def test_backend_host_emits_turns_select_request_with_unlimited_option(tmp
 
     event = next(item for item in events if item.type == "select_request")
     assert event.modal["command"] == "turns"
-    assert any(option["value"] == "unlimited" and option.get("active") for option in event.select_options)
+    assert any(
+        option["value"] == "unlimited" and option.get("active") for option in event.select_options
+    )
 
 
 @pytest.mark.asyncio
@@ -446,11 +461,15 @@ async def test_backend_host_emits_provider_select_request(tmp_path, monkeypatch)
 
     event = next(item for item in events if item.type == "select_request")
     assert event.modal["command"] == "provider"
-    assert any(option["value"] == "claude-api" and option.get("active") for option in event.select_options)
+    assert any(
+        option["value"] == "claude-api" and option.get("active") for option in event.select_options
+    )
 
 
 @pytest.mark.asyncio
-async def test_backend_host_apply_select_command_shows_single_segment_transcript(tmp_path, monkeypatch):
+async def test_backend_host_apply_select_command_shows_single_segment_transcript(
+    tmp_path, monkeypatch
+):
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("OPENHARNESS_CONFIG_DIR", str(tmp_path / "config"))
     monkeypatch.setenv("OPENHARNESS_DATA_DIR", str(tmp_path / "data"))
@@ -470,12 +489,18 @@ async def test_backend_host_apply_select_command_shows_single_segment_transcript
         await close_runtime(host._bundle)
 
     assert should_continue is True
-    user_event = next(item for item in events if item.type == "transcript_item" and item.item and item.item.role == "user")
+    user_event = next(
+        item
+        for item in events
+        if item.type == "transcript_item" and item.item and item.item.role == "user"
+    )
     assert user_event.item.text == "/theme"
 
 
 @pytest.mark.asyncio
-async def test_backend_host_apply_provider_select_command_shows_single_segment_transcript(tmp_path, monkeypatch):
+async def test_backend_host_apply_provider_select_command_shows_single_segment_transcript(
+    tmp_path, monkeypatch
+):
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("OPENHARNESS_CONFIG_DIR", str(tmp_path / "config"))
     monkeypatch.setenv("OPENHARNESS_DATA_DIR", str(tmp_path / "data"))
@@ -495,7 +520,11 @@ async def test_backend_host_apply_provider_select_command_shows_single_segment_t
         await close_runtime(host._bundle)
 
     assert should_continue is True
-    user_event = next(item for item in events if item.type == "transcript_item" and item.item and item.item.role == "user")
+    user_event = next(
+        item
+        for item in events
+        if item.type == "transcript_item" and item.item and item.item.role == "user"
+    )
     assert user_event.item.text == "/provider"
 
 

@@ -189,7 +189,9 @@ class TestLoadSaveSettings:
         monkeypatch.delenv("ANTHROPIC_MODEL", raising=False)
         monkeypatch.delenv("OPENHARNESS_MODEL", raising=False)
         path = tmp_path / "settings.json"
-        path.write_text(json.dumps({"model": "claude-opus-4-20250514", "verbose": True, "fast_mode": True}))
+        path.write_text(
+            json.dumps({"model": "claude-opus-4-20250514", "verbose": True, "fast_mode": True})
+        )
         s = load_settings(path)
         assert s.model == "claude-opus-4-20250514"
         assert s.verbose is True
@@ -440,10 +442,14 @@ class TestLoadSaveSettings:
 
         assert materialized.model == "claude-opus-4-6"
 
-    def test_resolve_auth_prefers_profile_scoped_credential_for_custom_compatible_profile(self, tmp_path: Path, monkeypatch):
+    def test_resolve_auth_prefers_profile_scoped_credential_for_custom_compatible_profile(
+        self, tmp_path: Path, monkeypatch
+    ):
         monkeypatch.setenv("OPENHARNESS_CONFIG_DIR", str(tmp_path))
         monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-global-env")
-        store_credential("profile:kimi-anthropic", "api_key", "sk-profile-specific", use_keyring=False)
+        store_credential(
+            "profile:kimi-anthropic", "api_key", "sk-profile-specific", use_keyring=False
+        )
         settings = Settings(
             active_profile="kimi-anthropic",
             profiles={
@@ -506,7 +512,9 @@ class TestLoadSaveSettings:
         assert s.sandbox.enabled is True
         assert s.sandbox.fail_if_unavailable is True
 
-    def test_load_anthropic_api_key_env_not_loaded_into_api_key_field(self, tmp_path: Path, monkeypatch):
+    def test_load_anthropic_api_key_env_not_loaded_into_api_key_field(
+        self, tmp_path: Path, monkeypatch
+    ):
         path = tmp_path / "settings.json"
         path.write_text(json.dumps({}))
         monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-anthropic-env")
@@ -541,7 +549,9 @@ class TestLoadSaveSettings:
         assert s.vertex_project == "gcp-proj"
         assert s.vertex_location == "us-central1"
 
-    def test_vertex_project_env_takes_precedence_over_google_cloud(self, tmp_path: Path, monkeypatch):
+    def test_vertex_project_env_takes_precedence_over_google_cloud(
+        self, tmp_path: Path, monkeypatch
+    ):
         path = tmp_path / "settings.json"
         path.write_text(json.dumps({}))
         monkeypatch.setenv("VERTEX_PROJECT", "vertex-wins")
@@ -576,7 +586,10 @@ class TestLoadSaveSettings:
 
 
 def test_normalize_anthropic_model_name_matches_hermes_behavior():
-    assert normalize_anthropic_model_name("anthropic/claude-sonnet-4-20250514") == "claude-sonnet-4-20250514"
+    assert (
+        normalize_anthropic_model_name("anthropic/claude-sonnet-4-20250514")
+        == "claude-sonnet-4-20250514"
+    )
     assert normalize_anthropic_model_name("claude-opus-4.6") == "claude-opus-4-6"
 
 
@@ -590,7 +603,10 @@ class TestAnsiEscapeSequences:
         # Bold formatting should be stripped
         assert strip_ansi_escape_sequences("\x1b[1mclaude-opus-4-6\x1b[0m") == "claude-opus-4-6"
         # Green + bold formatting should be stripped
-        assert strip_ansi_escape_sequences("\x1b[32m\x1b[1mclaude-opus-4-6\x1b[0m") == "claude-opus-4-6"
+        assert (
+            strip_ansi_escape_sequences("\x1b[32m\x1b[1mclaude-opus-4-6\x1b[0m")
+            == "claude-opus-4-6"
+        )
         # Only bold prefix
         assert strip_ansi_escape_sequences("\x1b[1mclaude-opus-4-6") == "claude-opus-4-6"
         # Only reset suffix

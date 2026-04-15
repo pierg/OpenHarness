@@ -7,7 +7,10 @@ from typing import Iterable
 
 from openharness.config.paths import get_project_issue_file, get_project_pr_comments_file
 from openharness.config.settings import Settings
-from openharness.coordinator.coordinator_mode import get_coordinator_system_prompt, is_coordinator_mode
+from openharness.coordinator.coordinator_mode import (
+    get_coordinator_system_prompt,
+    is_coordinator_mode,
+)
 from openharness.memory import find_relevant_memories, load_memory_prompt
 from openharness.personalization.rules import load_local_rules
 from openharness.prompts.claudemd import load_claude_md_prompt
@@ -36,7 +39,7 @@ def _build_skills_section(
         "# Available Skills",
         "",
         "The following skills are available via the `skill` tool. "
-        "When a user's request matches a skill, invoke it with `skill(name=\"<skill_name>\")` "
+        'When a user\'s request matches a skill, invoke it with `skill(name="<skill_name>")` '
         "to load detailed instructions before proceeding.",
         "",
     ]
@@ -56,7 +59,7 @@ def _build_delegation_section() -> str:
             "or when the task clearly benefits from splitting off a focused worker.",
             "",
             "Default pattern:",
-            '- Spawn with `agent(description=..., prompt=..., subagent_type=\"worker\")`.',
+            '- Spawn with `agent(description=..., prompt=..., subagent_type="worker")`.',
             "- Inspect running or recorded workers with `/agents`.",
             "- Inspect one worker in detail with `/agents show TASK_ID`.",
             "- Send follow-up instructions with `send_message(task_id=..., message=...)`.",

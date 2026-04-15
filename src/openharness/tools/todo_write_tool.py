@@ -22,13 +22,17 @@ class TodoWriteTool(BaseTool):
     """Add or update an item in a TODO markdown file."""
 
     name = "todo_write"
-    description = "Add a new TODO item or mark an existing one as done in a markdown checklist file."
+    description = (
+        "Add a new TODO item or mark an existing one as done in a markdown checklist file."
+    )
     input_model = TodoWriteToolInput
 
     def __init__(self, workspace: Workspace | None = None) -> None:
         self._workspace = workspace
 
-    async def execute(self, arguments: TodoWriteToolInput, context: ToolExecutionContext) -> ToolResult:
+    async def execute(
+        self, arguments: TodoWriteToolInput, context: ToolExecutionContext
+    ) -> ToolResult:
         workspace = self._workspace or LocalWorkspace(context.cwd)
         path = _resolve(workspace.cwd, arguments.path)
 

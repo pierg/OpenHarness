@@ -88,9 +88,7 @@ class ConversationMessage(BaseModel):
     @property
     def text(self) -> str:
         """Return concatenated text blocks."""
-        return "".join(
-            block.text for block in self.content if isinstance(block, TextBlock)
-        )
+        return "".join(block.text for block in self.content if isinstance(block, TextBlock))
 
     @property
     def tool_uses(self) -> list[ToolUseBlock]:
@@ -115,7 +113,9 @@ class ConversationMessage(BaseModel):
         return True
 
 
-def sanitize_conversation_messages(messages: list[ConversationMessage]) -> list[ConversationMessage]:
+def sanitize_conversation_messages(
+    messages: list[ConversationMessage],
+) -> list[ConversationMessage]:
     """Drop legacy empty assistant messages while preserving other content."""
     sanitized: list[ConversationMessage] = []
     for message in messages:

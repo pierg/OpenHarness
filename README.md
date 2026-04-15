@@ -58,6 +58,7 @@ Windows support is native. In PowerShell, use `openh` instead of `oh` because `o
 .venv/bin/python examples/local_workflow_coordinator_worker_fix_bug/run.py
 .venv/bin/python examples/local_docker_sandbox_fix_bug/run.py
 .venv/bin/python examples/harbor_fix_bug/run.py
+.venv/bin/python examples/harbor_registry_task/run.py
 ```
 
 Each run logs the run folder and trace URL immediately:

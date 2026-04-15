@@ -3,9 +3,11 @@
 from openharness.runs.specs import (
     AgentSpec,
     HarborAgentRunSpec,
+    HarborJobResult,
     InlineTaskSpec,
     LocalAgentRunSpec,
     RunLaunchResult,
+    TrialResult,
 )
 
 
@@ -28,10 +30,12 @@ def __getattr__(name: str):
 __all__ = [
     "AgentSpec",
     "HarborAgentRunSpec",
+    "HarborJobResult",
     "InlineTaskSpec",
     "LocalAgentRunSpec",
     "RunLaunchResult",
     "RunContext",
+    "TrialResult",
     "run_harbor_agent",
     "run_local_agent",
 ]

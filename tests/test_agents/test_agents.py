@@ -16,7 +16,12 @@ from openharness.workspace import CommandResult, LocalWorkspace, Workspace
 from openharness.tools import WorkspaceToolRegistryFactory, normalize_tool_name
 from openharness.api.client import ApiMessageCompleteEvent, ApiMessageRequest
 from openharness.api.usage import UsageSnapshot
-from openharness.engine.messages import ConversationMessage, TextBlock, ToolResultBlock, ToolUseBlock
+from openharness.engine.messages import (
+    ConversationMessage,
+    TextBlock,
+    ToolResultBlock,
+    ToolUseBlock,
+)
 from openharness.engine.query import _trace_model_input, _trace_model_output
 from openharness.tools.bash_tool import format_command_output
 
@@ -36,14 +41,18 @@ class FakeWorkspace:
     def cwd(self) -> str:
         return self._cwd
 
-    async def run_shell(self, command: str, *, cwd: str | None = None, timeout_seconds: int | None = None) -> CommandResult:
+    async def run_shell(
+        self, command: str, *, cwd: str | None = None, timeout_seconds: int | None = None
+    ) -> CommandResult:
         self.shell_calls.append(command)
         return CommandResult(stdout="ok\n")
 
     async def read_file(self, path: str) -> bytes:
         return self.files[path]
 
-    async def write_file(self, path: str, content: bytes, *, create_directories: bool = True) -> None:
+    async def write_file(
+        self, path: str, content: bytes, *, create_directories: bool = True
+    ) -> None:
         self.files[path] = content
 
     async def file_exists(self, path: str) -> bool:
@@ -72,7 +81,9 @@ class FakeApiClient:
     async def stream_message(self, request: ApiMessageRequest):
         self.requests.append(request)
         response = self._responses.pop(0)
-        yield ApiMessageCompleteEvent(message=response.message, usage=response.usage, stop_reason=None)
+        yield ApiMessageCompleteEvent(
+            message=response.message, usage=response.usage, stop_reason=None
+        )
 
 
 @dataclass
@@ -181,7 +192,9 @@ def test_registry_factory_raises_for_unknown_tool(tmp_path: Path):
 
 def test_registry_factory_supports_swarm_tools(tmp_path: Path):
     workspace = FakeWorkspace(cwd=str(tmp_path))
-    registry = WorkspaceToolRegistryFactory(tool_names=("agent", "send_message", "task_stop")).build(workspace)
+    registry = WorkspaceToolRegistryFactory(
+        tool_names=("agent", "send_message", "task_stop")
+    ).build(workspace)
     names = {t.name for t in registry.list_tools()}
     assert names == {"agent", "send_message", "task_stop"}
 
@@ -215,27 +228,36 @@ def test_format_command_output_truncates():
 
 
 async def test_simple_agent_writes_file_and_returns_result(tmp_path: Path):
-    api_client = FakeApiClient([
-        _FakeResponse(
-            message=ConversationMessage(role="assistant", content=[
-                ToolUseBlock(id="t1", name="write_file", input={"path": f"{tmp_path}/hello.txt", "content": "Hello!\n"})
-            ]),
-            usage=UsageSnapshot(input_tokens=11, output_tokens=7),
-        ),
-        _FakeResponse(
-            message=ConversationMessage(role="assistant", content=[TextBlock(text="Done.")]),
-            usage=UsageSnapshot(input_tokens=5, output_tokens=3),
-        ),
-    ])
+    api_client = FakeApiClient(
+        [
+            _FakeResponse(
+                message=ConversationMessage(
+                    role="assistant",
+                    content=[
+                        ToolUseBlock(
+                            id="t1",
+                            name="write_file",
+                            input={"path": f"{tmp_path}/hello.txt", "content": "Hello!\n"},
+                        )
+                    ],
+                ),
+                usage=UsageSnapshot(input_tokens=11, output_tokens=7),
+            ),
+            _FakeResponse(
+                message=ConversationMessage(role="assistant", content=[TextBlock(text="Done.")]),
+                usage=UsageSnapshot(input_tokens=5, output_tokens=3),
+            ),
+        ]
+    )
     config = AgentConfig(
-        model="claude-test", 
-        tools=("write_file",), 
+        model="claude-test",
+        tools=("write_file",),
         max_turns=4,
-        prompts={"system": "sys", "user": "usr"}
+        prompts={"system": "sys", "user": "usr"},
     )
     agent = SimpleAgent(config)
     workspace = FakeWorkspace(cwd=str(tmp_path))
-    
+
     runtime = AgentRuntime(
         workspace=workspace,
         permission_mode=PermissionMode.FULL_AUTO,
@@ -243,9 +265,9 @@ async def test_simple_agent_writes_file_and_returns_result(tmp_path: Path):
         log_paths=AgentLogPaths(
             messages_path=str(tmp_path / "messages.jsonl"),
             events_path=str(tmp_path / "events.jsonl"),
-        )
+        ),
     )
-    
+
     result = await agent.run(
         task=TaskDefinition(instruction="Write hello.txt"),
         runtime=runtime,
@@ -262,48 +284,51 @@ async def test_simple_agent_writes_file_and_returns_result(tmp_path: Path):
 
 
 async def test_simple_agent_only_registers_requested_tools(tmp_path: Path):
-    api_client = FakeApiClient([
-        _FakeResponse(message=ConversationMessage(role="assistant", content=[TextBlock(text="ok")]))
-    ])
+    api_client = FakeApiClient(
+        [
+            _FakeResponse(
+                message=ConversationMessage(role="assistant", content=[TextBlock(text="ok")])
+            )
+        ]
+    )
     config = AgentConfig(
-        model="claude-test", 
-        tools=("bash",), 
-        max_turns=2,
-        prompts={"system": "sys", "user": "usr"}
+        model="claude-test", tools=("bash",), max_turns=2, prompts={"system": "sys", "user": "usr"}
     )
     agent = SimpleAgent(config)
     workspace = FakeWorkspace(cwd=str(tmp_path))
-    
+
     runtime = AgentRuntime(
         workspace=workspace,
         api_client=api_client,
     )
-    
+
     await agent.run(task=TaskDefinition(instruction="Run bash"), runtime=runtime)
     tool_names = [t["name"] for t in api_client.requests[0].tools]
     assert tool_names == ["bash"]
 
 
 async def test_simple_agent_emits_trace_stages(tmp_path: Path):
-    api_client = FakeApiClient([
-        _FakeResponse(
-            message=ConversationMessage(
-                role="assistant",
-                content=[
-                    ToolUseBlock(
-                        id="t1",
-                        name="write_file",
-                        input={"path": f"{tmp_path}/hello.txt", "content": "Hello!\n"},
-                    )
-                ],
+    api_client = FakeApiClient(
+        [
+            _FakeResponse(
+                message=ConversationMessage(
+                    role="assistant",
+                    content=[
+                        ToolUseBlock(
+                            id="t1",
+                            name="write_file",
+                            input={"path": f"{tmp_path}/hello.txt", "content": "Hello!\n"},
+                        )
+                    ],
+                ),
+                usage=UsageSnapshot(input_tokens=3, output_tokens=2),
             ),
-            usage=UsageSnapshot(input_tokens=3, output_tokens=2),
-        ),
-        _FakeResponse(
-            message=ConversationMessage(role="assistant", content=[TextBlock(text="Done.")]),
-            usage=UsageSnapshot(input_tokens=2, output_tokens=1),
-        ),
-    ])
+            _FakeResponse(
+                message=ConversationMessage(role="assistant", content=[TextBlock(text="Done.")]),
+                usage=UsageSnapshot(input_tokens=2, output_tokens=1),
+            ),
+        ]
+    )
     trace_observer = _RecordingTraceObserver()
     config = AgentConfig(
         name="trace-demo",

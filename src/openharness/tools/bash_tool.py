@@ -42,7 +42,11 @@ class BashTool(BaseTool):
             )
 
         workspace = self._workspace or LocalWorkspace(context.cwd)
-        cwd = _resolve_path(Path(workspace.cwd), arguments.cwd) if arguments.cwd else Path(workspace.cwd)
+        cwd = (
+            _resolve_path(Path(workspace.cwd), arguments.cwd)
+            if arguments.cwd
+            else Path(workspace.cwd)
+        )
 
         if not isinstance(workspace, LocalWorkspace):
             result = await workspace.run_shell(

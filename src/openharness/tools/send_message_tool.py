@@ -68,7 +68,9 @@ class SendMessageTool(BaseTool):
     description = "Send a follow-up message to a running local agent task."
     input_model = SendMessageToolInput
 
-    async def execute(self, arguments: SendMessageToolInput, context: ToolExecutionContext) -> ToolResult:
+    async def execute(
+        self, arguments: SendMessageToolInput, context: ToolExecutionContext
+    ) -> ToolResult:
         del context
         sender_agent_id = _resolve_sender_agent_id() or "coordinator"
 

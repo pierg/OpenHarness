@@ -59,9 +59,7 @@ class FileReadTool(BaseTool):
         selected = lines[arguments.offset : arguments.offset + arguments.limit]
         if not selected:
             return ToolResult(output=f"(no content in selected range for {path})")
-        numbered = [
-            f"{arguments.offset + i + 1:>6}\t{line}" for i, line in enumerate(selected)
-        ]
+        numbered = [f"{arguments.offset + i + 1:>6}\t{line}" for i, line in enumerate(selected)]
         return ToolResult(output="\n".join(numbered))
 
 

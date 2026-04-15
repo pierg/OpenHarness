@@ -2,10 +2,12 @@ import logging
 import sys
 from loguru import logger
 
+
 class InterceptHandler(logging.Handler):
     """
     Intercepts standard logging messages and routes them to Loguru.
     """
+
     def emit(self, record: logging.LogRecord) -> None:
         # Get corresponding Loguru level if it exists
         try:
@@ -37,10 +39,7 @@ def setup_logging(debug: bool = False) -> None:
         )
     else:
         # Very concise format for normal use
-        log_format = (
-            "<green>{time:HH:mm:ss}</green> | "
-            "<level>{message}</level>"
-        )
+        log_format = "<green>{time:HH:mm:ss}</green> | <level>{message}</level>"
 
     logger.add(
         sys.stderr,
@@ -48,9 +47,9 @@ def setup_logging(debug: bool = False) -> None:
         colorize=True,
         format=log_format,
     )
-    
+
     # Intercept all standard logging messages
     logging.basicConfig(handlers=[InterceptHandler()], level=0, force=True)
-    
+
     # Suppress noisy warnings from google.genai
     logging.getLogger("google_genai._api_client").setLevel(logging.ERROR)

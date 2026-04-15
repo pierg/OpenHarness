@@ -92,7 +92,9 @@ def load_latest(workspace: str | Path | None = None) -> dict[str, Any] | None:
     return _sanitize_snapshot_payload(json.loads(path.read_text(encoding="utf-8")))
 
 
-def load_latest_for_session_key(workspace: str | Path | None, session_key: str) -> dict[str, Any] | None:
+def load_latest_for_session_key(
+    workspace: str | Path | None, session_key: str
+) -> dict[str, Any] | None:
     path = _session_key_latest_path(workspace, session_key)
     if path.exists():
         return _sanitize_snapshot_payload(json.loads(path.read_text(encoding="utf-8")))
@@ -102,7 +104,9 @@ def load_latest_for_session_key(workspace: str | Path | None, session_key: str) 
 def list_snapshots(workspace: str | Path | None = None, limit: int = 20) -> list[dict[str, Any]]:
     session_dir = get_session_dir(workspace)
     sessions: list[dict[str, Any]] = []
-    for path in sorted(session_dir.glob("session-*.json"), key=lambda p: p.stat().st_mtime, reverse=True):
+    for path in sorted(
+        session_dir.glob("session-*.json"), key=lambda p: p.stat().st_mtime, reverse=True
+    ):
         try:
             data = json.loads(path.read_text(encoding="utf-8"))
         except (json.JSONDecodeError, OSError):

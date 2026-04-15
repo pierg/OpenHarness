@@ -66,7 +66,9 @@ class _FakeProcess:
 
 
 @pytest.mark.asyncio
-async def test_bash_tool_preflight_short_circuits_interactive_scaffold_even_with_timeout_fixture(monkeypatch, tmp_path: Path):
+async def test_bash_tool_preflight_short_circuits_interactive_scaffold_even_with_timeout_fixture(
+    monkeypatch, tmp_path: Path
+):
     process = _FakeProcess(
         stdout=_FakeStdout(
             [
@@ -80,7 +82,9 @@ async def test_bash_tool_preflight_short_circuits_interactive_scaffold_even_with
     async def fake_create_shell_subprocess(*args, **kwargs):
         return process
 
-    monkeypatch.setattr("openharness.tools.bash_tool.create_shell_subprocess", fake_create_shell_subprocess)
+    monkeypatch.setattr(
+        "openharness.tools.bash_tool.create_shell_subprocess", fake_create_shell_subprocess
+    )
 
     result = await BashTool().execute(
         BashToolInput(
@@ -91,7 +95,9 @@ async def test_bash_tool_preflight_short_circuits_interactive_scaffold_even_with
     )
 
     assert result.is_error is True
-    assert "This command appears to require interactive input before it can continue." in result.output
+    assert (
+        "This command appears to require interactive input before it can continue." in result.output
+    )
     assert result.metadata["interactive_required"] is True
 
 
@@ -118,7 +124,7 @@ async def test_bash_tool_timeout_returns_partial_output_for_real_command(tmp_pat
             command=(
                 "python -u -c \"print('Creating a new Next.js app in /tmp/coolblog.'); "
                 "print('Would you like to use Turbopack?'); "
-                "import time; time.sleep(5)\""
+                'import time; time.sleep(5)"'
             ),
             timeout_seconds=1,
         ),
@@ -144,7 +150,9 @@ async def test_bash_tool_collects_combined_output(monkeypatch, tmp_path: Path):
     async def fake_create_shell_subprocess(*args, **kwargs):
         return process
 
-    monkeypatch.setattr("openharness.tools.bash_tool.create_shell_subprocess", fake_create_shell_subprocess)
+    monkeypatch.setattr(
+        "openharness.tools.bash_tool.create_shell_subprocess", fake_create_shell_subprocess
+    )
 
     result = await BashTool().execute(
         BashToolInput(command="printf 'line one\\nline two\\n'"),

@@ -64,7 +64,9 @@ def upsert_cron_job(job: dict[str, Any]) -> None:
         job["next_run"] = next_run_time(schedule).isoformat()
 
     with exclusive_file_lock(_cron_lock_path()):
-        jobs = [existing for existing in load_cron_jobs() if existing.get("name") != job.get("name")]
+        jobs = [
+            existing for existing in load_cron_jobs() if existing.get("name") != job.get("name")
+        ]
         jobs.append(job)
         jobs.sort(key=lambda item: str(item.get("name", "")))
         save_cron_jobs(jobs)

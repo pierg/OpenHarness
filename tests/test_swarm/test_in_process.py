@@ -162,6 +162,7 @@ async def test_send_message_writes_to_mailbox(backend, tmp_path, monkeypatch):
 
     # Verify the message was written to mailbox
     from openharness.swarm.mailbox import TeammateMailbox
+
     mailbox = TeammateMailbox(team_name="myteam", agent_id="rcvr")
     messages = await mailbox.read_all(unread_only=False)
     assert any(m.payload.get("content") == "work on it" for m in messages)

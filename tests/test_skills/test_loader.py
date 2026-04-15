@@ -23,7 +23,9 @@ def test_load_skill_registry_includes_user_skills(tmp_path: Path, monkeypatch):
     skills_dir = get_user_skills_dir()
     deploy_dir = skills_dir / "deploy"
     deploy_dir.mkdir(parents=True)
-    (deploy_dir / "SKILL.md").write_text("# Deploy\nDeployment workflow guidance\n", encoding="utf-8")
+    (deploy_dir / "SKILL.md").write_text(
+        "# Deploy\nDeployment workflow guidance\n", encoding="utf-8"
+    )
 
     registry = load_skill_registry()
     deploy = registry.get("Deploy")

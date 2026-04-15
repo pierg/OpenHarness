@@ -1,0 +1,24 @@
+name: harbor_registry_agent
+description: YAML-configured agent for existing Harbor registry tasks.
+architecture: simple
+model: gemini-2.5-flash
+max_turns: 10
+max_tokens: 8192
+
+tools:
+  - bash
+  - read_file
+  - write_file
+  - edit_file
+  - grep
+  - glob
+
+prompts:
+  system: |
+    {{ openharness_system_context }}
+
+    You are running inside a Harbor task environment.
+    Read the task instruction, inspect files when useful, make the smallest correct change, and verify with available tests or simple shell checks before you stop.
+    Do not ask for human input.
+  user: |
+    {{ instruction }}

@@ -37,7 +37,7 @@ async def test_create_agent_task_with_command_override_and_write(tmp_path: Path,
         prompt="first",
         description="agent",
         cwd=tmp_path,
-        command="while read line; do echo \"got:$line\"; break; done",
+        command='while read line; do echo "got:$line"; break; done',
     )
 
     await asyncio.wait_for(manager._waiters[task.id], timeout=5)  # type: ignore[attr-defined]
@@ -53,7 +53,7 @@ async def test_write_to_stopped_agent_task_restarts_process(tmp_path: Path, monk
         prompt="ready",
         description="agent",
         cwd=tmp_path,
-        command="while read line; do echo \"got:$line\"; break; done",
+        command='while read line; do echo "got:$line"; break; done',
     )
     await asyncio.wait_for(manager._waiters[task.id], timeout=5)  # type: ignore[attr-defined]
 

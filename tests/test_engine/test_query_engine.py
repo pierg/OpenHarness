@@ -97,13 +97,17 @@ class PromptTooLongThenSuccessApiClient:
             raise RequestFailure("prompt too long")
         if self._calls == 2:
             yield ApiMessageCompleteEvent(
-                message=ConversationMessage(role="assistant", content=[TextBlock(text="<summary>compressed</summary>")]),
+                message=ConversationMessage(
+                    role="assistant", content=[TextBlock(text="<summary>compressed</summary>")]
+                ),
                 usage=UsageSnapshot(input_tokens=1, output_tokens=1),
                 stop_reason=None,
             )
             return
         yield ApiMessageCompleteEvent(
-            message=ConversationMessage(role="assistant", content=[TextBlock(text="after reactive compact")]),
+            message=ConversationMessage(
+                role="assistant", content=[TextBlock(text="after reactive compact")]
+            ),
             usage=UsageSnapshot(input_tokens=1, output_tokens=1),
             stop_reason=None,
         )
@@ -150,7 +154,10 @@ class CoordinatorLoopApiClient:
             )
             return
         yield ApiMessageCompleteEvent(
-            message=ConversationMessage(role="assistant", content=[TextBlock(text="Worker launched; coordinator mode is active.")]),
+            message=ConversationMessage(
+                role="assistant",
+                content=[TextBlock(text="Worker launched; coordinator mode is active.")],
+            ),
             usage=UsageSnapshot(input_tokens=2, output_tokens=2),
             stop_reason=None,
         )
@@ -246,12 +253,16 @@ async def test_query_engine_executes_tool_calls(tmp_path: Path, monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_query_engine_coordinator_mode_uses_coordinator_prompt_and_runs_agent_loop(tmp_path: Path, monkeypatch):
+async def test_query_engine_coordinator_mode_uses_coordinator_prompt_and_runs_agent_loop(
+    tmp_path: Path, monkeypatch
+):
     monkeypatch.setenv("OPENHARNESS_DATA_DIR", str(tmp_path / "data"))
     monkeypatch.setenv("CLAUDE_CODE_COORDINATOR_MODE", "1")
 
     api_client = CoordinatorLoopApiClient()
-    system_prompt = build_runtime_system_prompt(Settings(), cwd=tmp_path, latest_user_prompt="investigate issue")
+    system_prompt = build_runtime_system_prompt(
+        Settings(), cwd=tmp_path, latest_user_prompt="investigate issue"
+    )
     engine = QueryEngine(
         api_client=api_client,
         tool_registry=create_default_tool_registry(),
@@ -267,12 +278,23 @@ async def test_query_engine_coordinator_mode_uses_coordinator_prompt_and_runs_ag
     assert "You are a **coordinator**." in api_client.requests[0].system_prompt
     assert "Coordinator User Context" not in api_client.requests[0].system_prompt
     coordinator_context_messages = [
-        msg for msg in api_client.requests[0].messages if msg.role == "user" and "Coordinator User Context" in msg.text
+        msg
+        for msg in api_client.requests[0].messages
+        if msg.role == "user" and "Coordinator User Context" in msg.text
     ]
     assert len(coordinator_context_messages) == 1
-    assert "Workers spawned via the agent tool have access to these tools" in coordinator_context_messages[0].text
-    assert any(isinstance(event, ToolExecutionStarted) and event.tool_name == "agent" for event in events)
-    agent_results = [event for event in events if isinstance(event, ToolExecutionCompleted) and event.tool_name == "agent"]
+    assert (
+        "Workers spawned via the agent tool have access to these tools"
+        in coordinator_context_messages[0].text
+    )
+    assert any(
+        isinstance(event, ToolExecutionStarted) and event.tool_name == "agent" for event in events
+    )
+    agent_results = [
+        event
+        for event in events
+        if isinstance(event, ToolExecutionCompleted) and event.tool_name == "agent"
+    ]
     assert len(agent_results) == 1
     assert isinstance(events[-1], AssistantTurnComplete)
     assert "coordinator mode is active" in events[-1].message.text
@@ -337,24 +359,34 @@ async def test_query_engine_surfaces_retry_status_events(tmp_path: Path):
 
     events = [event async for event in engine.submit_message("hello")]
 
-    assert any(isinstance(event, StatusEvent) and "retrying in 1.5s" in event.message for event in events)
+    assert any(
+        isinstance(event, StatusEvent) and "retrying in 1.5s" in event.message for event in events
+    )
     assert isinstance(events[-1], AssistantTurnComplete)
 
 
 @pytest.mark.asyncio
 async def test_query_engine_emits_compact_progress_before_reply(tmp_path: Path, monkeypatch):
     long_text = "alpha " * 50000
-    monkeypatch.setattr("openharness.services.compact.try_session_memory_compaction", lambda *args, **kwargs: None)
-    monkeypatch.setattr("openharness.services.compact.should_autocompact", lambda *args, **kwargs: True)
+    monkeypatch.setattr(
+        "openharness.services.compact.try_session_memory_compaction", lambda *args, **kwargs: None
+    )
+    monkeypatch.setattr(
+        "openharness.services.compact.should_autocompact", lambda *args, **kwargs: True
+    )
     engine = QueryEngine(
         api_client=FakeApiClient(
             [
                 _FakeResponse(
-                    message=ConversationMessage(role="assistant", content=[TextBlock(text="<summary>trimmed</summary>")]),
+                    message=ConversationMessage(
+                        role="assistant", content=[TextBlock(text="<summary>trimmed</summary>")]
+                    ),
                     usage=UsageSnapshot(input_tokens=1, output_tokens=1),
                 ),
                 _FakeResponse(
-                    message=ConversationMessage(role="assistant", content=[TextBlock(text="after compact")]),
+                    message=ConversationMessage(
+                        role="assistant", content=[TextBlock(text="after compact")]
+                    ),
                     usage=UsageSnapshot(input_tokens=1, output_tokens=1),
                 ),
             ]
@@ -380,18 +412,34 @@ async def test_query_engine_emits_compact_progress_before_reply(tmp_path: Path, 
 
     events = [event async for event in engine.submit_message("hello")]
 
-    hooks_start_index = next(i for i, event in enumerate(events) if isinstance(event, CompactProgressEvent) and event.phase == "hooks_start")
-    compact_start_index = next(i for i, event in enumerate(events) if isinstance(event, CompactProgressEvent) and event.phase == "compact_start")
-    final_index = next(i for i, event in enumerate(events) if isinstance(event, AssistantTurnComplete))
+    hooks_start_index = next(
+        i
+        for i, event in enumerate(events)
+        if isinstance(event, CompactProgressEvent) and event.phase == "hooks_start"
+    )
+    compact_start_index = next(
+        i
+        for i, event in enumerate(events)
+        if isinstance(event, CompactProgressEvent) and event.phase == "compact_start"
+    )
+    final_index = next(
+        i for i, event in enumerate(events) if isinstance(event, AssistantTurnComplete)
+    )
     assert hooks_start_index < compact_start_index
     assert compact_start_index < final_index
-    assert any(isinstance(event, CompactProgressEvent) and event.phase == "compact_end" for event in events)
+    assert any(
+        isinstance(event, CompactProgressEvent) and event.phase == "compact_end" for event in events
+    )
 
 
 @pytest.mark.asyncio
 async def test_query_engine_reactive_compacts_after_prompt_too_long(tmp_path: Path, monkeypatch):
-    monkeypatch.setattr("openharness.services.compact.try_session_memory_compaction", lambda *args, **kwargs: None)
-    monkeypatch.setattr("openharness.services.compact.should_autocompact", lambda *args, **kwargs: False)
+    monkeypatch.setattr(
+        "openharness.services.compact.try_session_memory_compaction", lambda *args, **kwargs: None
+    )
+    monkeypatch.setattr(
+        "openharness.services.compact.should_autocompact", lambda *args, **kwargs: False
+    )
     engine = QueryEngine(
         api_client=PromptTooLongThenSuccessApiClient(),
         tool_registry=create_default_tool_registry(),
@@ -517,7 +565,9 @@ async def test_query_engine_tracks_async_agent_activity(tmp_path: Path, monkeypa
                     usage=UsageSnapshot(input_tokens=1, output_tokens=1),
                 ),
                 _FakeResponse(
-                    message=ConversationMessage(role="assistant", content=[TextBlock(text="spawned")]),
+                    message=ConversationMessage(
+                        role="assistant", content=[TextBlock(text="spawned")]
+                    ),
                     usage=UsageSnapshot(input_tokens=1, output_tokens=1),
                 ),
             ]
@@ -596,7 +646,9 @@ async def test_query_engine_respects_pre_tool_hook_blocks(tmp_path: Path):
     assert "no reading" in tool_results[0].output
 
 
-def _tool_context(tmp_path: Path, registry: ToolRegistry, settings: PermissionSettings) -> QueryContext:
+def _tool_context(
+    tmp_path: Path, registry: ToolRegistry, settings: PermissionSettings
+) -> QueryContext:
     return QueryContext(
         api_client=_NoopApiClient(),
         tool_registry=registry,
@@ -657,7 +709,9 @@ async def test_execute_tool_call_applies_path_rules_to_directory_roots(tmp_path:
 
 
 @pytest.mark.asyncio
-async def test_execute_tool_call_returns_actionable_reason_when_user_denies_confirmation(tmp_path: Path):
+async def test_execute_tool_call_returns_actionable_reason_when_user_denies_confirmation(
+    tmp_path: Path,
+):
     async def _deny(_tool_name: str, _reason: str) -> bool:
         return False
 
@@ -921,10 +975,14 @@ async def test_query_engine_synthesizes_tool_result_when_parallel_tool_raises(tm
     assert "boom" in completed_by_name["boom_tool"].output
 
     user_tool_messages = [
-        msg for msg in engine.messages if msg.role == "user" and any(isinstance(block, ToolResultBlock) for block in msg.content)
+        msg
+        for msg in engine.messages
+        if msg.role == "user" and any(isinstance(block, ToolResultBlock) for block in msg.content)
     ]
     assert len(user_tool_messages) == 1
-    result_blocks = [block for block in user_tool_messages[0].content if isinstance(block, ToolResultBlock)]
+    result_blocks = [
+        block for block in user_tool_messages[0].content if isinstance(block, ToolResultBlock)
+    ]
     assert {block.tool_use_id for block in result_blocks} == {"toolu_ok", "toolu_boom"}
 
     assert isinstance(events[-1], AssistantTurnComplete)

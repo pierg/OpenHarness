@@ -73,20 +73,20 @@ def test_ohmo_init_interactive_writes_feishu_gateway_config(tmp_path: Path, monk
     monkeypatch.setattr("sys.stdout.isatty", lambda: True)
     user_input = "\n".join(
         [
-            "1",         # provider profile
-            "n",         # telegram
-            "n",         # slack
-            "n",         # discord
-            "y",         # feishu
-            "*",         # allow_from
-            "cli_app",   # app_id
-            "cli_secret",# app_secret
-            "enc_key",   # encrypt_key
-            "verify_me", # verification_token
-            "OK",        # react_emoji
-            "y",         # send_progress
-            "n",         # send_tool_hints
-            "n",         # allow_remote_admin_commands
+            "1",  # provider profile
+            "n",  # telegram
+            "n",  # slack
+            "n",  # discord
+            "y",  # feishu
+            "*",  # allow_from
+            "cli_app",  # app_id
+            "cli_secret",  # app_secret
+            "enc_key",  # encrypt_key
+            "verify_me",  # verification_token
+            "OK",  # react_emoji
+            "y",  # send_progress
+            "n",  # send_tool_hints
+            "n",  # allow_remote_admin_commands
         ]
     )
     result = runner.invoke(app, ["init", "--workspace", str(workspace)], input=user_input)
@@ -106,26 +106,28 @@ def test_ohmo_config_interactive_can_restart_gateway(tmp_path: Path, monkeypatch
     runner.invoke(app, ["init", "--workspace", str(workspace), "--no-interactive"])
     monkeypatch.setattr("sys.stdin.isatty", lambda: True)
     monkeypatch.setattr("sys.stdout.isatty", lambda: True)
-    monkeypatch.setattr("ohmo.cli.gateway_status", lambda cwd, workspace: type("State", (), {"running": True})())
+    monkeypatch.setattr(
+        "ohmo.cli.gateway_status", lambda cwd, workspace: type("State", (), {"running": True})()
+    )
     monkeypatch.setattr("ohmo.cli.stop_gateway_process", lambda cwd, workspace: True)
     monkeypatch.setattr("ohmo.cli.start_gateway_process", lambda cwd, workspace: 4321)
     user_input = "\n".join(
         [
-            "4",          # provider profile -> codex
-            "n",          # telegram
-            "n",          # slack
-            "n",          # discord
-            "y",          # feishu
-            "*",          # allow_from
-            "cli_app",    # app_id
-            "cli_secret", # app_secret
-            "",           # encrypt_key
+            "4",  # provider profile -> codex
+            "n",  # telegram
+            "n",  # slack
+            "n",  # discord
+            "y",  # feishu
+            "*",  # allow_from
+            "cli_app",  # app_id
+            "cli_secret",  # app_secret
+            "",  # encrypt_key
             "verify_me",  # verification_token
-            "OK",         # react_emoji
-            "y",          # send_progress
-            "y",          # send_tool_hints
-            "n",          # allow_remote_admin_commands
-            "y",          # restart gateway
+            "OK",  # react_emoji
+            "y",  # send_progress
+            "y",  # send_tool_hints
+            "n",  # allow_remote_admin_commands
+            "y",  # restart gateway
         ]
     )
     result = runner.invoke(app, ["config", "--workspace", str(workspace)], input=user_input)
@@ -155,7 +157,9 @@ def test_ohmo_config_keeps_existing_channel_when_not_reconfigured(tmp_path: Path
 
     monkeypatch.setattr("sys.stdin.isatty", lambda: True)
     monkeypatch.setattr("sys.stdout.isatty", lambda: True)
-    monkeypatch.setattr("ohmo.cli.gateway_status", lambda cwd, workspace: type("State", (), {"running": False})())
+    monkeypatch.setattr(
+        "ohmo.cli.gateway_status", lambda cwd, workspace: type("State", (), {"running": False})()
+    )
     user_input = "\n".join(
         [
             "4",  # provider profile -> codex

@@ -46,7 +46,9 @@ class GlobTool(BaseTool):
 
         return await self._execute_via_shell(arguments, workspace)
 
-    async def _execute_via_shell(self, arguments: GlobToolInput, workspace: Workspace) -> ToolResult:
+    async def _execute_via_shell(
+        self, arguments: GlobToolInput, workspace: Workspace
+    ) -> ToolResult:
         root = arguments.root or workspace.cwd
         result = await workspace.run_shell(
             f"find {_sq(root)} -path {_sq(root + '/' + arguments.pattern)} "
@@ -57,7 +59,7 @@ class GlobTool(BaseTool):
         if not lines:
             return ToolResult(output="(no matches)")
         prefix = root.rstrip("/") + "/"
-        relative = [ln[len(prefix):] if ln.startswith(prefix) else ln for ln in lines]
+        relative = [ln[len(prefix) :] if ln.startswith(prefix) else ln for ln in lines]
         return ToolResult(output="\n".join(relative))
 
 

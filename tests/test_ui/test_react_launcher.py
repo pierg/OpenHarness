@@ -88,9 +88,11 @@ async def test_run_task_worker_reads_one_shot_json_line(monkeypatch):
 
     class _FakeStdin:
         def __init__(self):
-            self._lines = iter([
-                '{"text":"follow up from coordinator","from":"coordinator"}\n',
-            ])
+            self._lines = iter(
+                [
+                    '{"text":"follow up from coordinator","from":"coordinator"}\n',
+                ]
+            )
 
         def readline(self):
             return next(self._lines, "")
@@ -109,7 +111,9 @@ async def test_run_task_worker_reads_one_shot_json_line(monkeypatch):
             mcp_summary=lambda: "",
             app_state=SimpleNamespace(set=lambda **_kwargs: None),
             mcp_manager=SimpleNamespace(close=lambda: None, list_statuses=lambda: []),
-            hook_executor=SimpleNamespace(execute=lambda *_args, **_kwargs: None, update_registry=lambda *_a, **_k: None),
+            hook_executor=SimpleNamespace(
+                execute=lambda *_args, **_kwargs: None, update_registry=lambda *_a, **_k: None
+            ),
             commands=SimpleNamespace(lookup=lambda _line: None),
             session_backend=SimpleNamespace(save_snapshot=lambda **_kwargs: None),
             enforce_max_turns=False,
