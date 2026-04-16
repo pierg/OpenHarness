@@ -50,6 +50,13 @@ class AgentConfig(BaseModel):
     max_tokens: int = 4096
     tools: tuple[str, ...] = DEFAULT_TOOL_NAMES
 
+    # Free-form tags naming the components active on this agent (e.g.
+    # "loop-guard", "web-tools"). No validation: this is just metadata
+    # that travels with the resolved config into leg/agent.resolved.yaml
+    # so trial artifacts can be grouped after the fact. The source of
+    # truth for what each tag means lives in lab/components.md.
+    components: tuple[str, ...] = ()
+
     definition: AgentDefinitionMetadata | None = None
     prompts: dict[str, str] = Field(default_factory=dict)
 

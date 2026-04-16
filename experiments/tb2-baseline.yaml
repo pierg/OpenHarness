@@ -3,8 +3,8 @@ dataset: terminal-bench@2.0
 
 defaults:
   model: gemini-2.0-flash
-  max_turns: 30
-  max_tokens: 8192
+  max_turns: 60
+  max_tokens: 16384
   n_concurrent: 1
   n_attempts: 1
 
@@ -15,6 +15,7 @@ task_filter:
 agents:
   - default
   - planner_executor
+  # - planner_executor_critic
   # - reflection
   # - react
 
@@ -32,5 +33,5 @@ profiles:
   fast:
     defaults:
       model: gemini-2.5-flash
-      max_turns: 15
-      max_tokens: 4096
+      max_turns: 30
+      max_tokens: 8192

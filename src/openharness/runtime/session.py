@@ -18,6 +18,7 @@ from openharness.api.provider import detect_provider
 from openharness.config import load_settings
 from openharness.config.settings import Settings
 from openharness.engine.cost_tracker import CostTracker
+from openharness.engine.loop_guard import LoopGuardConfig, LoopGuardState
 from openharness.engine.messages import ConversationMessage
 from openharness.engine.query import QueryContext
 from openharness.engine.stream_events import (
@@ -186,7 +187,8 @@ class AgentRuntime:
                 )
 
             conv = self.create_conversation(config, task, extra or None)
-            text = await conv.run_to_completion()
+            loop_guard = LoopGuardState(config=LoopGuardConfig())
+            text = await conv.run_to_completion(loop_guard=loop_guard)
 
             if output_type is not None:
                 parsed = _parse_structured_output(text, output_type)

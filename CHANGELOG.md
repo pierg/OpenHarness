@@ -6,6 +6,18 @@ The format is based on Keep a Changelog, and this project currently tracks chang
 
 ## [Unreleased]
 
+### Agents
+
+Small well-understood agent improvements live here in the changelog.
+Longer-running work (ideas, experiments, validated components) is
+tracked in [`lab/`](lab/) — three append-only markdown files for
+ideas, experiments, and components.
+
+- `AgentConfig` gained a `components: tuple[str, ...]` field (plain metadata, no validation). It is persisted into each run's `agent.resolved.yaml` so trial artifacts list the active components and outcomes can be grouped by component set after the fact.
+- Planner system prompt (`planner_executor`, `planner_executor_critic`) tightened with a strict output schema (Observations / Assumptions / Steps / Success Criteria) and explicit bans on pseudo-tool-call code fences, eliminating the `tool_code` hallucinations we saw on Gemini.
+- Default, planner, executor, and critic system prompts gained an onboarding protocol (pwd/ls/README before editing), a failure protocol (hypothesis-before-retry, no duplicate commands), a verification protocol (run a concrete check before declaring done), and output-compaction guidance (head/tail/wc for large outputs).
+- `lab/ideas.md`, `lab/experiments.md`, `lab/components.md` scaffold the iteration workflow: ideas start in `ideas.md`, move through a git-worktree experiment logged in `experiments.md`, and if validated graduate into `components.md`.
+
 ### Upstream Integration
 
 - Integrated upstream `HKUDS/OpenHarness` `main` through `9caf700` (`2026-04-15`), covering secure default channel allowlists, profile materialization for base_url resolution, and openai_compat format support.
@@ -29,6 +41,8 @@ The format is based on Keep a Changelog, and this project currently tracks chang
 
 ### Fixed
 
+- Gemini API client now captures `thought_signature` from the correct `google.genai.types.Part` field (not `FunctionCall`), handles thought-only parts, and echoes the signature back on outgoing parts. `TextBlock` / `ToolUseBlock` store the signature as `bytes` with base64 JSON serialization, fixing `400 Function call is missing a thought_signature` mid-conversation and `UnicodeDecodeError` on JSON round-trips.
+- OpenHarness-authored run artifacts (`run.json`, `experiment.json`, `leg.json`, `result.portable.json`) now store paths relative to the experiment root, so runs produced on one machine can be analyzed on another without path rewriting.
 - `todo_write` tool now updates an existing unchecked item in-place when `checked=True` instead of appending a duplicate `[x]` line.
 - React TUI spinner now stays visible throughout the entire agent turn.
 - Skill loader now uses `yaml.safe_load` to parse SKILL.md frontmatter.

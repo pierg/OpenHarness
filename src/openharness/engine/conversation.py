@@ -16,10 +16,12 @@ from __future__ import annotations
 
 from typing import Any, Awaitable, Callable
 
+from openharness.engine.loop_guard import LoopGuardState, inspect_turn
 from openharness.engine.messages import ConversationMessage
 from openharness.engine.query import QueryContext, TurnResult, run_single_turn
 from openharness.engine.stream_events import (
     AssistantTurnComplete,
+    StatusEvent,
     ToolExecutionCompleted,
     ToolExecutionStarted,
 )
@@ -112,6 +114,8 @@ class Conversation:
     async def run_to_completion(
         self,
         on_turn_complete: OnTurnComplete | None = None,
+        *,
+        loop_guard: LoopGuardState | None = None,
     ) -> str:
         """Run the agentic loop until done.
 
@@ -120,6 +124,10 @@ class Conversation:
                 The callback receives the ``TurnResult`` and this
                 ``Conversation`` instance — it can call ``inject()`` to
                 add messages or set ``_is_complete`` to force-stop.
+            loop_guard: Optional loop-guard state. When provided, the guard
+                inspects each completed turn and — if it detects an empty
+                turn or an identical-tool-call loop — injects a short
+                steering user message to nudge the model back on track.
 
         Can be called again after ``inject()`` to continue the conversation.
         """
@@ -131,6 +139,19 @@ class Conversation:
                 result = await self.step()
                 if on_turn_complete is not None:
                     await on_turn_complete(result, self)
+                if loop_guard is not None:
+                    nudge = inspect_turn(loop_guard, result)
+                    if nudge is not None:
+                        self._log_event(
+                            StatusEvent(
+                                message=(
+                                    "loop_guard: injecting steering message "
+                                    f"(recoveries={loop_guard.recoveries_used}/"
+                                    f"{loop_guard.config.max_recoveries})"
+                                )
+                            )
+                        )
+                        self.inject(nudge)
         finally:
             new_messages = self._messages[self._logged_up_to :]
             self._log_messages(new_messages)

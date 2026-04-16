@@ -284,4 +284,6 @@ async def test_agent_tool_projects_yaml_definition_into_spawn_config(tmp_path: P
         "edit_file",
         "glob",
         "grep",
+        "web_fetch",
+        "web_search",
     }
