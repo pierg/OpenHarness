@@ -32,8 +32,11 @@ def get_user_agent_configs_dir() -> Path:
 
 
 def get_project_agent_configs_dir(cwd: str | Path) -> Path:
-    """Return the project-level YAML agent config directory."""
-    return get_project_config_dir(cwd) / "agent_configs"
+    """Return the project-level YAML agent config directory.
+
+    Read-only lookup: does not create ``.openharness/`` on disk.
+    """
+    return get_project_config_dir(cwd, create=False) / "agent_configs"
 
 
 def load_agent_configs_dir(

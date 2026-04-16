@@ -19,6 +19,7 @@ class Leg(BaseModel):
     n_concurrent: int
     n_attempts: int
     harbor_run_id: str  # = _safe_id(instance_id + "-" + leg_id)
+    overrides_env: dict[str, str] = {}
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
@@ -70,14 +71,19 @@ def plan_experiment(
     instance_id: str,
     cwd: str | Path | None = None,
 ) -> ExperimentPlan:
-    """Expand a declarative experiment into concrete execution legs."""
+    """Expand a declarative experiment into concrete execution legs.
+
+    *cwd* is the project root used to resolve user/project-level agent
+    catalogs; the experiment output directory is intentionally NOT a good
+    default because we do not want to create ``.openharness/`` inside it.
+    """
     legs: list[Leg] = []
+    catalog_cwd: str | Path | None = cwd if cwd is not None else Path.cwd()
 
     for agent_spec in spec.agents:
         leg_id = agent_spec.alias or agent_spec.id
 
-        # Resolve from catalog
-        catalog_item = get_catalog_agent_config(agent_spec.id, cwd)
+        catalog_item = get_catalog_agent_config(agent_spec.id, catalog_cwd)
         if catalog_item is None:
             raise KeyError(f"Unknown agent config id: {agent_spec.id}")
 
@@ -88,6 +94,12 @@ def plan_experiment(
             agent_spec.overrides,
         )
 
+        overrides_env: dict[str, str] = {}
+        if spec.defaults.env:
+            overrides_env.update(spec.defaults.env)
+        if agent_spec.overrides.env:
+            overrides_env.update(agent_spec.overrides.env)
+
         legs.append(
             Leg(
                 leg_id=leg_id,
@@ -96,6 +108,7 @@ def plan_experiment(
                 n_concurrent=agent_spec.overrides.n_concurrent or spec.defaults.n_concurrent or 1,
                 n_attempts=agent_spec.overrides.n_attempts or spec.defaults.n_attempts or 1,
                 harbor_run_id=_safe_id(f"{instance_id}-{leg_id}"),
+                overrides_env=overrides_env,
             )
         )
 

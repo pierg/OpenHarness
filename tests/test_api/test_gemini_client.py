@@ -162,6 +162,101 @@ async def test_stream_tool_call_in_complete():
     assert complete.message.tool_uses[0].name == "bash"
 
 
+async def test_stream_captures_thought_signature_on_function_call_part():
+    """Regression: thought_signature lives on Part, not on FunctionCall.
+
+    Previously, the client read ``part.function_call.thought_signature`` which
+    always returned ``None`` on real responses, causing Gemini to reject the
+    follow-up turn with ``Function call is missing a thought_signature``.
+    """
+    client = _make_client()
+    chunk = _chunk(func_name="bash", func_args={"command": "ls"})
+    chunk.candidates[0].content.parts[0].thought_signature = b"\x01\x02\x03"
+    _setup_stream(client, chunk)
+
+    events = [
+        ev
+        async for ev in client.stream_message(
+            ApiMessageRequest(
+                model="gemini-2.0-flash", messages=[ConversationMessage.from_user_text("hi")]
+            )
+        )
+    ]
+    complete = next(e for e in events if isinstance(e, ApiMessageCompleteEvent))
+    assert complete.message.tool_uses[0].thought_signature == b"\x01\x02\x03"
+
+
+async def test_stream_promotes_pending_signature_to_next_function_call():
+    """A thought-only part's signature must carry over to the next function_call."""
+    client = _make_client()
+    # Part 1: thought-only (no text, no function_call, but has a signature).
+    thought_part = MagicMock()
+    thought_part.text = None
+    thought_part.function_call = None
+    thought_part.thought_signature = b"SIG"
+    thought_candidate = MagicMock()
+    thought_candidate.content.parts = [thought_part]
+    thought_candidate.finish_reason = None
+    thought_chunk = MagicMock()
+    thought_chunk.candidates = [thought_candidate]
+    thought_chunk.usage_metadata = None
+    # Part 2: function_call with NO signature of its own.
+    fc_chunk = _chunk(func_name="bash", func_args={"command": "ls"})
+    _setup_stream(client, thought_chunk, fc_chunk)
+
+    events = [
+        ev
+        async for ev in client.stream_message(
+            ApiMessageRequest(
+                model="gemini-2.0-flash", messages=[ConversationMessage.from_user_text("hi")]
+            )
+        )
+    ]
+    complete = next(e for e in events if isinstance(e, ApiMessageCompleteEvent))
+    assert complete.message.tool_uses[0].thought_signature == b"SIG"
+
+
+def test_tool_use_block_thought_signature_json_roundtrip():
+    """Opaque bytes survive a JSON dump/load round-trip via base64."""
+    import json as _json
+
+    from openharness.engine.messages import ToolUseBlock
+
+    block = ToolUseBlock(id="c1", name="bash", input={}, thought_signature=b"\x00\x01\xfe\xff")
+    dumped = _json.dumps(block.model_dump(mode="json"))
+    restored = ToolUseBlock.model_validate_json(dumped)
+    assert restored.thought_signature == b"\x00\x01\xfe\xff"
+
+
+def test_build_contents_echoes_thought_signature_on_part_not_function_call():
+    """Regression: signature goes on ``Part(...)``, not on ``FunctionCall(...)``.
+
+    The real google-genai SDK forbids ``thought_signature`` as a FunctionCall
+    field (pydantic ValidationError), so putting it on the wrong side would
+    raise at send time.
+    """
+    types = MagicMock()
+    messages = [
+        ConversationMessage(
+            role="assistant",
+            content=[
+                ToolUseBlock(
+                    id="c1",
+                    name="bash",
+                    input={},
+                    thought_signature=b"\xde\xad\xbe\xef",
+                )
+            ],
+        )
+    ]
+    _build_gemini_contents(messages, types)
+    # ``thought_signature`` must appear in the Part(...) call kwargs, not in
+    # the FunctionCall(...) call kwargs.
+    assert "thought_signature" not in types.FunctionCall.call_args.kwargs
+    part_kwargs = types.Part.call_args.kwargs
+    assert part_kwargs.get("thought_signature") == b"\xde\xad\xbe\xef"
+
+
 # ---------------------------------------------------------------------------
 # _build_gemini_tools
 # ---------------------------------------------------------------------------

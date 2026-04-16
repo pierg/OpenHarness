@@ -30,14 +30,20 @@ def resolve_rel(root: str | Path, rel: RelPath | str | Path) -> Path:
             rel_path.relative_to(root_path)
             return rel_path
         except ValueError:
-            # If it's absolute and not under root, it's invalid.
-            # We assume it's just a misplaced absolute path that we try to use.
             raise ValueError(f"Absolute path {rel_path} is not under root {root_path}")
     return (root_path / rel_path).resolve()
 
 
 def make_rel(root: str | Path, path: str | Path) -> Path:
-    """Make an absolute path relative to the experiment root."""
+    """Make an absolute path relative to *root*. Raises if *path* is outside *root*."""
     root_path = Path(root).expanduser().resolve()
     full_path = Path(path).expanduser().resolve()
     return full_path.relative_to(root_path)
+
+
+def try_make_rel(root: str | Path, path: str | Path) -> Path | None:
+    """Best-effort relative path; returns None if *path* is outside *root*."""
+    try:
+        return make_rel(root, path)
+    except ValueError:
+        return None

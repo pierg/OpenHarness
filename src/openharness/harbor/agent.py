@@ -72,10 +72,12 @@ class OpenHarnessHarborAgent(BaseAgent):
         **kwargs: object,
     ) -> None:
         del kwargs
+        # `run_root` is accepted for backwards compatibility but ignored:
+        # the agent derives `harbor_job_dir` from Harbor's own trial_dir.
+        del run_root
         self._remote_cwd = remote_cwd
         self._extra_env = dict(extra_env or {})
         self._run_id = run_id
-        self._run_root = str(run_root) if run_root is not None else None
         resolved_model_name = (
             model_name
             or self._extra_env.get("OPENHARNESS_MODEL")
@@ -136,7 +138,12 @@ class OpenHarnessHarborAgent(BaseAgent):
             resolved_model = self.model_name or resolved_settings.model
             trial_dir = self.logs_dir.parent
             job_run_id = self._run_id or os.environ.get("OPENHARNESS_RUN_ID")
-            job_run_root = self._run_root or os.environ.get("OPENHARNESS_RUN_ROOT")
+            # The Harbor job directory is the parent of the trial directory:
+            # <jobs_dir>/<job_name>/<trial_name>/  →  parent is <jobs_dir>/<job_name>/.
+            # This is the real directory Harbor owns, unlike the deprecated
+            # `run_root` kwarg which pointed at a synthetic <cwd>/runs/<job>
+            # path that no longer exists on disk.
+            harbor_job_dir = trial_dir.parent
 
             # The agent is running in self.logs_dir which is usually trial_dir/agent
             # We want OpenHarness artifacts to live alongside Harbor's trial artifacts
@@ -150,7 +157,7 @@ class OpenHarnessHarborAgent(BaseAgent):
                 metadata={
                     "harbor_logs_dir": str(self.logs_dir),
                     "harbor_job_id": job_run_id,
-                    "harbor_job_dir": job_run_root,
+                    "harbor_job_dir": str(harbor_job_dir),
                 },
             )
             messages_path = run_context.artifacts.messages_path

@@ -8,7 +8,38 @@ from pathlib import Path
 from typing import Any, Annotated, Literal
 from uuid import uuid4
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, PlainSerializer, PlainValidator, field_validator
+
+
+def _validate_thought_signature(value: Any) -> bytes | None:
+    """Accept raw bytes, base64 strings, or None."""
+    if value is None:
+        return None
+    if isinstance(value, bytes):
+        return value
+    if isinstance(value, str):
+        try:
+            return base64.b64decode(value, validate=True)
+        except Exception as exc:
+            raise ValueError(f"invalid base64 thought_signature: {exc}") from exc
+    raise TypeError(
+        f"thought_signature must be bytes, base64 str, or None; got {type(value).__name__}"
+    )
+
+
+def _serialize_thought_signature(value: bytes | None) -> str | None:
+    if value is None:
+        return None
+    return base64.b64encode(value).decode("ascii")
+
+
+# Opaque Gemini "thought signature" that must be echoed back on subsequent turns.
+# Raw bytes in memory, base64 in JSON serialization.
+ThoughtSignature = Annotated[
+    bytes | None,
+    PlainValidator(_validate_thought_signature),
+    PlainSerializer(_serialize_thought_signature, when_used="json"),
+]
 
 
 class TextBlock(BaseModel):
@@ -16,7 +47,11 @@ class TextBlock(BaseModel):
 
     type: Literal["text"] = "text"
     text: str
-    thought_signature: str | None = None
+    # Gemini thought signatures are opaque byte strings that must be echoed back
+    # verbatim on subsequent turns. Stored as raw ``bytes`` in memory; JSON-dumped
+    # as base64 so we get a portable round-trip through messages.jsonl (the raw
+    # bytes are typically not valid UTF-8).
+    thought_signature: ThoughtSignature = None
 
 
 class ImageBlock(BaseModel):
@@ -45,7 +80,8 @@ class ToolUseBlock(BaseModel):
     id: str = Field(default_factory=lambda: f"toolu_{uuid4().hex}")
     name: str
     input: dict[str, Any] = Field(default_factory=dict)
-    thought_signature: str | None = None
+    # Gemini thought signatures are opaque byte strings (see TextBlock above).
+    thought_signature: ThoughtSignature = None
 
 
 class ToolResultBlock(BaseModel):

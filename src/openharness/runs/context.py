@@ -192,7 +192,45 @@ class RunContext:
         log.info("Trace URL:   %s", self.resolved_trace_url())
 
     def as_manifest(self) -> dict[str, Any]:
+        import os
+
+        run_dir = self.run_dir.resolve()
+        anchor_root = run_dir.parents[4] if len(run_dir.parents) >= 5 else None
+
+        def _rel(path: Path | None) -> str | None:
+            if path is None:
+                return None
+            resolved = path.resolve()
+            if resolved == run_dir:
+                return "."
+            try:
+                return resolved.relative_to(run_dir).as_posix()
+            except ValueError:
+                pass
+            # Fall back to a ``..``-prefixed path when the target is still on
+            # the same logical tree (same anchor root, e.g. the experiment
+            # root). Otherwise keep the absolute path so callers can still
+            # resolve it.
+            if anchor_root is not None:
+                try:
+                    resolved.relative_to(anchor_root)
+                    return os.path.relpath(resolved, run_dir).replace(os.sep, "/")
+                except ValueError:
+                    pass
+            return str(resolved)
+
+        def _rel_meta_path(value: Any) -> Any:
+            if isinstance(value, (str, Path)):
+                path = Path(value)
+                if path.is_absolute():
+                    rel = _rel(path)
+                    return rel if rel is not None else str(path)
+            return value
+
+        metadata = {key: _rel_meta_path(value) for key, value in self.metadata.items()}
+
         manifest: dict[str, Any] = {
+            "schema_version": 1,
             "run_id": self.run_id,
             "interface": self.interface,
             "cwd": self.cwd,
@@ -202,19 +240,18 @@ class RunContext:
             "error": self.error,
             "trace_id": self.resolved_trace_id(),
             "trace_url": self.resolved_trace_url(),
-            "artifacts": {
-                "run_dir": str(self.run_dir),
-                "manifest_path": str(self.manifest_path),
-                "messages_path": str(self.artifacts.messages_path),
-                "events_path": str(self.artifacts.events_path),
-                "results_path": str(self.artifacts.results_path),
-                "metrics_path": str(self.artifacts.metrics_path),
-                "logs_dir": str(self.artifacts.logs_dir) if self.artifacts.logs_dir else None,
-                "workspace_dir": (
-                    str(self.artifacts.workspace_dir) if self.artifacts.workspace_dir else None
-                ),
+            "paths": {
+                "anchor": "run_dir",
+                "run_dir": ".",
+                "manifest": _rel(self.manifest_path),
+                "messages": _rel(self.artifacts.messages_path),
+                "events": _rel(self.artifacts.events_path),
+                "results": _rel(self.artifacts.results_path),
+                "metrics": _rel(self.artifacts.metrics_path),
+                "logs": _rel(self.artifacts.logs_dir),
+                "workspace": _rel(self.artifacts.workspace_dir),
             },
-            "metadata": self.metadata,
+            "metadata": metadata,
         }
         return manifest
 

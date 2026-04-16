@@ -1,7 +1,8 @@
 """Command line interface for OpenHarness experiments."""
 
 import asyncio
-from datetime import datetime
+import logging
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Literal
 
@@ -9,13 +10,20 @@ import typer
 
 from openharness.experiments.manifest import LegStatus
 from openharness.experiments.plan import plan_experiment
-from openharness.experiments.results import collect_results, summarize_results, write_results
+from openharness.experiments.results import (
+    ResultsSummary,
+    collect_results,
+    summarize_results,
+    write_results,
+)
 from openharness.experiments.runner import run_experiment
-from openharness.experiments.spec import load_experiment_spec
+from openharness.experiments.spec import load_experiment_spec, load_experiment_spec_full
 from openharness.experiments.logging import setup_experiment_logging
 from openharness.observability.langfuse import langfuse_agent_env_for_docker
 
 app = typer.Typer(help="Run and manage OpenHarness experiments.")
+
+log = logging.getLogger(__name__)
 
 
 @app.command()
@@ -43,10 +51,11 @@ def run(
     ),
 ):
     """Run an experiment from a declarative YAML spec."""
-    experiment_spec = load_experiment_spec(spec, profile=profile)
+    loaded = load_experiment_spec_full(spec, profile=profile)
+    experiment_spec = loaded.spec
 
     if instance_id is None:
-        timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+        timestamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
         prof_suffix = f"-{profile}" if profile else ""
         instance_id = f"{experiment_spec.id}{prof_suffix}-{timestamp}"
 
@@ -60,12 +69,20 @@ def run(
     if fail_fast and not experiment_spec.fail_fast:
         experiment_spec = experiment_spec.model_copy(update={"fail_fast": True})
 
-    typer.echo(f"Starting experiment {experiment_spec.id} (Instance: {instance_id})")
-    typer.echo(f"Root: {experiment_root}")
-    typer.echo(f"Agents: {', '.join(a.alias or a.id for a in experiment_spec.agents)}")
-    typer.echo(f"Leg concurrency: {experiment_spec.leg_concurrency}")
-    typer.echo(f"Trials per agent: {experiment_spec.task_filter.n_tasks if experiment_spec.task_filter.n_tasks is not None else 'all'} (concurrent: {experiment_spec.defaults.n_concurrent or 1})")
-    typer.echo("-" * 40)
+    agents_list = ", ".join(a.alias or a.id for a in experiment_spec.agents)
+    n_tasks_str = (
+        experiment_spec.task_filter.n_tasks
+        if experiment_spec.task_filter.n_tasks is not None
+        else "all"
+    )
+    log.info(
+        "Starting experiment %s instance=%s agents=[%s] leg_concurrency=%s trials=%s",
+        experiment_spec.id,
+        instance_id,
+        agents_list,
+        experiment_spec.leg_concurrency,
+        n_tasks_str,
+    )
 
     manifest = asyncio.run(
         run_experiment(
@@ -76,8 +93,14 @@ def run(
             dry_run=dry_run,
             resume=resume,
             emit_results=emit_results,
+            loaded_spec=loaded,
         )
     )
+
+    if emit_results:
+        rows = collect_results(manifest, experiment_root=experiment_root)
+        summary = summarize_results(rows)
+        _print_summary(experiment_spec.id, instance_id, experiment_root, summary, manifest)
 
     if any(leg.status == LegStatus.FAILED for leg in manifest.legs):
         raise typer.Exit(code=1)
@@ -102,7 +125,15 @@ def status(
     typer.echo(f"Updated: {manifest.updated_at.isoformat()}")
     typer.echo("\nLegs:")
     for leg in manifest.legs:
-        typer.echo(f"  - {leg.leg_id}: {leg.status.value.upper()}")
+        status_str = leg.status.value.upper()
+        result_str = f" [{leg.result_status.value}]" if leg.result_status is not None else ""
+        typer.echo(f"  - {leg.leg_id}: {status_str}{result_str}")
+        if leg.aggregate is not None:
+            agg = leg.aggregate
+            typer.echo(
+                f"      Trials: {agg.n_trials} | Passed: {agg.n_passed} | "
+                f"Failed: {agg.n_failed} | Errored: {agg.n_errored}"
+            )
         if leg.error:
             typer.echo(f"      Error: {leg.error}")
 
@@ -145,6 +176,63 @@ def plan(
     plan_obj = plan_experiment(experiment_spec, instance_id="plan-dry-run")
 
     typer.echo(plan_obj.model_dump_json(indent=2))
+
+
+def _print_summary(
+    experiment_id: str,
+    instance_id: str,
+    experiment_root: Path,
+    summary: ResultsSummary,
+    manifest,
+) -> None:
+    typer.echo("")
+    typer.echo("=" * 72)
+    typer.echo(f"Experiment {experiment_id} (instance: {instance_id}) complete.")
+    typer.echo(f"Root: {experiment_root}")
+    typer.echo("=" * 72)
+
+    if not summary.by_leg:
+        typer.echo("No trials recorded.")
+        return
+
+    for leg_id, stats in summary.by_leg.items():
+        leg_record = next((leg for leg in manifest.legs if leg.leg_id == leg_id), None)
+        result_status = (
+            leg_record.result_status.value if leg_record and leg_record.result_status else "unknown"
+        )
+        pass_rate = f"{stats.pass_rate * 100:.1f}%" if stats.pass_rate is not None else "n/a"
+        mean_score = f"{stats.mean_score:.3f}" if stats.mean_score is not None else "n/a"
+        phase_str = (
+            ", ".join(f"{k}={v}" for k, v in sorted(stats.n_errored_by_phase.items()))
+            if stats.n_errored_by_phase
+            else "-"
+        )
+        typer.echo(
+            f"  {leg_id:32s} result={result_status:11s} "
+            f"trials={stats.n_trials:3d} pass={stats.n_passed:3d} "
+            f"fail={stats.n_failed:3d} err={stats.n_errored:3d} "
+            f"(phases: {phase_str})"
+        )
+        typer.echo(
+            f"    pass_rate={pass_rate} mean_score={mean_score} "
+            f"tokens={stats.total_tokens} cost_usd={stats.total_cost_usd:.4f}"
+        )
+
+    totals = _totals(summary)
+    typer.echo("-" * 72)
+    typer.echo(
+        f"  TOTAL{'':27s} trials={totals[0]:3d} pass={totals[1]:3d} "
+        f"fail={totals[2]:3d} err={totals[3]:3d}"
+    )
+    typer.echo(f"\nSummary written to {experiment_root / 'results' / 'summary.md'}")
+
+
+def _totals(summary: ResultsSummary) -> tuple[int, int, int, int]:
+    n_trials = sum(s.n_trials for s in summary.by_leg.values())
+    n_passed = sum(s.n_passed for s in summary.by_leg.values())
+    n_failed = sum(s.n_failed for s in summary.by_leg.values())
+    n_errored = sum(s.n_errored for s in summary.by_leg.values())
+    return n_trials, n_passed, n_failed, n_errored
 
 
 if __name__ == "__main__":

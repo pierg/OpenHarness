@@ -66,7 +66,9 @@ def test_build_harbor_run_command_maps_agent_task_and_environment_specs() -> Non
     assert 'remote_cwd="/app"' in command
     assert any(item.startswith("agent_config_yaml=") for item in command)
     assert 'run_id="job-1"' in command
-    assert any("run_root=" in arg and "job-1" in arg for arg in command)
+    # `run_root` is no longer injected: the agent derives its harbor job dir
+    # from Harbor's trial_dir at runtime instead.
+    assert not any("run_root=" in arg for arg in command)
     assert "--agent-env" not in command
 
 

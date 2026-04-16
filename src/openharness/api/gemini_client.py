@@ -132,8 +132,13 @@ class GeminiApiClient:
         )
 
         full_text = ""
-        full_text_signature: str | None = None
+        full_text_signature: bytes | None = None
         tool_calls: list[dict[str, Any]] = []
+        # Gemini may emit a standalone "thought" part (thought=True, no text,
+        # no function_call) carrying only a ``thought_signature``. That signature
+        # must be echoed back on the following function_call/text part, otherwise
+        # the API will return a 400 ("Function call is missing a thought_signature").
+        pending_signature: bytes | None = None
         input_tokens = 0
         output_tokens = 0
 
@@ -150,20 +155,35 @@ class GeminiApiClient:
                 continue
 
             for part in candidate.content.parts:
+                # ``thought_signature`` is a field on ``Part`` itself, NOT on
+                # ``part.function_call``. Capture it before routing by part kind.
+                part_sig = getattr(part, "thought_signature", None)
                 if part.text:
                     full_text += part.text
-                    sig = getattr(part, "thought_signature", None)
-                    if sig:
-                        full_text_signature = sig
-                        log.debug("Captured Gemini thought signature for text: %s", sig)
+                    if part_sig:
+                        full_text_signature = part_sig
+                        log.debug("Captured Gemini thought signature for text: %s", part_sig)
+                    elif pending_signature is not None:
+                        full_text_signature = pending_signature
+                        pending_signature = None
                     yield ApiTextDeltaEvent(text=part.text)
                 elif part.function_call:
                     args = dict(part.function_call.args) if part.function_call.args else {}
-                    sig = getattr(part.function_call, "thought_signature", None)
-                    log.debug("Captured Gemini thought signature for FC %s: %s", part.function_call.name, sig)
-                    tool_calls.append(
-                        {"name": part.function_call.name, "args": args, "thought_signature": sig}
+                    fc_sig = part_sig if part_sig is not None else pending_signature
+                    pending_signature = None
+                    log.debug(
+                        "Captured Gemini thought signature for FC %s: %s",
+                        part.function_call.name,
+                        bool(fc_sig),
                     )
+                    tool_calls.append(
+                        {"name": part.function_call.name, "args": args, "thought_signature": fc_sig}
+                    )
+                elif part_sig is not None:
+                    # Thought-only part with no text / function_call; hold signature
+                    # for the next emitted block so we can echo it back later.
+                    log.debug("Captured Gemini thought-only signature (len=%d)", len(part_sig))
+                    pending_signature = part_sig
 
         final_content: list[TextBlock | ToolUseBlock] = []
         if full_text:
@@ -177,6 +197,13 @@ class GeminiApiClient:
                     thought_signature=tc["thought_signature"],
                 )
             )
+
+        # Attach any remaining pending signature to the first content block so
+        # it isn't lost on the roundtrip.
+        if pending_signature is not None and final_content:
+            head = final_content[0]
+            if head.thought_signature is None:
+                final_content[0] = head.model_copy(update={"thought_signature": pending_signature})
 
         yield ApiMessageCompleteEvent(
             message=ConversationMessage(role="assistant", content=final_content),
@@ -230,24 +257,30 @@ def _build_gemini_contents(messages: list[ConversationMessage], types: Any) -> l
         for block in msg.content:
             if isinstance(block, TextBlock):
                 if block.thought_signature:
-                    log.debug("Sending Gemini thought signature for text: %s", block.thought_signature)
+                    log.debug(
+                        "Sending Gemini thought signature for text: %s", block.thought_signature
+                    )
                     parts.append(
-                        types.Part(
-                            text=block.text, thought_signature=block.thought_signature
-                        )
+                        types.Part(text=block.text, thought_signature=block.thought_signature)
                     )
                 else:
                     parts.append(types.Part.from_text(text=block.text))
             elif isinstance(block, ToolUseBlock):
                 if block.thought_signature:
-                    log.debug("Sending Gemini thought signature for FC %s: %s", block.name, block.thought_signature)
+                    log.debug(
+                        "Sending Gemini thought signature for FC %s (len=%d)",
+                        block.name,
+                        len(block.thought_signature),
+                    )
+                    # ``thought_signature`` is a field on ``Part`` itself; it is
+                    # NOT a valid field on ``FunctionCall`` (pydantic rejects it).
                     parts.append(
                         types.Part(
                             function_call=types.FunctionCall(
                                 name=block.name,
                                 args=block.input,
-                                thought_signature=block.thought_signature,
-                            )
+                            ),
+                            thought_signature=block.thought_signature,
                         )
                     )
                 else:
@@ -255,15 +288,14 @@ def _build_gemini_contents(messages: list[ConversationMessage], types: Any) -> l
             elif isinstance(block, ToolResultBlock):
                 log.debug("Adding ToolResultBlock: tool_use_id=%s", block.tool_use_id)
                 func_name = tool_name_by_id.get(block.tool_use_id, block.tool_use_id)
-                
+
                 # Format the response in a dictionary.
                 response_dict = {"result": block.content}
-                
+
                 parts.append(
                     types.Part(
                         function_response=types.FunctionResponse(
-                            name=func_name,
-                            response=response_dict
+                            name=func_name, response=response_dict
                         )
                     )
                 )

@@ -54,7 +54,7 @@ class ExperimentSpec(BaseModel):
     fail_fast: bool = False
     leg_concurrency: int = Field(default=1, ge=1)
     profiles: dict[str, Any] = Field(default_factory=dict)
-    
+
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     @field_validator("agents", mode="before")
@@ -95,38 +95,61 @@ def _deep_merge(base: dict[str, Any], update: dict[str, Any]) -> dict[str, Any]:
             result[k] = v
     return result
 
-def load_experiment_spec(path: str | Path, profile: str | None = None) -> ExperimentSpec:
-    """Load an experiment YAML file, optionally merging a profile."""
-    path_obj = Path(path)
-    raw = yaml.safe_load(path_obj.read_text(encoding="utf-8"))
-    if not isinstance(raw, dict):
-        raise ValueError(f"Expected experiment YAML mapping, got {type(raw).__name__}")
-    
-    # Backwards compatibility translation
+
+class LoadedExperimentSpec(BaseModel):
+    """Wrapper returned when callers need both the verbatim source and the resolved spec."""
+
+    spec: ExperimentSpec
+    source_text: str
+    source_path: Path
+    profile: str | None = None
+
+    model_config = ConfigDict(arbitrary_types_allowed=True, frozen=True)
+
+
+def _coerce_raw(raw: dict[str, Any], *, default_id: str) -> dict[str, Any]:
     if "id" not in raw:
-        raw["id"] = path_obj.stem
-        
-    # Migrate old flat overrides to defaults
+        raw["id"] = default_id
+
     flat_overrides = {}
-    for key in ["model", "max_turns", "max_tokens", "n_concurrent", "n_attempts", "env"]:
+    for key in ("model", "max_turns", "max_tokens", "n_concurrent", "n_attempts", "env"):
         if key in raw:
             flat_overrides[key] = raw.pop(key)
     if flat_overrides and "defaults" not in raw:
         raw["defaults"] = flat_overrides
 
-    # Migrate old task fields
     task_fields = {}
-    for key in ["include_tasks", "exclude_tasks", "n_tasks"]:
+    for key in ("include_tasks", "exclude_tasks", "n_tasks"):
         if key in raw:
             task_fields[key] = raw.pop(key)
     if task_fields and "task_filter" not in raw:
         raw["task_filter"] = task_fields
 
+    return raw
+
+
+def load_experiment_spec_full(path: str | Path, profile: str | None = None) -> LoadedExperimentSpec:
+    """Load a spec and retain the verbatim YAML for ``config.source.yaml`` persistence."""
+    path_obj = Path(path)
+    source_text = path_obj.read_text(encoding="utf-8")
+    raw = yaml.safe_load(source_text)
+    if not isinstance(raw, dict):
+        raise ValueError(f"Expected experiment YAML mapping, got {type(raw).__name__}")
+
+    raw = _coerce_raw(raw, default_id=path_obj.stem)
+
     if profile:
         profiles = raw.get("profiles", {})
         if profile not in profiles:
             raise ValueError(f"Profile '{profile}' not found in {path_obj}")
-        # Merge the profile over the base raw dict
         raw = _deep_merge(raw, profiles[profile])
 
-    return ExperimentSpec.model_validate(raw)
+    spec = ExperimentSpec.model_validate(raw)
+    return LoadedExperimentSpec(
+        spec=spec, source_text=source_text, source_path=path_obj, profile=profile
+    )
+
+
+def load_experiment_spec(path: str | Path, profile: str | None = None) -> ExperimentSpec:
+    """Load an experiment YAML file, optionally merging a profile."""
+    return load_experiment_spec_full(path, profile=profile).spec

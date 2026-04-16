@@ -21,8 +21,15 @@ def run_harbor_agent(spec: HarborAgentRunSpec) -> HarborJobResult:
 
     from openharness.config.paths import get_project_runs_dir
 
-    job_dir = get_project_runs_dir(run_cwd) / job_id
-    jobs_dir = spec.job.jobs_dir or (job_dir / "harbor_jobs")
+    # Only touch the on-disk ``<cwd>/runs/<job_id>/`` layout when Harbor needs
+    # it for the fallback jobs_dir. When jobs_dir is explicit (experiments),
+    # avoid creating an empty sibling directory.
+    if spec.job.jobs_dir is not None:
+        jobs_dir = spec.job.jobs_dir
+        job_dir = jobs_dir.parent
+    else:
+        job_dir = get_project_runs_dir(run_cwd) / job_id
+        jobs_dir = job_dir / "harbor_jobs"
 
     log.debug("Harbor job starting: job_id=%s  job_dir=%s", job_id, job_dir)
 

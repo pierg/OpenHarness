@@ -5,26 +5,33 @@ from __future__ import annotations
 import asyncio
 import logging
 import traceback
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Mapping
 
 import yaml
-from rich.console import Console
 
 from openharness.experiments.backends import Backend, LegContext
 from openharness.experiments.backends.harbor import HarborBackend
 from openharness.experiments.manifest import (
     ExperimentManifest,
+    LegAggregate,
     LegRecord,
+    LegResultStatus,
     LegStatus,
+    TrialErrorPhase,
+    TrialRecord,
 )
 from openharness.experiments.paths import make_rel
 from openharness.experiments.plan import ExperimentPlan, Leg, plan_experiment
 from openharness.experiments.reproducibility import collect_reproducibility
-from openharness.experiments.spec import ExperimentSpec
+from openharness.experiments.spec import ExperimentSpec, LoadedExperimentSpec
 
 log = logging.getLogger(__name__)
+
+
+def _now_utc() -> datetime:
+    return datetime.now(timezone.utc)
 
 
 def _get_default_backend(spec: ExperimentSpec) -> Backend:
@@ -32,16 +39,23 @@ def _get_default_backend(spec: ExperimentSpec) -> Backend:
 
 
 def _initialize_experiment_tree(
-    experiment_root: Path, spec: ExperimentSpec, plan: ExperimentPlan
+    experiment_root: Path,
+    spec: ExperimentSpec,
+    plan: ExperimentPlan,
+    *,
+    loaded_spec: LoadedExperimentSpec | None,
 ) -> None:
     experiment_root.mkdir(parents=True, exist_ok=True)
 
     spec_path = experiment_root / "config.source.yaml"
     if not spec_path.exists():
-        spec_path.write_text(
-            yaml.safe_dump(spec.model_dump(mode="json", exclude_none=True), sort_keys=False),
-            encoding="utf-8",
-        )
+        if loaded_spec is not None:
+            spec_path.write_text(loaded_spec.source_text, encoding="utf-8")
+        else:
+            spec_path.write_text(
+                yaml.safe_dump(spec.model_dump(mode="json", exclude_none=True), sort_keys=False),
+                encoding="utf-8",
+            )
 
     for leg in plan.legs:
         (experiment_root / "legs" / leg.leg_id).mkdir(parents=True, exist_ok=True)
@@ -55,7 +69,7 @@ def _load_or_seed_manifest(experiment_root: Path, plan: ExperimentPlan) -> Exper
         except Exception as e:
             log.warning(f"Failed to load existing manifest: {e}. Starting fresh.")
 
-    now = datetime.now()
+    now = _now_utc()
 
     resolved_spec_path = experiment_root / "config.resolved.yaml"
     resolved_spec_path.write_text(
@@ -70,6 +84,7 @@ def _load_or_seed_manifest(experiment_root: Path, plan: ExperimentPlan) -> Exper
                 leg_id=leg.leg_id,
                 agent_id=leg.agent_id,
                 status=LegStatus.PENDING,
+                result_status=None,
                 started_at=None,
                 finished_at=None,
                 duration_sec=None,
@@ -77,6 +92,7 @@ def _load_or_seed_manifest(experiment_root: Path, plan: ExperimentPlan) -> Exper
                 harbor_result_path=None,
                 agent_config_path=None,
                 trials=(),
+                aggregate=None,
             )
         )
 
@@ -98,9 +114,67 @@ def _persist_manifest(manifest: ExperimentManifest, experiment_root: Path) -> No
     manifest_path.write_text(manifest.model_dump_json(indent=2) + "\n", encoding="utf-8")
 
 
+def _compute_aggregate(trials: tuple[TrialRecord, ...]) -> LegAggregate | None:
+    if not trials:
+        return None
+
+    n_passed = sum(1 for t in trials if t.passed)
+    n_errored = sum(1 for t in trials if t.error is not None)
+    n_failed = sum(1 for t in trials if not t.passed and t.error is None)
+
+    by_phase: dict[str, int] = {}
+    for t in trials:
+        if t.error is None:
+            continue
+        phase = t.error.phase.value if hasattr(t.error.phase, "value") else str(t.error.phase)
+        by_phase[phase] = by_phase.get(phase, 0) + 1
+
+    scores = [t.score for t in trials if t.score is not None]
+    mean_score = sum(scores) / len(scores) if scores else None
+
+    total_input = sum(t.input_tokens or 0 for t in trials)
+    total_output = sum(t.output_tokens or 0 for t in trials)
+    total_tokens = sum(t.total_tokens or 0 for t in trials)
+    total_cost = round(sum(t.cost_usd or 0.0 for t in trials), 10)
+
+    return LegAggregate(
+        n_trials=len(trials),
+        n_passed=n_passed,
+        n_failed=n_failed,
+        n_errored=n_errored,
+        n_errored_by_phase=by_phase,
+        mean_score=mean_score,
+        total_input_tokens=total_input,
+        total_output_tokens=total_output,
+        total_tokens=total_tokens,
+        total_cost_usd=total_cost,
+    )
+
+
+def _compute_result_status(
+    trials: tuple[TrialRecord, ...], aggregate: LegAggregate | None
+) -> LegResultStatus | None:
+    if aggregate is None or aggregate.n_trials == 0:
+        return LegResultStatus.NO_TRIALS
+    if aggregate.n_passed == aggregate.n_trials:
+        return LegResultStatus.ALL_PASSED
+    if aggregate.n_errored == aggregate.n_trials:
+        return LegResultStatus.ALL_ERRORED
+    if aggregate.n_passed == 0:
+        return LegResultStatus.ALL_FAILED
+    return LegResultStatus.PARTIAL
+
+
+def _finalize_leg_record(record: LegRecord) -> LegRecord:
+    aggregate = _compute_aggregate(record.trials)
+    result_status = _compute_result_status(record.trials, aggregate)
+    return record.model_copy(update={"aggregate": aggregate, "result_status": result_status})
+
+
 def _upsert_leg(
     manifest: ExperimentManifest, record: LegRecord, experiment_root: Path
 ) -> ExperimentManifest:
+    record = _finalize_leg_record(record)
     updated_legs = []
     for existing in manifest.legs:
         if existing.leg_id == record.leg_id:
@@ -114,7 +188,7 @@ def _upsert_leg(
     return manifest.model_copy(
         update={
             "legs": tuple(updated_legs),
-            "updated_at": datetime.now(),
+            "updated_at": _now_utc(),
         }
     )
 
@@ -129,17 +203,17 @@ async def run_experiment(
     resume: bool = False,
     backend: Backend | None = None,
     emit_results: bool = True,
+    loaded_spec: LoadedExperimentSpec | None = None,
 ) -> ExperimentManifest:
-    plan = plan_experiment(spec, instance_id=instance_id, cwd=experiment_root)
+    plan = plan_experiment(spec, instance_id=instance_id)
     backend = backend or _get_default_backend(spec)
     env = env or {}
 
-    _initialize_experiment_tree(experiment_root, spec, plan)
+    _initialize_experiment_tree(experiment_root, spec, plan, loaded_spec=loaded_spec)
     manifest = _load_or_seed_manifest(experiment_root, plan)
     _persist_manifest(manifest, experiment_root)
 
     semaphore = asyncio.Semaphore(spec.leg_concurrency)
-    console = Console()
 
     async def run_one(leg: Leg) -> LegRecord:
         async with semaphore:
@@ -157,6 +231,7 @@ async def run_experiment(
                     leg_id=leg.leg_id,
                     agent_id=leg.agent_id,
                     status=LegStatus.DRY_RUN,
+                    result_status=None,
                     started_at=None,
                     finished_at=None,
                     duration_sec=None,
@@ -166,15 +241,11 @@ async def run_experiment(
                 )
 
             if resume and backend.is_leg_complete(leg, ctx):
-                # When skipping, we could also collect existing trials.
-                # For now, mark skipped. The results collector will read from disk.
-                now_str = datetime.now().strftime("%H:%M:%S")
-                console.print(f"[[dim]{now_str}[/dim]] ⏭️  Leg [bold cyan]{leg.leg_id}[/bold cyan] "
-                              f"already complete, [yellow]skipping[/yellow].")
                 return LegRecord(
                     leg_id=leg.leg_id,
                     agent_id=leg.agent_id,
                     status=LegStatus.SKIPPED,
+                    result_status=None,
                     started_at=None,
                     finished_at=None,
                     duration_sec=None,
@@ -191,7 +262,8 @@ async def run_experiment(
                 leg_id=leg.leg_id,
                 agent_id=leg.agent_id,
                 status=LegStatus.RUNNING,
-                started_at=datetime.now(),
+                result_status=None,
+                started_at=_now_utc(),
                 finished_at=None,
                 duration_sec=None,
                 harbor_dir=make_rel(experiment_root, ctx.leg_dir / "harbor"),
@@ -204,10 +276,6 @@ async def run_experiment(
             manifest = _upsert_leg(manifest, running_record, experiment_root)
             _persist_manifest(manifest, experiment_root)
 
-            now_str = datetime.now().strftime("%H:%M:%S")
-            console.print(f"[[dim]{now_str}[/dim]] 🚀 Starting leg [bold cyan]{leg.leg_id}[/bold cyan] "
-                          f"([dim]agent:[/dim] {leg.agent_id}, [dim]trials:[/dim] {leg.n_attempts * leg.n_concurrent})")
-
             try:
                 outcome = await backend.run_leg(leg, ctx)
 
@@ -215,33 +283,33 @@ async def run_experiment(
                     raise RuntimeError(f"Leg {leg.leg_id} failed: {outcome.error}")
 
             except asyncio.CancelledError:
-                dur = (datetime.now() - running_record.started_at).total_seconds()
-                now_str = datetime.now().strftime("%H:%M:%S")
-                console.print(f"[[dim]{now_str}[/dim]] 🛑 Leg [bold cyan]{leg.leg_id}[/bold cyan] "
-                              f"was [yellow]interrupted[/yellow] after {dur:.1f}s")
+                now = _now_utc()
                 return LegRecord(
                     leg_id=leg.leg_id,
                     agent_id=leg.agent_id,
                     status=LegStatus.INTERRUPTED,
+                    result_status=None,
                     started_at=running_record.started_at,
-                    finished_at=datetime.now(),
-                    duration_sec=dur,
+                    finished_at=now,
+                    duration_sec=(now - running_record.started_at).total_seconds()
+                    if running_record.started_at is not None
+                    else None,
                     harbor_dir=running_record.harbor_dir,
                     harbor_result_path=running_record.harbor_result_path,
                     agent_config_path=running_record.agent_config_path,
                 )
             except Exception as exc:
-                dur = (datetime.now() - running_record.started_at).total_seconds()
-                now_str = datetime.now().strftime("%H:%M:%S")
-                console.print(f"[[dim]{now_str}[/dim]] 💥 Leg [bold cyan]{leg.leg_id}[/bold cyan] "
-                              f"[red]failed[/red] after {dur:.1f}s: {exc}")
+                now = _now_utc()
                 return LegRecord(
                     leg_id=leg.leg_id,
                     agent_id=leg.agent_id,
                     status=LegStatus.FAILED,
+                    result_status=None,
                     started_at=running_record.started_at,
-                    finished_at=datetime.now(),
-                    duration_sec=dur,
+                    finished_at=now,
+                    duration_sec=(now - running_record.started_at).total_seconds()
+                    if running_record.started_at is not None
+                    else None,
                     harbor_dir=running_record.harbor_dir,
                     harbor_result_path=running_record.harbor_result_path,
                     agent_config_path=running_record.agent_config_path,
@@ -249,22 +317,11 @@ async def run_experiment(
                     traceback=traceback.format_exc(),
                 )
 
-            dur = (outcome.finished_at - outcome.started_at).total_seconds()
-            now_str = datetime.now().strftime("%H:%M:%S")
-            passed = sum(1 for t in outcome.trials if t.passed)
-            total = len(outcome.trials)
-            
-            if outcome.status == LegStatus.SUCCEEDED:
-                console.print(f"[[dim]{now_str}[/dim]] ✅ Leg [bold cyan]{leg.leg_id}[/bold cyan] "
-                              f"completed in {dur:.1f}s ([green]{passed}[/green]/{total} passed)")
-            else:
-                console.print(f"[[dim]{now_str}[/dim]] ⚠️ Leg [bold cyan]{leg.leg_id}[/bold cyan] "
-                              f"finished with status [yellow]{outcome.status.value}[/yellow] in {dur:.1f}s")
-
             return LegRecord(
                 leg_id=leg.leg_id,
                 agent_id=leg.agent_id,
                 status=outcome.status,
+                result_status=None,
                 started_at=outcome.started_at,
                 finished_at=outcome.finished_at,
                 duration_sec=(outcome.finished_at - outcome.started_at).total_seconds(),
@@ -276,6 +333,7 @@ async def run_experiment(
                 traceback=outcome.traceback,
             )
 
+    tasks: list[asyncio.Task[LegRecord]] = []
     try:
         async with asyncio.TaskGroup() as tg:
             tasks = [tg.create_task(run_one(leg)) for leg in plan.legs]
@@ -289,7 +347,7 @@ async def run_experiment(
             record = task.result()
             manifest = _upsert_leg(manifest, record, experiment_root)
         except Exception:
-            # Should not happen as run_one catches everything
+            # Should not happen because run_one catches everything.
             pass
 
     _persist_manifest(manifest, experiment_root)
@@ -306,3 +364,9 @@ async def run_experiment(
         write_results(rows, summary, experiment_root=experiment_root)
 
     return manifest
+
+
+__all__ = [
+    "run_experiment",
+    "TrialErrorPhase",
+]

@@ -79,3 +79,53 @@ def test_duplicate_ids_without_alias_rejected():
                 ],
             }
         )
+
+
+def test_profile_overrides_deep_merge(tmp_path):
+    from openharness.experiments.spec import load_experiment_spec_full
+
+    spec_path = tmp_path / "tb2.yaml"
+    spec_path.write_text(
+        """
+id: tb2-baseline
+dataset: terminal-bench@2.0
+model: gemini-2.5-flash
+n_tasks: 50
+agents:
+  - default
+  - planner_executor
+profiles:
+  demo:
+    task_filter:
+      include_tasks: ["build-*"]
+      n_tasks: 2
+    defaults:
+      model: gemini-2.0-flash
+""",
+        encoding="utf-8",
+    )
+
+    loaded = load_experiment_spec_full(spec_path, profile="demo")
+    assert loaded.spec.defaults.model == "gemini-2.0-flash"
+    assert loaded.spec.task_filter.include_tasks == ("build-*",)
+    assert loaded.spec.task_filter.n_tasks == 2
+    assert loaded.source_text.startswith("\nid: tb2-baseline")
+    assert loaded.profile == "demo"
+
+
+def test_unknown_profile_rejected(tmp_path):
+    from openharness.experiments.spec import load_experiment_spec_full
+
+    spec_path = tmp_path / "tb2.yaml"
+    spec_path.write_text(
+        """
+id: tb2-baseline
+dataset: terminal-bench@2.0
+agents:
+  - default
+""",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="Profile 'missing' not found"):
+        load_experiment_spec_full(spec_path, profile="missing")

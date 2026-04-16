@@ -10,10 +10,17 @@ from pathlib import Path
 from openharness.experiments.manifest import Reproducibility
 import importlib.metadata
 
-try:
-    openharness_version = importlib.metadata.version("openharness")
-except importlib.metadata.PackageNotFoundError:
-    openharness_version = "unknown"
+
+def _resolve_openharness_version() -> str:
+    for candidate in ("openharness-ai", "openharness"):
+        try:
+            return importlib.metadata.version(candidate)
+        except importlib.metadata.PackageNotFoundError:
+            continue
+    return "unknown"
+
+
+openharness_version = _resolve_openharness_version()
 
 
 def _run_git(args: list[str], cwd: Path) -> str | None:
