@@ -349,7 +349,8 @@ def _print_gateway_config_summary(config: GatewayConfig) -> None:
             + f" | provider_profile={config.provider_profile}"
         )
         deny_all_channels = [
-            name for name in config.enabled_channels
+            name
+            for name in config.enabled_channels
             if not list(config.channel_configs.get(name, {}).get("allow_from", []))
         ]
         if deny_all_channels:

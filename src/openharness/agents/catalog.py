@@ -91,5 +91,12 @@ def get_catalog_agent_config(
     name: str,
     cwd: str | Path | None = None,
 ) -> CatalogAgentConfig | None:
-    """Return one YAML agent config by name from the merged catalog."""
+    """Return one YAML agent config by name from the merged catalog, or load from path if name is a file."""
+    # If name looks like a path and exists, load it directly
+    if name.endswith(".yaml") or name.endswith(".yml"):
+        path = Path(name)
+        if path.is_file():
+            config = AgentConfig.from_yaml(path)
+            return CatalogAgentConfig(config=config, source="project", path=path)
+
     return get_catalog_agent_configs(cwd).get(name)

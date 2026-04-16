@@ -16,6 +16,7 @@ class TextBlock(BaseModel):
 
     type: Literal["text"] = "text"
     text: str
+    thought_signature: str | None = None
 
 
 class ImageBlock(BaseModel):
@@ -44,6 +45,7 @@ class ToolUseBlock(BaseModel):
     id: str = Field(default_factory=lambda: f"toolu_{uuid4().hex}")
     name: str
     input: dict[str, Any] = Field(default_factory=dict)
+    thought_signature: str | None = None
 
 
 class ToolResultBlock(BaseModel):

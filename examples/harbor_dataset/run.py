@@ -5,52 +5,55 @@ Usage:
 """
 
 import sys
+import asyncio
 from pathlib import Path
 
 EXAMPLES_ROOT = Path(__file__).resolve().parents[1]
 if str(EXAMPLES_ROOT) not in sys.path:
     sys.path.insert(0, str(EXAMPLES_ROOT))
 
-from openharness.experiments import HarborExperiment  # noqa: E402
-from openharness.experiments.observability import setup_local_langfuse  # noqa: E402
+from openharness.observability.langfuse import langfuse_agent_env_for_docker  # noqa: E402
+from openharness.experiments.spec import ExperimentSpec, AgentLegSpec, AgentOverrides, TaskFilter  # noqa: E402
+from openharness.experiments.runner import run_experiment  # noqa: E402
 
 AGENT_CONFIG = EXAMPLES_ROOT / "_shared" / "agent_configs" / "harbor_registry_agent.yaml"
-
-# 1. Define the dataset (e.g. from registry.harborframework.com)
 DATASET = "terminal-bench@2.0"
 MODEL = "gemini-3.1-flash-lite-preview"
 MAX_TURNS = 10
 
 
-def main() -> None:
-    env = setup_local_langfuse(docker_compatible=True)
+async def main() -> None:
+    env = langfuse_agent_env_for_docker()
 
-    experiment = HarborExperiment(
-        agent_config=AGENT_CONFIG,
-        # We specify dataset instead of a single task
+    spec = ExperimentSpec(
+        id="example-dataset",
         dataset=DATASET,
-        # We define a reduced dataset by filtering the full dataset.
-        # This will ONLY run the tasks that match the glob patterns provided below
-        include_tasks=[
-            "build-*",
-            "git-*",
-        ],
-        # Limit the total number of tasks to run (useful for a fast trial)
-        n_tasks=2,
-        # How many Docker sandbox environments to spin up and run in parallel
-        n_concurrent=2,
-        model=MODEL,
-        max_turns=MAX_TURNS,
-        env=env,
+        agents=(AgentLegSpec(id=str(AGENT_CONFIG)),),
+        defaults=AgentOverrides(
+            model=MODEL,
+            max_turns=MAX_TURNS,
+            n_concurrent=2,
+        ),
+        task_filter=TaskFilter(
+            include_tasks=("build-*", "git-*"),
+            n_tasks=2,
+        ),
     )
 
-    # This automatically provisions 2 concurrent environments, runs the 4 matching
-    # tasks, aggregates the scores, and exports the traces to Langfuse.
-    result = experiment.run()
+    # We use the new async run_experiment
+    experiment_root = Path("runs/experiments/example-dataset")
 
-    # Will print aggregated statistics and location of the combined results.json
-    experiment.log_summary(result)
+    await run_experiment(
+        spec,
+        experiment_root=experiment_root,
+        instance_id="example-dataset",
+        env=env,
+        emit_results=True,
+    )
+
+    print(f"\nExperiment complete. Manifest written to: {experiment_root / 'experiment.json'}")
+    print(f"Summary written to: {experiment_root / 'results' / 'summary.md'}")
 
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(main())

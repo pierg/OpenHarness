@@ -61,6 +61,10 @@ openharness = "openharness.cli:app"
 oh = "openharness.cli:app"
 openh = "openharness.cli:app"
 ohmo = "ohmo.cli:app"
+exec = "openharness.experiments.cli_shorthands:exec_app"
+status = "openharness.experiments.cli_shorthands:status_app"
+results = "openharness.experiments.cli_shorthands:results_app"
+plan = "openharness.experiments.cli_shorthands:plan_app"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/openharness", "ohmo"]

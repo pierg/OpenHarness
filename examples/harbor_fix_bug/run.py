@@ -6,41 +6,54 @@ Usage:
 
 import sys
 import shutil
+import asyncio
 from pathlib import Path
 
 EXAMPLES_ROOT = Path(__file__).resolve().parents[1]
 if str(EXAMPLES_ROOT) not in sys.path:
     sys.path.insert(0, str(EXAMPLES_ROOT))
 
-from openharness.experiments import HarborExperiment  # noqa: E402
-from openharness.experiments.observability import setup_local_langfuse  # noqa: E402
+from openharness.experiments.spec import ExperimentSpec, AgentLegSpec, AgentOverrides  # noqa: E402
+from openharness.experiments.runner import run_experiment  # noqa: E402
+from openharness.observability.langfuse import langfuse_agent_env_for_docker  # noqa: E402
 
 AGENT_CONFIG = EXAMPLES_ROOT / "_shared" / "agent_configs" / "bugfix_agent.yaml"
 MODEL = "gemini-3.1-flash-lite-preview"
 MAX_TURNS = 10
 
 
-def main() -> None:
-    env = setup_local_langfuse(docker_compatible=True)
+async def main() -> None:
+    env = langfuse_agent_env_for_docker()
 
-    # Harbor needs a proper task folder (task.toml, instruction.md, etc.)
-    task_source = Path(__file__).resolve().parents[1] / "_shared" / "bugfix_task"
+    task_source = EXAMPLES_ROOT / "_shared" / "bugfix_task"
     workspace_dir = EXAMPLES_ROOT.parent / "runs" / "temp_workspace"
     if workspace_dir.exists():
         shutil.rmtree(workspace_dir)
     shutil.copytree(task_source, workspace_dir)
 
-    experiment = HarborExperiment(
-        agent_config=AGENT_CONFIG,
-        task=workspace_dir,
-        model=MODEL,
-        max_turns=MAX_TURNS,
-        env=env,
+    spec = ExperimentSpec(
+        id="example-fix-bug",
+        dataset=str(workspace_dir),
+        agents=(AgentLegSpec(id=str(AGENT_CONFIG)),),
+        defaults=AgentOverrides(
+            model=MODEL,
+            max_turns=MAX_TURNS,
+            n_concurrent=1,
+        ),
     )
 
-    result = experiment.run()
-    experiment.log_summary(result)
+    experiment_root = Path("runs/experiments/example-fix-bug")
+
+    await run_experiment(
+        spec,
+        experiment_root=experiment_root,
+        instance_id="example-fix-bug",
+        env=env,
+        emit_results=True,
+    )
+
+    print(f"\nExperiment complete. Results in {experiment_root}")
 
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(main())

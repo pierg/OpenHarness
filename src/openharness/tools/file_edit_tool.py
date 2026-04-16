@@ -16,7 +16,9 @@ class FileEditToolInput(BaseModel):
     path: str = Field(description="Path of the file to edit")
     old_str: str = Field(description="Existing text to replace")
     new_str: str = Field(description="Replacement text")
-    replace_all: bool = Field(default=False, description="Set to true to replace all occurrences of old_str with new_str")
+    replace_all: bool = Field(
+        default=False, description="Set to true to replace all occurrences of old_str with new_str"
+    )
 
 
 class FileEditTool(BaseTool):
