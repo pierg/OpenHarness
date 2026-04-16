@@ -1,361 +1,308 @@
-"""Experiment runner helpers for Harbor-backed benchmark jobs."""
+"""Experiment runner and orchestrator."""
 
 from __future__ import annotations
 
-import json
-from dataclasses import dataclass
+import asyncio
+import logging
+import traceback
+from datetime import datetime
 from pathlib import Path
-from typing import Any
+from typing import Mapping
 
 import yaml
+from rich.console import Console
 
-from openharness.agents.catalog import get_catalog_agent_config
-from openharness.agents.config import AgentConfig
-from openharness.config.paths import get_project_runs_dir
-from openharness.harbor import (
-    HarborEnvironmentSpec,
-    HarborExistingJobPolicy,
-    HarborJobSpec,
-    HarborTaskSpec,
-    HarborToolSpec,
-    OpenHarnessHarborAgentSpec,
+from openharness.experiments.backends import Backend, LegContext
+from openharness.experiments.backends.harbor import HarborBackend
+from openharness.experiments.manifest import (
+    ExperimentManifest,
+    LegRecord,
+    LegStatus,
 )
-from openharness.runs import HarborAgentRunSpec, HarborJobResult, run_harbor_agent
+from openharness.experiments.paths import make_rel
+from openharness.experiments.plan import ExperimentPlan, Leg, plan_experiment
+from openharness.experiments.reproducibility import collect_reproducibility
+from openharness.experiments.spec import ExperimentSpec
 
-from openharness.experiments.specs import (
-    ExperimentJob,
-    ExperimentConfig,
-    expand_experiment_jobs,
-)
+log = logging.getLogger(__name__)
 
 
-@dataclass(frozen=True)
-class ExperimentJobRecord:
-    """Manifest record for one expanded experiment job."""
+def _get_default_backend(spec: ExperimentSpec) -> Backend:
+    return HarborBackend()
 
-    job_id: str
-    experiment_instance_id: str
-    agent_id: str
-    dataset: str
-    openharness_run_id: str | None
-    harbor_result_path: str | None
-    status: str
-    config: dict[str, Any]
-    error: str | None = None
 
-    def as_dict(self) -> dict[str, Any]:
-        return {
-            "job_id": self.job_id,
-            "experiment_instance_id": self.experiment_instance_id,
-            "agent_id": self.agent_id,
-            "dataset": self.dataset,
-            "openharness_run_id": self.openharness_run_id,
-            "harbor_result_path": self.harbor_result_path,
-            "status": self.status,
-            "config": self.config,
-            "error": self.error,
+def _initialize_experiment_tree(
+    experiment_root: Path, spec: ExperimentSpec, plan: ExperimentPlan
+) -> None:
+    experiment_root.mkdir(parents=True, exist_ok=True)
+
+    spec_path = experiment_root / "config.source.yaml"
+    if not spec_path.exists():
+        spec_path.write_text(
+            yaml.safe_dump(spec.model_dump(mode="json", exclude_none=True), sort_keys=False),
+            encoding="utf-8",
+        )
+
+    for leg in plan.legs:
+        (experiment_root / "legs" / leg.leg_id).mkdir(parents=True, exist_ok=True)
+
+
+def _load_or_seed_manifest(experiment_root: Path, plan: ExperimentPlan) -> ExperimentManifest:
+    manifest_path = experiment_root / "experiment.json"
+    if manifest_path.exists():
+        try:
+            return ExperimentManifest.model_validate_json(manifest_path.read_text(encoding="utf-8"))
+        except Exception as e:
+            log.warning(f"Failed to load existing manifest: {e}. Starting fresh.")
+
+    now = datetime.now()
+
+    resolved_spec_path = experiment_root / "config.resolved.yaml"
+    resolved_spec_path.write_text(
+        yaml.safe_dump(plan.spec.model_dump(mode="json", exclude_none=True), sort_keys=False),
+        encoding="utf-8",
+    )
+
+    legs = []
+    for leg in plan.legs:
+        legs.append(
+            LegRecord(
+                leg_id=leg.leg_id,
+                agent_id=leg.agent_id,
+                status=LegStatus.PENDING,
+                started_at=None,
+                finished_at=None,
+                duration_sec=None,
+                harbor_dir=None,
+                harbor_result_path=None,
+                agent_config_path=None,
+                trials=(),
+            )
+        )
+
+    return ExperimentManifest(
+        experiment_id=plan.spec.id,
+        instance_id=plan.instance_id,
+        dataset=plan.spec.dataset,
+        spec_path=make_rel(experiment_root, experiment_root / "config.source.yaml"),
+        resolved_spec_path=make_rel(experiment_root, resolved_spec_path),
+        created_at=now,
+        updated_at=now,
+        reproducibility=collect_reproducibility(),
+        legs=tuple(legs),
+    )
+
+
+def _persist_manifest(manifest: ExperimentManifest, experiment_root: Path) -> None:
+    manifest_path = experiment_root / "experiment.json"
+    manifest_path.write_text(manifest.model_dump_json(indent=2) + "\n", encoding="utf-8")
+
+
+def _upsert_leg(
+    manifest: ExperimentManifest, record: LegRecord, experiment_root: Path
+) -> ExperimentManifest:
+    updated_legs = []
+    for existing in manifest.legs:
+        if existing.leg_id == record.leg_id:
+            updated_legs.append(record)
+        else:
+            updated_legs.append(existing)
+
+    leg_json = experiment_root / "legs" / record.leg_id / "leg.json"
+    leg_json.write_text(record.model_dump_json(indent=2) + "\n", encoding="utf-8")
+
+    return manifest.model_copy(
+        update={
+            "legs": tuple(updated_legs),
+            "updated_at": datetime.now(),
         }
-
-
-def resolve_agent_config_for_experiment(
-    agent_id: str,
-    config: ExperimentConfig,
-    *,
-    cwd: str | Path | None = None,
-) -> AgentConfig:
-    """Resolve a catalog agent id and apply runtime overrides in memory."""
-    item = get_catalog_agent_config(agent_id, cwd)
-    if item is None:
-        raise KeyError(f"Unknown agent config id: {agent_id}")
-    return _apply_agent_runtime_overrides(item.config, config)
-
-
-def build_harbor_run_spec(
-    job: ExperimentJob,
-    *,
-    cwd: str | Path,
-    jobs_dir: Path | None = None,
-    env: dict[str, str] | None = None,
-    resume: bool = False,
-) -> HarborAgentRunSpec:
-    """Translate an expanded experiment job into a Harbor run spec."""
-    root = Path(cwd).expanduser().resolve()
-    config = resolve_agent_config_for_experiment(job.agent_id, job.config, cwd=root)
-    config_yaml = _dump_agent_config_yaml(config)
-
-    resolved_jobs_dir = jobs_dir or (
-        get_project_runs_dir(root) / job.harbor_run_id / "harbor_jobs"
     )
-    job_spec = HarborJobSpec(
-        tool=HarborToolSpec(editable_openharness_dir=root),
-        agent=OpenHarnessHarborAgentSpec(
-            agent_name=config.name,
-            model=job.config.model or config.model,
-            max_turns=job.config.max_turns or config.max_turns,
-            max_tokens=job.config.max_tokens or config.max_tokens,
-            agent_config_yaml=config_yaml,
-            env=dict(env or {}),
-        ),
-        task=HarborTaskSpec(
-            dataset=job.dataset,
-            include_task_names=job.config.include_tasks or (),
-            exclude_task_names=job.config.exclude_tasks or (),
-            n_tasks=job.config.n_tasks,
-        ),
-        environment=HarborEnvironmentSpec(type="docker"),
-        jobs_dir=resolved_jobs_dir,
-        n_attempts=job.config.n_attempts,
-        n_concurrent_trials=job.config.n_concurrent,
-        existing_job_policy=(
-            HarborExistingJobPolicy.RESUME if resume else HarborExistingJobPolicy.ERROR
-        ),
-        metadata={
-            "experiment_id": job.experiment_id,
-            "experiment_instance_id": job.experiment_instance_id,
-            "agent_id": job.agent_id,
-            "job_id": job.job_id,
-            "dataset": job.dataset,
-        },
-    )
-    return HarborAgentRunSpec(cwd=root, job=job_spec, run_id=job.harbor_run_id)
 
 
-def run_experiment(
-    config: ExperimentConfig,
+async def run_experiment(
+    spec: ExperimentSpec,
     *,
-    cwd: str | Path,
-    manifest_path: str | Path | None = None,
-    env: dict[str, str] | None = None,
-    experiment_instance_id: str | None = None,
+    experiment_root: Path,
+    instance_id: str,
+    env: Mapping[str, str] | None = None,
     dry_run: bool = False,
     resume: bool = False,
-) -> dict[str, Any]:
-    """Run or dry-run all jobs in an experiment spec."""
-    resolved_instance_id = experiment_instance_id or config.id or "experiment"
-    jobs = expand_experiment_jobs(
-        config,
-        experiment_instance_id=resolved_instance_id,
-    )
-    records: list[ExperimentJobRecord] = (
-        _load_existing_records(manifest_path) if resume and manifest_path is not None else []
-    )
-    records = [
-        record
-        for record in records
-        if record.experiment_instance_id == resolved_instance_id
-    ]
-    for job in jobs:
-        run_spec = build_harbor_run_spec(job, cwd=cwd, env=env, resume=resume)
-        result_path = _expected_harbor_result_path(run_spec)
-        if dry_run:
-            records = _upsert_record(
-                records,
-                _record_for_job(job, run_spec.run_id, str(result_path), "dry_run"),
+    backend: Backend | None = None,
+    emit_results: bool = True,
+) -> ExperimentManifest:
+    plan = plan_experiment(spec, instance_id=instance_id, cwd=experiment_root)
+    backend = backend or _get_default_backend(spec)
+    env = env or {}
+
+    _initialize_experiment_tree(experiment_root, spec, plan)
+    manifest = _load_or_seed_manifest(experiment_root, plan)
+    _persist_manifest(manifest, experiment_root)
+
+    semaphore = asyncio.Semaphore(spec.leg_concurrency)
+    console = Console()
+
+    async def run_one(leg: Leg) -> LegRecord:
+        async with semaphore:
+            ctx = LegContext(
+                experiment_root=experiment_root,
+                leg_dir=experiment_root / "legs" / leg.leg_id,
+                env=dict(env),
+                dry_run=dry_run,
+                resume=resume,
+                spec=spec,
             )
-            _write_manifest_if_requested(config, resolved_instance_id, records, manifest_path)
-            continue
 
-        if resume and _harbor_job_complete(result_path):
-            records = _upsert_record(
-                records,
-                _record_for_job(job, run_spec.run_id, str(result_path), "succeeded"),
-            )
-            _write_manifest_if_requested(config, resolved_instance_id, records, manifest_path)
-            continue
-
-        records = _upsert_record(
-            records,
-            _record_for_job(job, run_spec.run_id, str(result_path), "running"),
-        )
-        _write_manifest_if_requested(config, resolved_instance_id, records, manifest_path)
-        try:
-            result = run_harbor_agent(run_spec)
-            records = _upsert_record(records, _record_for_result(job, result, "succeeded"))
-        except KeyboardInterrupt:
-            records = _upsert_record(
-                records,
-                _record_for_job(
-                    job,
-                    run_spec.run_id,
-                    str(result_path),
-                    "interrupted",
-                    error="KeyboardInterrupt",
-                ),
-            )
-            _write_manifest_if_requested(config, resolved_instance_id, records, manifest_path)
-            raise
-        except Exception as exc:
-            records = _upsert_record(
-                records,
-                _record_for_job(job, run_spec.run_id, str(result_path), "failed", error=str(exc)),
-            )
-            raise
-        finally:
-            _write_manifest_if_requested(config, resolved_instance_id, records, manifest_path)
-
-    manifest = {
-        "experiment_id": config.id,
-        "experiment_instance_id": resolved_instance_id,
-        "dataset": config.dataset,
-        "jobs": [record.as_dict() for record in records],
-    }
-    if manifest_path is not None:
-        write_experiment_manifest(manifest, manifest_path)
-    return manifest
-
-
-def write_experiment_manifest(manifest: dict[str, Any], path: str | Path) -> None:
-    target = Path(path)
-    target.parent.mkdir(parents=True, exist_ok=True)
-    target.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
-
-
-def _write_manifest_if_requested(
-    config: ExperimentConfig,
-    experiment_instance_id: str,
-    records: list[ExperimentJobRecord],
-    manifest_path: str | Path | None,
-) -> None:
-    if manifest_path is None:
-        return
-    write_experiment_manifest(
-        {
-            "experiment_id": config.id,
-            "experiment_instance_id": experiment_instance_id,
-            "dataset": config.dataset,
-            "jobs": [record.as_dict() for record in records],
-        },
-        manifest_path,
-    )
-
-
-def _load_existing_records(manifest_path: str | Path | None) -> list[ExperimentJobRecord]:
-    if manifest_path is None:
-        return []
-    path = Path(manifest_path)
-    if not path.exists():
-        return []
-    try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        return []
-    records: list[ExperimentJobRecord] = []
-    for raw in data.get("jobs", []):
-        if not isinstance(raw, dict):
-            continue
-        try:
-            records.append(
-                ExperimentJobRecord(
-                    job_id=raw["job_id"],
-                    experiment_instance_id=raw["experiment_instance_id"],
-                    agent_id=raw["agent_id"],
-                    dataset=raw["dataset"],
-                    openharness_run_id=raw.get("openharness_run_id"),
-                    harbor_result_path=raw.get("harbor_result_path"),
-                    status=raw["status"],
-                    config=raw.get("config") or {},
-                    error=raw.get("error"),
+            if dry_run:
+                return LegRecord(
+                    leg_id=leg.leg_id,
+                    agent_id=leg.agent_id,
+                    status=LegStatus.DRY_RUN,
+                    started_at=None,
+                    finished_at=None,
+                    duration_sec=None,
+                    harbor_dir=None,
+                    harbor_result_path=None,
+                    agent_config_path=None,
                 )
+
+            if resume and backend.is_leg_complete(leg, ctx):
+                # When skipping, we could also collect existing trials.
+                # For now, mark skipped. The results collector will read from disk.
+                now_str = datetime.now().strftime("%H:%M:%S")
+                console.print(f"[[dim]{now_str}[/dim]] ⏭️  Leg [bold cyan]{leg.leg_id}[/bold cyan] "
+                              f"already complete, [yellow]skipping[/yellow].")
+                return LegRecord(
+                    leg_id=leg.leg_id,
+                    agent_id=leg.agent_id,
+                    status=LegStatus.SKIPPED,
+                    started_at=None,
+                    finished_at=None,
+                    duration_sec=None,
+                    harbor_dir=make_rel(experiment_root, ctx.leg_dir / "harbor"),
+                    harbor_result_path=make_rel(
+                        experiment_root, ctx.leg_dir / "harbor" / leg.harbor_run_id / "result.json"
+                    ),
+                    agent_config_path=make_rel(
+                        experiment_root, ctx.leg_dir / "agent.resolved.yaml"
+                    ),
+                )
+
+            running_record = LegRecord(
+                leg_id=leg.leg_id,
+                agent_id=leg.agent_id,
+                status=LegStatus.RUNNING,
+                started_at=datetime.now(),
+                finished_at=None,
+                duration_sec=None,
+                harbor_dir=make_rel(experiment_root, ctx.leg_dir / "harbor"),
+                harbor_result_path=make_rel(
+                    experiment_root, ctx.leg_dir / "harbor" / leg.harbor_run_id / "result.json"
+                ),
+                agent_config_path=make_rel(experiment_root, ctx.leg_dir / "agent.resolved.yaml"),
             )
-        except KeyError:
-            continue
-    return records
+            nonlocal manifest
+            manifest = _upsert_leg(manifest, running_record, experiment_root)
+            _persist_manifest(manifest, experiment_root)
 
+            now_str = datetime.now().strftime("%H:%M:%S")
+            console.print(f"[[dim]{now_str}[/dim]] 🚀 Starting leg [bold cyan]{leg.leg_id}[/bold cyan] "
+                          f"([dim]agent:[/dim] {leg.agent_id}, [dim]trials:[/dim] {leg.n_attempts * leg.n_concurrent})")
 
-def _upsert_record(
-    records: list[ExperimentJobRecord],
-    record: ExperimentJobRecord,
-) -> list[ExperimentJobRecord]:
-    updated: list[ExperimentJobRecord] = []
-    replaced = False
-    for existing in records:
-        if existing.job_id == record.job_id:
-            updated.append(record)
-            replaced = True
-        else:
-            updated.append(existing)
-    if not replaced:
-        updated.append(record)
-    return updated
+            try:
+                outcome = await backend.run_leg(leg, ctx)
 
+                if spec.fail_fast and outcome.status == LegStatus.FAILED:
+                    raise RuntimeError(f"Leg {leg.leg_id} failed: {outcome.error}")
 
-def _expected_harbor_result_path(spec: HarborAgentRunSpec) -> Path:
-    return spec.job.jobs_dir.expanduser().resolve() / spec.run_id / "result.json"
+            except asyncio.CancelledError:
+                dur = (datetime.now() - running_record.started_at).total_seconds()
+                now_str = datetime.now().strftime("%H:%M:%S")
+                console.print(f"[[dim]{now_str}[/dim]] 🛑 Leg [bold cyan]{leg.leg_id}[/bold cyan] "
+                              f"was [yellow]interrupted[/yellow] after {dur:.1f}s")
+                return LegRecord(
+                    leg_id=leg.leg_id,
+                    agent_id=leg.agent_id,
+                    status=LegStatus.INTERRUPTED,
+                    started_at=running_record.started_at,
+                    finished_at=datetime.now(),
+                    duration_sec=dur,
+                    harbor_dir=running_record.harbor_dir,
+                    harbor_result_path=running_record.harbor_result_path,
+                    agent_config_path=running_record.agent_config_path,
+                )
+            except Exception as exc:
+                dur = (datetime.now() - running_record.started_at).total_seconds()
+                now_str = datetime.now().strftime("%H:%M:%S")
+                console.print(f"[[dim]{now_str}[/dim]] 💥 Leg [bold cyan]{leg.leg_id}[/bold cyan] "
+                              f"[red]failed[/red] after {dur:.1f}s: {exc}")
+                return LegRecord(
+                    leg_id=leg.leg_id,
+                    agent_id=leg.agent_id,
+                    status=LegStatus.FAILED,
+                    started_at=running_record.started_at,
+                    finished_at=datetime.now(),
+                    duration_sec=dur,
+                    harbor_dir=running_record.harbor_dir,
+                    harbor_result_path=running_record.harbor_result_path,
+                    agent_config_path=running_record.agent_config_path,
+                    error=str(exc),
+                    traceback=traceback.format_exc(),
+                )
 
+            dur = (outcome.finished_at - outcome.started_at).total_seconds()
+            now_str = datetime.now().strftime("%H:%M:%S")
+            passed = sum(1 for t in outcome.trials if t.passed)
+            total = len(outcome.trials)
+            
+            if outcome.status == LegStatus.SUCCEEDED:
+                console.print(f"[[dim]{now_str}[/dim]] ✅ Leg [bold cyan]{leg.leg_id}[/bold cyan] "
+                              f"completed in {dur:.1f}s ([green]{passed}[/green]/{total} passed)")
+            else:
+                console.print(f"[[dim]{now_str}[/dim]] ⚠️ Leg [bold cyan]{leg.leg_id}[/bold cyan] "
+                              f"finished with status [yellow]{outcome.status.value}[/yellow] in {dur:.1f}s")
 
-def _harbor_job_complete(result_path: Path) -> bool:
-    if not result_path.exists():
-        return False
+            return LegRecord(
+                leg_id=leg.leg_id,
+                agent_id=leg.agent_id,
+                status=outcome.status,
+                started_at=outcome.started_at,
+                finished_at=outcome.finished_at,
+                duration_sec=(outcome.finished_at - outcome.started_at).total_seconds(),
+                harbor_dir=running_record.harbor_dir,
+                harbor_result_path=running_record.harbor_result_path,
+                agent_config_path=running_record.agent_config_path,
+                trials=outcome.trials,
+                error=outcome.error,
+                traceback=outcome.traceback,
+            )
+
     try:
-        data = json.loads(result_path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        return False
+        async with asyncio.TaskGroup() as tg:
+            tasks = [tg.create_task(run_one(leg)) for leg in plan.legs]
+    except Exception:
+        # Exceptions are recorded inside the task and returned,
+        # but if fail_fast raises we catch it here and let it finish recording.
+        pass
 
-    expected_trials = data.get("n_total_trials")
-    if not isinstance(expected_trials, int):
-        return False
+    for task in tasks:
+        try:
+            record = task.result()
+            manifest = _upsert_leg(manifest, record, experiment_root)
+        except Exception:
+            # Should not happen as run_one catches everything
+            pass
 
-    completed_trials = sum(
-        1
-        for trial_dir in result_path.parent.iterdir()
-        if trial_dir.is_dir() and (trial_dir / "result.json").exists()
-    )
-    return completed_trials >= expected_trials
+    _persist_manifest(manifest, experiment_root)
 
+    if emit_results:
+        from openharness.experiments.results import (
+            collect_results,
+            summarize_results,
+            write_results,
+        )
 
-def _apply_agent_runtime_overrides(
-    agent_config: AgentConfig,
-    experiment_config: ExperimentConfig,
-) -> AgentConfig:
-    update: dict[str, Any] = {}
-    if experiment_config.model is not None:
-        update["model"] = experiment_config.model
-    if experiment_config.max_turns is not None:
-        update["max_turns"] = experiment_config.max_turns
-    if experiment_config.max_tokens is not None:
-        update["max_tokens"] = experiment_config.max_tokens
-    if agent_config.subagents:
-        update["subagents"] = {
-            name: _apply_agent_runtime_overrides(subagent, experiment_config)
-            for name, subagent in agent_config.subagents.items()
-        }
-    return agent_config.model_copy(update=update)
+        rows = collect_results(manifest, experiment_root=experiment_root)
+        summary = summarize_results(rows)
+        write_results(rows, summary, experiment_root=experiment_root)
 
-
-def _dump_agent_config_yaml(config: AgentConfig) -> str:
-    raw = config.model_dump(mode="json", exclude_none=True)
-    return yaml.safe_dump(raw, sort_keys=False)
-
-
-def _record_for_result(
-    job: ExperimentJob,
-    result: HarborJobResult,
-    status: str,
-) -> ExperimentJobRecord:
-    return _record_for_job(
-        job,
-        result.job_id,
-        str(result.harbor_result_path),
-        status,
-    )
-
-
-def _record_for_job(
-    job: ExperimentJob,
-    openharness_run_id: str | None,
-    harbor_result_path: str | None,
-    status: str,
-    *,
-    error: str | None = None,
-) -> ExperimentJobRecord:
-    return ExperimentJobRecord(
-        job_id=job.job_id,
-        experiment_instance_id=job.experiment_instance_id,
-        agent_id=job.agent_id,
-        dataset=job.dataset,
-        openharness_run_id=openharness_run_id,
-        harbor_result_path=harbor_result_path,
-        status=status,
-        config=job.config.model_dump(mode="json"),
-        error=error,
-    )
+    return manifest
