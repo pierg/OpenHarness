@@ -85,11 +85,13 @@ def _chunk(
 ):
     part = MagicMock()
     part.text = text
+    part.thought_signature = None
     part.function_call = None
     if func_name:
         fc = MagicMock()
         fc.name = func_name
         fc.args = func_args or {}
+        fc.thought_signature = None
         part.function_call = fc
     candidate = MagicMock()
     candidate.content.parts = [part]
@@ -199,7 +201,7 @@ def test_build_contents_resolves_tool_name():
         ConversationMessage(role="user", content=[ToolResultBlock(tool_use_id="c1", content="ok")]),
     ]
     _build_gemini_contents(messages, types)
-    assert types.Part.from_function_response.call_args.kwargs["name"] == "bash"
+    assert types.FunctionResponse.call_args.kwargs["name"] == "bash"
 
 
 def test_build_contents_assistant_role_is_model():
