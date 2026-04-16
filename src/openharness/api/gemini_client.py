@@ -121,9 +121,9 @@ class GeminiApiClient:
             config_kwargs["tools"] = tools
         config = types.GenerateContentConfig(**config_kwargs)
 
-        log.warning("Sending Gemini request: model=%s contents_len=%d", request.model, len(contents))
+        log.debug("Sending Gemini request: model=%s contents_len=%d", request.model, len(contents))
         for i, c in enumerate(contents):
-            log.warning("Content %d: role=%s parts_len=%d", i, c.role, len(c.parts))
+            log.debug("Content %d: role=%s parts_len=%d", i, c.role, len(c.parts))
 
         response_stream = await self._client.aio.models.generate_content_stream(
             model=request.model,
@@ -138,7 +138,7 @@ class GeminiApiClient:
         output_tokens = 0
 
         async for chunk in response_stream:
-            log.warning("Received Gemini chunk: %s", chunk)
+            log.debug("Received Gemini chunk: %s", chunk)
             if chunk.usage_metadata:
                 input_tokens = int(chunk.usage_metadata.prompt_token_count or 0)
                 output_tokens = int(chunk.usage_metadata.candidates_token_count or 0)
@@ -253,7 +253,7 @@ def _build_gemini_contents(messages: list[ConversationMessage], types: Any) -> l
                 else:
                     parts.append(types.Part.from_function_call(name=block.name, args=block.input))
             elif isinstance(block, ToolResultBlock):
-                log.warning("Adding ToolResultBlock: tool_use_id=%s", block.tool_use_id)
+                log.debug("Adding ToolResultBlock: tool_use_id=%s", block.tool_use_id)
                 func_name = tool_name_by_id.get(block.tool_use_id, block.tool_use_id)
                 
                 # Format the response in a dictionary.
