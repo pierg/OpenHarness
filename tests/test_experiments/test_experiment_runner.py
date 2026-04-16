@@ -6,17 +6,19 @@ from openharness.experiments.runner import (
     build_harbor_run_spec,
     resolve_agent_config_for_experiment,
 )
-from openharness.experiments.specs import ExperimentJob, ExperimentRuntimeOverrides
+from openharness.experiments.specs import ExperimentJob, ExperimentConfig
 
 
 def test_resolve_agent_config_applies_runtime_overrides_recursively():
-    overrides = ExperimentRuntimeOverrides(
+    config_obj = ExperimentConfig(
+        dataset="terminal-bench@2.0",
+        agents=("planner_executor",),
         model="gemini-3.1-flash-lite-preview",
         max_turns=30,
         max_tokens=8192,
     )
 
-    config = resolve_agent_config_for_experiment("planner_executor", overrides)
+    config = resolve_agent_config_for_experiment("planner_executor", config_obj)
 
     assert config.name == "planner_executor"
     assert config.subagents["planner"].model == "gemini-3.1-flash-lite-preview"
@@ -28,25 +30,28 @@ def test_resolve_agent_config_applies_runtime_overrides_recursively():
 
 
 def test_build_harbor_run_spec_uses_resolved_agent_yaml(tmp_path: Path):
+    config = ExperimentConfig(
+        dataset="terminal-bench@2.0",
+        agents=("default",),
+        model="gemini-3.1-flash-lite-preview",
+        max_turns=30,
+        max_tokens=8192,
+        n_concurrent=4,
+        n_attempts=1,
+        include_tasks=("build-*", "git-*"),
+        n_tasks=5,
+    )
     job = ExperimentJob(
         experiment_id="tb2-baseline",
-        run_id="smoke",
+        experiment_instance_id="smoke",
         agent_id="default",
         dataset="terminal-bench@2.0",
-        settings=ExperimentRuntimeOverrides(
-            model="gemini-3.1-flash-lite-preview",
-            max_turns=30,
-            max_tokens=8192,
-            n_concurrent=4,
-            n_attempts=1,
-            include_tasks=("build-*", "git-*"),
-            n_tasks=5,
-        ),
+        config=config,
     )
 
     spec = build_harbor_run_spec(job, cwd=tmp_path, jobs_dir=tmp_path / "jobs")
 
-    assert spec.run_id == "tb2-baseline-smoke-default"
+    assert spec.run_id == "smoke-default"
     assert spec.job.agent.agent_name == "default"
     assert spec.job.agent.model == "gemini-3.1-flash-lite-preview"
     assert spec.job.agent.max_turns == 30
@@ -61,5 +66,5 @@ def test_build_harbor_run_spec_uses_resolved_agent_yaml(tmp_path: Path):
     assert spec.job.n_attempts == 1
     assert spec.job.jobs_dir == tmp_path / "jobs"
     assert spec.job.metadata["experiment_id"] == "tb2-baseline"
-    assert spec.job.metadata["run_id"] == "smoke"
+    assert spec.job.metadata["experiment_instance_id"] == "smoke"
     assert spec.job.metadata["agent_id"] == "default"
