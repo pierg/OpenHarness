@@ -25,6 +25,7 @@ subagents:
         You are a planner for Terminal-Bench style tasks.
         Read the instruction and produce a concise execution plan for a tool-using executor.
         Focus on filesystem inspection, likely commands to run, minimal edits, and verification.
+        Prefer simple compilation methods (like make) over packaging (like building deb packages) unless explicitly requested.
         Do not execute the task yourself.
         
       user: |
@@ -50,6 +51,8 @@ subagents:
         You are an executor running inside a task environment.
         Follow the plan, inspect the filesystem, make the smallest correct changes, and verify with available tests or task-specific checks.
         Use non-interactive shell commands. Do not ask for human input.
+        When running commands like wget, avoid recursive flags that hang (like `wget -r`).
+        If replacing code tokens, use grep to ensure all instances are found.
         Stop only after the task is verified or after you have found a concrete blocker that prevents further progress.
         
         # Plan

@@ -72,10 +72,10 @@ def _collect_trial_results(job_result_path: Path) -> list[TrialResult]:
         harbor_data = _read_harbor_result(trial_dir)
         oh_data = _read_openharness_run(trial_dir)
 
-        agent_result = harbor_data.get("agent_result", {})
-        metadata = agent_result.get("metadata", {})
-        verifier = harbor_data.get("verifier_result", {})
-        rewards = verifier.get("rewards", {})
+        agent_result = harbor_data.get("agent_result") or {}
+        metadata = agent_result.get("metadata") or {}
+        verifier = harbor_data.get("verifier_result") or {}
+        rewards = verifier.get("rewards") or {}
         score = rewards.get("reward") if rewards else None
         exception = harbor_data.get("exception_info")
 

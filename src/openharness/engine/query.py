@@ -40,7 +40,7 @@ from openharness.engine.stream_events import (
 from openharness.hooks import HookEvent, HookExecutor
 from openharness.observability import NullTraceObserver, TraceObserver
 from openharness.permissions.checker import PermissionChecker
-from openharness.tools.base import ToolExecutionContext
+from openharness.tools.base import ToolExecutionContext, ToolResult
 from openharness.tools.base import ToolRegistry
 
 AUTO_COMPACT_STATUS_MESSAGE = "Auto-compacting conversation memory to keep things fast and focused."
@@ -861,18 +861,30 @@ async def _execute_tool_call(
 
         log.debug("executing %s ...", tool_name)
         t0 = time.monotonic()
-        result = await tool.execute(
-            parsed_input,
-            ToolExecutionContext(
-                cwd=context.cwd,
-                metadata={
-                    "tool_registry": context.tool_registry,
-                    "ask_user_prompt": context.ask_user_prompt,
-                    "trace_observer": context.trace_observer,
-                    **(context.tool_metadata or {}),
-                },
-            ),
-        )
+        try:
+            result = await tool.execute(
+                parsed_input,
+                ToolExecutionContext(
+                    cwd=context.cwd,
+                    metadata={
+                        "tool_registry": context.tool_registry,
+                        "ask_user_prompt": context.ask_user_prompt,
+                        "trace_observer": context.trace_observer,
+                        **(context.tool_metadata or {}),
+                    },
+                ),
+            )
+        except Exception as exc:
+            log.exception(
+                "tool execution raised: name=%s id=%s",
+                tool_name,
+                tool_use_id,
+                exc_info=exc,
+            )
+            result = ToolResult(
+                output=f"Tool {tool_name} failed: {type(exc).__name__}: {exc}",
+                is_error=True,
+            )
         elapsed = time.monotonic() - t0
         log.debug(
             "executed %s in %.2fs err=%s output_len=%d",
