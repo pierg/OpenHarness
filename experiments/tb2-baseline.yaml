@@ -1,17 +1,36 @@
 id: tb2-baseline
 dataset: terminal-bench@2.0
 
-model: gemini-3.1-flash-lite-preview
-max_turns: 30
-max_tokens: 8192
-n_concurrent: 4
-n_attempts: 1
-include_tasks: []
-exclude_tasks: []
-n_tasks: null
+defaults:
+  model: gemini-2.0-flash
+  max_turns: 30
+  max_tokens: 8192
+  n_concurrent: 1
+  n_attempts: 1
+
+task_filter:
+  include_tasks: []
+  exclude_tasks: []
 
 agents:
   - default
   - planner_executor
-  - reflection
-  - react
+  # - reflection
+  # - react
+
+leg_concurrency: 2
+
+profiles:
+  demo:
+    task_filter:
+      include_tasks:
+        - "build-*"
+        - "git-*"
+      n_tasks: 2
+    defaults:
+      n_concurrent: 2
+  fast:
+    defaults:
+      model: gemini-2.5-flash
+      max_turns: 15
+      max_tokens: 4096
