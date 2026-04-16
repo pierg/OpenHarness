@@ -38,7 +38,7 @@ def test_collect_experiment_results_normalizes_harbor_trials(tmp_path: Path):
                     "n_output_tokens": 20,
                     "cost_usd": 0.01,
                     "metadata": {
-                        "model": "gemini-2.5-flash",
+                        "model": "gemini-3.1-flash-lite-preview",
                         "trace_id": "trace-1",
                         "trace_url": "http://trace/1",
                     },
@@ -95,7 +95,7 @@ def test_collect_experiment_results_normalizes_harbor_trials(tmp_path: Path):
     assert row.task_name == "build-pov-ray"
     assert row.score == 1.0
     assert row.passed is True
-    assert row.model == "gemini-2.5-flash"
+    assert row.model == "gemini-3.1-flash-lite-preview"
     assert row.input_tokens == 100
     assert row.output_tokens == 20
     assert row.total_tokens == 120
@@ -135,7 +135,7 @@ def test_summarize_experiment_results_groups_by_agent(tmp_path: Path):
                 score=1.0,
                 passed=True,
                 error=None,
-                model="gemini-2.5-flash",
+                model="gemini-3.1-flash-lite-preview",
                 input_tokens=10,
                 output_tokens=5,
                 total_tokens=15,
@@ -158,7 +158,7 @@ def test_summarize_experiment_results_groups_by_agent(tmp_path: Path):
                 score=0.0,
                 passed=False,
                 error=None,
-                model="gemini-2.5-flash",
+                model="gemini-3.1-flash-lite-preview",
                 input_tokens=20,
                 output_tokens=5,
                 total_tokens=25,

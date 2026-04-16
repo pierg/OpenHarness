@@ -27,7 +27,7 @@ from openharness.sandbox.session import (  # noqa: E402
 )
 
 AGENT_CONFIG = EXAMPLES_ROOT / "_shared" / "agent_configs" / "bugfix_agent.yaml"
-MODEL = "gemini-2.5-flash"
+MODEL = "gemini-3.1-flash-lite-preview"
 MAX_TURNS = 10
 
 log = logging.getLogger(__name__)

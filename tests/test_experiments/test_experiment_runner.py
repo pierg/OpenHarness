@@ -11,7 +11,7 @@ from openharness.experiments.specs import ExperimentJob, ExperimentRuntimeOverri
 
 def test_resolve_agent_config_applies_runtime_overrides_recursively():
     overrides = ExperimentRuntimeOverrides(
-        model="gemini-2.5-flash",
+        model="gemini-3.1-flash-lite-preview",
         max_turns=30,
         max_tokens=8192,
     )
@@ -19,10 +19,10 @@ def test_resolve_agent_config_applies_runtime_overrides_recursively():
     config = resolve_agent_config_for_experiment("planner_executor", overrides)
 
     assert config.name == "planner_executor"
-    assert config.subagents["planner"].model == "gemini-2.5-flash"
+    assert config.subagents["planner"].model == "gemini-3.1-flash-lite-preview"
     assert config.subagents["planner"].max_turns == 30
     assert config.subagents["planner"].max_tokens == 8192
-    assert config.subagents["executor"].model == "gemini-2.5-flash"
+    assert config.subagents["executor"].model == "gemini-3.1-flash-lite-preview"
     assert config.subagents["executor"].max_turns == 30
     assert config.subagents["executor"].max_tokens == 8192
 
@@ -34,7 +34,7 @@ def test_build_harbor_run_spec_uses_resolved_agent_yaml(tmp_path: Path):
         agent_id="default",
         dataset="terminal-bench@2.0",
         settings=ExperimentRuntimeOverrides(
-            model="gemini-2.5-flash",
+            model="gemini-3.1-flash-lite-preview",
             max_turns=30,
             max_tokens=8192,
             n_concurrent=4,
@@ -48,12 +48,12 @@ def test_build_harbor_run_spec_uses_resolved_agent_yaml(tmp_path: Path):
 
     assert spec.run_id == "tb2-baseline-smoke-default"
     assert spec.job.agent.agent_name == "default"
-    assert spec.job.agent.model == "gemini-2.5-flash"
+    assert spec.job.agent.model == "gemini-3.1-flash-lite-preview"
     assert spec.job.agent.max_turns == 30
     assert spec.job.agent.max_tokens == 8192
     assert spec.job.agent.agent_config_yaml is not None
     assert "name: default" in spec.job.agent.agent_config_yaml
-    assert "model: gemini-2.5-flash" in spec.job.agent.agent_config_yaml
+    assert "model: gemini-3.1-flash-lite-preview" in spec.job.agent.agent_config_yaml
     assert spec.job.task.dataset == "terminal-bench@2.0"
     assert spec.job.task.include_task_names == ("build-*", "git-*")
     assert spec.job.task.n_tasks == 5

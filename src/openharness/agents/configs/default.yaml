@@ -1,7 +1,7 @@
 name: default
 description: Default OpenHarness Terminal-Bench baseline agent.
 
-model: gemini-2.5-flash
+model: gemini-3.1-flash-lite-preview
 max_turns: 30
 max_tokens: 8192
 definition:
