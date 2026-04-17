@@ -21,7 +21,7 @@ export LANGFUSE_SECRET_KEY=...
 export LANGFUSE_BASE_URL=http://localhost:3000
 ```
 
-Docker is required for the Harbor example.
+Docker is required for the Docker sandbox and Harbor examples.
 
 ## Shared Files
 
@@ -85,7 +85,27 @@ Shows:
 
 Use this to inspect multi-agent behavior without Harbor.
 
-## 3. Harbor Bug Fix
+## 3. Docker Sandbox Bug Fix
+
+Run:
+
+```bash
+.venv/bin/python examples/local_docker_sandbox_fix_bug/run.py
+```
+
+Shows:
+
+- same YAML config as the local example
+- OpenHarness Docker sandbox backend
+- bash tool execution routed through the sandbox container
+- normal local run artifacts under `runs/<run_id>/`
+- distinction between runtime sandboxing and Harbor evaluation containers
+
+If Docker is not running, this example should exit with a clear prerequisite message.
+
+Use this to inspect tool sandboxing without introducing Harbor.
+
+## 4. Harbor Bug Fix
 
 Run:
 
@@ -112,6 +132,7 @@ Run all examples:
 ```bash
 .venv/bin/python examples/local_fix_bug/run.py
 .venv/bin/python examples/local_workflow_coordinator_worker_fix_bug/run.py
+.venv/bin/python examples/local_docker_sandbox_fix_bug/run.py
 .venv/bin/python examples/harbor_fix_bug/run.py
 ```
 
@@ -120,6 +141,8 @@ Expected:
 - each started run prints run ID, run directory, workspace, and trace URL before the agent works
 - local example passes
 - workflow example passes
+- Docker sandbox example passes when Docker is running
+- Docker sandbox example exits cleanly when Docker is not running
 - Harbor example passes when Docker is running
 - Harbor example exits cleanly when Docker is not running
 

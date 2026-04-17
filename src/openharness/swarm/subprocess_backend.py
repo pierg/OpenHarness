@@ -9,7 +9,6 @@ import shlex
 import sys
 import uuid
 from pathlib import Path
-from typing import TYPE_CHECKING
 
 from openharness.swarm.spawn_utils import build_inherited_env_vars
 from openharness.swarm.types import (
@@ -20,22 +19,14 @@ from openharness.swarm.types import (
 )
 from openharness.tasks.manager import get_task_manager
 
-if TYPE_CHECKING:
-    pass
-
 logger = logging.getLogger(__name__)
 
 
 class SubprocessBackend:
-    """TeammateExecutor that runs each teammate as a separate subprocess.
-
-    Uses the existing :class:`~openharness.tasks.manager.BackgroundTaskManager`
-    to create and manage the child processes, communicating via stdin/stdout.
-    """
+    """TeammateExecutor that runs each teammate as a separate subprocess."""
 
     type: BackendType = "subprocess"
 
-    # Maps agent_id -> task_id for tracking live agents
     _agent_tasks: dict[str, str]
 
     def __init__(self) -> None:
@@ -47,11 +38,7 @@ class SubprocessBackend:
         return True
 
     async def spawn(self, config: TeammateSpawnConfig) -> SpawnResult:
-        """Spawn a new teammate as a subprocess via the task manager.
-
-        Builds the appropriate CLI command and creates a ``local_agent`` task
-        that accepts the initial prompt via stdin.
-        """
+        """Spawn a new teammate as an OpenHarness worker subprocess."""
         agent_id = f"{config.name}@{config.team}"
         extra_env = build_inherited_env_vars()
         extra_env.update(
@@ -64,7 +51,6 @@ class SubprocessBackend:
         if config.color:
             extra_env["CLAUDE_CODE_AGENT_COLOR"] = config.color
 
-        # Build environment export prefix for shell invocation
         env_prefix = " ".join(f"{k}={v!r}" for k, v in extra_env.items())
 
         from openharness.config.paths import get_tasks_dir  # noqa: PLC0415
@@ -114,11 +100,7 @@ class SubprocessBackend:
         )
 
     async def send_message(self, agent_id: str, message: TeammateMessage) -> None:
-        """Send a message to a running teammate via its stdin pipe.
-
-        The message is serialised as a single JSON line so the teammate can
-        distinguish structured messages from plain prompts.
-        """
+        """Send a message to a running teammate via its stdin pipe."""
         task_id = self._agent_tasks.get(agent_id)
         if task_id is None:
             raise ValueError(f"No active subprocess for agent {agent_id!r}")
@@ -141,16 +123,8 @@ class SubprocessBackend:
         logger.debug("Sent message to %s (task %s)", agent_id, task_id)
 
     async def shutdown(self, agent_id: str, *, force: bool = False) -> bool:
-        """Terminate a subprocess teammate.
-
-        Args:
-            agent_id: The agent to terminate.
-            force: Ignored for subprocess backend; always sends SIGTERM then
-                   SIGKILL after a brief wait (handled by the task manager).
-
-        Returns:
-            True if the task was found and terminated.
-        """
+        """Terminate a subprocess teammate."""
+        del force
         task_id = self._agent_tasks.get(agent_id)
         if task_id is None:
             logger.warning("shutdown() called for unknown agent %s", agent_id)
@@ -161,7 +135,6 @@ class SubprocessBackend:
             await manager.stop_task(task_id)
         except ValueError as exc:
             logger.debug("stop_task for %s: %s", task_id, exc)
-            # Task may have already finished — still clean up mapping
         finally:
             self._agent_tasks.pop(agent_id, None)
             config_path = self._agent_config_paths.pop(agent_id, None)

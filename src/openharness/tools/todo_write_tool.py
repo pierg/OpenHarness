@@ -19,10 +19,10 @@ class TodoWriteToolInput(BaseModel):
 
 
 class TodoWriteTool(BaseTool):
-    """Append an item to a TODO markdown file."""
+    """Add or update an item in a TODO markdown file."""
 
     name = "todo_write"
-    description = "Append a TODO item to a markdown checklist file."
+    description = "Add a new TODO item or mark an existing one as done in a markdown checklist file."
     input_model = TodoWriteToolInput
 
     def __init__(self, workspace: Workspace | None = None) -> None:
@@ -31,14 +31,23 @@ class TodoWriteTool(BaseTool):
     async def execute(self, arguments: TodoWriteToolInput, context: ToolExecutionContext) -> ToolResult:
         workspace = self._workspace or LocalWorkspace(context.cwd)
         path = _resolve(workspace.cwd, arguments.path)
-        prefix = "- [x]" if arguments.checked else "- [ ]"
 
         if await workspace.file_exists(path):
             existing = (await workspace.read_file(path)).decode("utf-8")
         else:
             existing = "# TODO\n"
 
-        updated = existing.rstrip() + f"\n{prefix} {arguments.item}\n"
+        unchecked_line = f"- [ ] {arguments.item}"
+        checked_line = f"- [x] {arguments.item}"
+        target_line = checked_line if arguments.checked else unchecked_line
+
+        if unchecked_line in existing and arguments.checked:
+            updated = existing.replace(unchecked_line, checked_line, 1)
+        elif target_line in existing:
+            return ToolResult(output=f"No change needed in {path}")
+        else:
+            updated = existing.rstrip() + f"\n{target_line}\n"
+
         await workspace.write_file(path, updated.encode("utf-8"))
         return ToolResult(output=f"Updated {path}")
 
