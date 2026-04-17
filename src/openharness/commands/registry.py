@@ -1657,10 +1657,22 @@ def create_default_command_registry(
     registry.register(SlashCommand("skills", "List or show available skills", _skills_handler))
     registry.register(SlashCommand("config", "Show or update configuration", _config_handler))
     registry.register(SlashCommand("mcp", "Show MCP status", _mcp_handler))
-    registry.register(SlashCommand("plugin", "Manage plugins", _plugin_handler))
     registry.register(
         SlashCommand(
-            "reload-plugins", "Reload plugin discovery for this workspace", _reload_plugins_handler
+            "plugin",
+            "Manage plugins",
+            _plugin_handler,
+            remote_invocable=False,
+            remote_admin_opt_in=True,
+        )
+    )
+    registry.register(
+        SlashCommand(
+            "reload-plugins",
+            "Reload plugin discovery for this workspace",
+            _reload_plugins_handler,
+            remote_invocable=False,
+            remote_admin_opt_in=True,
         )
     )
     registry.register(
