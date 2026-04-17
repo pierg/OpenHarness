@@ -45,6 +45,7 @@ class OpenHarnessHarborAgentSpec:
     remote_cwd: str = "/app"
     max_turns: int | None = None
     max_tokens: int | None = None
+    agent_config_yaml: str | None = None
     extra_kwargs: dict[str, Any] = field(default_factory=dict)
     env: dict[str, str] = field(default_factory=dict)
 
@@ -58,6 +59,8 @@ class OpenHarnessHarborAgentSpec:
             kwargs["max_turns"] = self.max_turns
         if self.max_tokens is not None:
             kwargs["max_tokens"] = self.max_tokens
+        if self.agent_config_yaml is not None:
+            kwargs["agent_config_yaml"] = self.agent_config_yaml
         kwargs.update(self.extra_kwargs)
         return kwargs
 
@@ -117,6 +120,7 @@ class HarborJobSpec:
     environment: HarborEnvironmentSpec
     agent: OpenHarnessHarborAgentSpec
     jobs_dir: Path
+    run_cwd: Path | None = None
     job_name: str = field(
         default_factory=lambda: datetime.now().strftime("openharness-harbor-%Y%m%d-%H%M%S-%f")
     )
@@ -129,6 +133,7 @@ class HarborJobSpec:
     existing_job_policy: HarborExistingJobPolicy = HarborExistingJobPolicy.ERROR
     env_file: Path | None = None
     extra_args: tuple[str, ...] = ()
+    metadata: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -139,3 +144,5 @@ class HarborRunResult:
     job_name: str
     jobs_dir: Path
     result_path: Path
+    trace_id: str | None = None
+    trace_url: str | None = None

@@ -13,9 +13,10 @@ The format is based on Keep a Changelog, and this project currently tracks chang
 - `OPENHARNESS_API_FORMAT` environment variable for selecting the API format.
 - `OPENAI_API_KEY` fallback when using OpenAI-format providers.
 - GitHub Actions CI workflow for Python linting, tests, and frontend TypeScript checks.
-- `CONTRIBUTING.md` with local setup, validation commands, and PR expectations.
-- `docs/SHOWCASE.md` with concrete OpenHarness usage patterns and demo commands.
+- `CONTRIBUTING.md` reframed as fork development notes with setup, checks, example policy, and docs policy.
+- `docs/examples.md` with concrete OpenHarness usage patterns and demo commands.
 - GitHub issue templates and a pull request template.
+- Google Gemini and Vertex AI client support through the shared streaming API client protocol.
 
 ### Fixed
 
@@ -29,9 +30,9 @@ The format is based on Keep a Changelog, and this project currently tracks chang
 - Fixed concurrent permission modals overwriting each other in TUI default mode when the LLM returns multiple tool calls in one response; `_ask_permission` now serialises callers via an `asyncio.Lock` so each modal is shown and resolved before the next one is emitted.
 ### Changed
 
-- README now links to contribution docs, changelog, showcase material, and provider compatibility guidance.
-- README quick start now includes a one-command demo and clearer provider compatibility notes.
-- README provider compatibility section updated to include OpenAI-format providers.
+- README is now a concise fork overview with setup, example commands, artifact layout, and links into `docs/`.
+- Documentation is reorganized around maintained feature, architecture, run, and example guides.
+- Example documentation now lists only examples that demonstrate distinct end-to-end behavior.
 
 ## [0.1.0] - 2026-04-01
 

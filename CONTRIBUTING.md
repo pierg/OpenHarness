@@ -1,68 +1,93 @@
-# Contributing to OpenHarness
+# Fork Development Notes
 
-OpenHarness is an open-source agent harness focused on clarity, hackability, and compatibility with Claude-style workflows.
+This repository is a personal fork of [HKUDS/OpenHarness](https://github.com/HKUDS/OpenHarness). It is not the primary place for upstream OpenHarness contributions.
 
-## Ways to contribute
+This file is a maintenance checklist for changes made on this fork.
 
-- Fix bugs or tighten edge-case handling in the harness runtime.
-- Improve docs, onboarding, examples, and architecture notes.
-- Add tests for tools, permissions, plugins, MCP, or multi-agent flows.
-- Contribute new skills, plugins, or provider compatibility improvements.
-- Share real usage patterns that can be added to [`docs/SHOWCASE.md`](docs/SHOWCASE.md).
+## Fork Scope
 
-## Development setup
+This fork currently focuses on:
+
+- YAML-configured agents
+- Google Gemini and Vertex AI support
+- runtime-generated run IDs
+- canonical `runs/<run_id>/` artifacts
+- local Langfuse traces
+- Harbor task execution
+- maintained end-to-end examples
+
+Changes outside this scope should usually stay small, or go upstream if they belong to the base OpenHarness CLI/runtime.
+
+## Local Setup
 
 ```bash
-git clone https://github.com/HKUDS/OpenHarness.git
-cd OpenHarness
-uv sync --extra dev
+git clone <this-fork-url>
+cd OpenHarness_fork
+uv sync --extra dev --extra harbor
+source .venv/bin/activate
 ```
 
-If you want to work on the React terminal UI as well:
+For the Harbor example, Docker must be running.
+
+For the example suite, configure Google AI Studio or Vertex AI credentials and local Langfuse:
+
+```bash
+export GOOGLE_API_KEY=...
+export LANGFUSE_PUBLIC_KEY=...
+export LANGFUSE_SECRET_KEY=...
+export LANGFUSE_BASE_URL=http://localhost:3000
+```
+
+For Vertex AI, set `VERTEX_PROJECT` or `GOOGLE_CLOUD_PROJECT`, and optionally `VERTEX_LOCATION` or `GOOGLE_CLOUD_LOCATION`.
+
+## Required Checks
+
+```bash
+ruff check examples src/openharness tests
+
+uv run --extra dev --extra harbor python -m pytest \
+  tests/test_runs/test_local.py \
+  tests/test_services/test_runs.py \
+  tests/test_harbor/test_harbor_runner.py \
+  tests/test_harbor/test_harbor_agent.py \
+  tests/test_swarm/test_orchestration.py \
+  tests/test_observability/test_langfuse.py \
+  tests/test_api/test_gemini_client.py
+```
+
+If the terminal frontend changes, also run:
 
 ```bash
 cd frontend/terminal
 npm ci
-cd ../..
-```
-
-## Local checks
-
-Run the same core checks that CI runs before opening a PR:
-
-```bash
-uv run ruff check src tests scripts
-uv run pytest -q
-```
-
-Frontend sanity check:
-
-```bash
-cd frontend/terminal
 npx tsc --noEmit
 ```
 
-## Pull request expectations
+## Example Policy
 
-- Keep PRs scoped. Small, reviewable changes merge faster than broad rewrites.
-- Include the problem, the change, and how you verified it.
-- Add or update tests when behavior changes.
-- Update docs when CLI flags, workflows, or compatibility claims change.
-- Add a short entry under `Unreleased` in [`CHANGELOG.md`](CHANGELOG.md) for user-visible changes.
-- If you are improving type coverage, feel free to run `uv run mypy src/openharness`, but it is not yet a required green check for the whole repo.
+The maintained examples are documented in [`docs/examples.md`](docs/examples.md).
 
-## Documentation and community contributions
+Keep examples only when they show distinct end-to-end behavior. Do not add examples that only change the prompt, model, or agent name.
 
-Issue [#7](https://github.com/HKUDS/OpenHarness/issues/7) surfaced several high-value docs needs. Useful contributions in that area include:
+Every maintained example should:
 
-- README accuracy improvements and compatibility notes.
-- Short, reproducible examples for common workflows.
-- Showcase entries based on real usage rather than generic marketing claims.
-- Contribution and maintenance docs that make the repo easier to navigate.
+- generate its run ID at runtime
+- write artifacts under `runs/<run_id>/`
+- log the run directory and Langfuse trace URL at startup
+- use YAML agent configs
+- use Google Gemini unless the example is specifically about provider selection
 
-## Reporting bugs and proposing features
+## Docs Policy
 
-- Use the GitHub issue templates when possible.
-- Include environment details, exact commands, and error output for bugs.
-- For features, explain the concrete workflow gap and expected behavior.
-- If the request is mostly documentation or maintenance related, say that explicitly so it can be scoped as a docs PR.
+Keep [README.md](README.md) concise. Put feature details in [`docs/`](docs/README.md).
+
+Update docs when behavior changes for:
+
+- run IDs or artifact layout
+- Langfuse tracing
+- Harbor execution
+- YAML agent configs
+- examples
+- Gemini or Vertex AI support
+
+Add a short entry under `Unreleased` in [`CHANGELOG.md`](CHANGELOG.md) for user-visible changes.

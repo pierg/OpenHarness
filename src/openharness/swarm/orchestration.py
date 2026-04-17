@@ -16,6 +16,7 @@ from openharness.agents.factory import AgentFactory
 from openharness.coordinator.agent_definitions import AgentDefinition
 from openharness.observability import NullTraceObserver, TraceObserver
 from openharness.runtime.workflow import Workflow as AgentWorkflow
+from openharness.runs.context import RunContext
 from openharness.swarm.mailbox import MailboxMessage, TeammateMailbox
 from openharness.swarm.registry import get_backend_registry
 from openharness.swarm.types import TeammateMessage, TeammateSpawnConfig
@@ -44,12 +45,14 @@ class TeamOrchestrator:
         backend_name: str = "in_process",
         *,
         trace_observer: TraceObserver | None = None,
+        run_context: RunContext | None = None,
     ) -> None:
         self.team_name = team_name
         self.workspace_dir = workspace_dir
         self.backend = get_backend_registry().get_executor(backend_name)
         self.leader_mailbox = TeammateMailbox(team_name=team_name, agent_id="leader")
         self.trace_observer = trace_observer or NullTraceObserver()
+        self.run_context = run_context
         self.workers: dict[str, str] = {}  # Maps role_name to agent_id
 
     async def __aenter__(self) -> "TeamOrchestrator":
@@ -91,7 +94,8 @@ class TeamOrchestrator:
             disallowed_tools=agent_def.disallowed_tools,
             initial_prompt=agent_def.initial_prompt,
             max_turns=agent_def.max_turns,
-            run_id=getattr(self.trace_observer, "run_id", None),
+            run_id=self.run_context.run_id if self.run_context else getattr(self.trace_observer, "run_id", None),
+            run_root=str(self.run_context.run_dir) if self.run_context else None,
             task_payload=payload or {},
         )
         result = await self.backend.spawn(config)
@@ -189,6 +193,7 @@ class TeamOrchestrator:
         identity: str,
         payload: dict[str, Any] | None = None,
         api_client: Any | None = None,
+        run_context: RunContext | None = None,
     ) -> Any:
         """Execute a coordinator or single-run agent inline within the team environment.
         
@@ -222,6 +227,7 @@ class TeamOrchestrator:
                 agent_name=agent_def.agent_config_name or agent_def.name,
                 api_client=api_client,
                 trace_observer=self.trace_observer,
+                run_context=run_context or self.run_context,
             )
         finally:
             if previous_context is not None:

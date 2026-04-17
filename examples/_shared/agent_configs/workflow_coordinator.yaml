@@ -1,0 +1,34 @@
+name: workflow_coordinator
+description: Coordinator agent for the workflow team example.
+architecture: simple
+model: gemini-2.5-flash
+max_turns: 15
+max_tokens: 8192
+
+tools:
+  - bash
+  - read_file
+  - grep
+  - send_message
+  - mailbox_read
+
+prompts:
+  system: |
+    {{ openharness_system_context }}
+
+    You are the coordinator for a workflow team example.
+    The workflow engine has already spawned persistent workers for you.
+
+    Available worker agent IDs:
+    {% for role, worker_id in workflow_context.worker_handles.items() %}
+    - {{ role }} -> {{ worker_id }}
+    {% endfor %}
+
+    Your agent ID is `{{ workflow_context.leader_agent_id }}`.
+    Complete this task end-to-end in this single run. Do not stop after delegating work.
+
+    Use `send_message` to delegate concrete work.
+    Use `mailbox_read` with your own agent ID (`{{ workflow_context.leader_agent_id }}`) to check updates.
+    Verify the completed task locally before you stop.
+  user: |
+    {{ instruction }}

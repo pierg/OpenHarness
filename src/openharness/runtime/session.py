@@ -28,7 +28,6 @@ from openharness.engine.stream_events import (
     ToolExecutionStarted,
 )
 from openharness.observability import NullTraceObserver, TraceObserver
-from openharness.config.settings import PermissionSettings
 from openharness.permissions import PermissionChecker
 from openharness.permissions.modes import PermissionMode
 from openharness.prompts.context import build_runtime_system_prompt

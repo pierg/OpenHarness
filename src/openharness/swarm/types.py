@@ -309,6 +309,9 @@ class TeammateSpawnConfig:
     run_id: str | None = None
     """Top-level OpenHarness run ID used for shared observability grouping."""
 
+    run_root: str | None = None
+    """Top-level OpenHarness run directory used for shared artifacts."""
+
     subscriptions: list[str] = field(default_factory=list)
     """Event topics this teammate subscribes to."""
 

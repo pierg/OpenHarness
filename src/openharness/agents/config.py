@@ -60,11 +60,22 @@ class AgentConfig(BaseModel):
         """Load an agent configuration from a YAML file."""
         path_obj = Path(path)
         raw = yaml.safe_load(path_obj.read_text(encoding="utf-8"))
+        return cls.from_mapping(raw, source_name=path_obj.stem)
+
+    @classmethod
+    def from_yaml_text(cls, text: str, *, source_name: str = "inline") -> AgentConfig:
+        """Load an agent configuration from a YAML string."""
+        raw = yaml.safe_load(text)
+        return cls.from_mapping(raw, source_name=source_name)
+
+    @classmethod
+    def from_mapping(cls, raw: Any, *, source_name: str) -> AgentConfig:
+        """Validate a raw YAML mapping as an agent configuration."""
         if not isinstance(raw, dict):
             raise ValueError(f"Expected a YAML mapping, got {type(raw).__name__}")
         
         if "name" not in raw:
-            raw["name"] = path_obj.stem
+            raw["name"] = source_name
 
         return cls.model_validate(raw)
 

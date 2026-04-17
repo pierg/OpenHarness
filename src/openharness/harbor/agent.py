@@ -10,6 +10,7 @@ from typing import Any
 from uuid import uuid4
 
 from openharness.agents.contracts import TaskDefinition
+from openharness.agents.config import AgentConfig
 from openharness.agents.factory import AgentFactory
 from harbor.agents.base import BaseAgent
 from harbor.environments.base import BaseEnvironment
@@ -21,7 +22,7 @@ from openharness.config import load_settings
 from openharness.observability import create_trace_observer
 from openharness.permissions.modes import PermissionMode
 from openharness.runtime.session import AgentLogPaths, AgentRuntime
-from openharness.services.runs import save_run_manifest
+from openharness.runs.context import RunContext
 from openharness.tools.base import ToolRegistryFactory
 from openharness.workspace.harbor import HarborWorkspace
 
@@ -59,12 +60,17 @@ class OpenHarnessHarborAgent(BaseAgent):
         remote_cwd: str = "/app",
         max_turns: int | None = None,
         max_tokens: int | None = None,
+        agent_config_yaml: str | None = None,
+        run_id: str | None = None,
+        run_root: str | Path | None = None,
         tool_registry_factory: ToolRegistryFactory | None = None,
         **kwargs: object,
     ) -> None:
         del kwargs
         self._remote_cwd = remote_cwd
         self._extra_env = dict(extra_env or {})
+        self._run_id = run_id
+        self._run_root = str(run_root) if run_root is not None else None
         resolved_model_name = (
             model_name
             or self._extra_env.get("OPENHARNESS_MODEL")
@@ -73,6 +79,8 @@ class OpenHarnessHarborAgent(BaseAgent):
 
         self._agent_name = agent_name
         factory = AgentFactory.with_catalog_configs()
+        if agent_config_yaml is not None:
+            factory.register(AgentConfig.from_yaml_text(agent_config_yaml, source_name=agent_name))
         config = factory.get_config(agent_name)
 
         overrides: dict[str, Any] = {}
@@ -118,25 +126,53 @@ class OpenHarnessHarborAgent(BaseAgent):
         context: AgentContext,
     ) -> None:
         with _temporary_environ(self._extra_env):
-            self.logs_dir.mkdir(parents=True, exist_ok=True)
-            messages_path = self.logs_dir / "messages.jsonl"
-            events_path = self.logs_dir / "events.jsonl"
-
             settings = load_settings()
             resolved_settings = settings.merge_cli_overrides(model=self.model_name)
             resolved_model = self.model_name or resolved_settings.model
+            run_id = self._run_id or os.environ.get("OPENHARNESS_RUN_ID")
+            run_root = self._run_root or os.environ.get("OPENHARNESS_RUN_ROOT")
+            if run_id is not None and run_root is not None:
+                run_context = RunContext.from_run_root(
+                    run_root,
+                    interface="harbor",
+                    run_id=run_id,
+                    cwd=self._remote_cwd,
+                    metadata={
+                        "harbor_logs_dir": str(self.logs_dir),
+                    },
+                )
+            else:
+                run_context = RunContext.create(
+                    self.logs_dir,
+                    interface="harbor",
+                    run_id=run_id,
+                    metadata={
+                        "harbor_logs_dir": str(self.logs_dir),
+                    },
+                )
+            messages_path = run_context.artifacts.messages_path
+            events_path = run_context.artifacts.events_path
             trace_observer = create_trace_observer(
                 session_id=uuid4().hex[:12],
                 interface="harbor",
                 cwd=self._remote_cwd,
                 model=resolved_model,
                 provider=detect_provider(resolved_settings).name,
+                run_id=run_context.run_id,
+            )
+            run_context.bind_trace_observer(trace_observer)
+            run_context.start(
+                metadata={
+                    "remote_cwd": self._remote_cwd,
+                    "mcp_server_count": len(self.mcp_servers),
+                    "harbor_logs_dir": str(self.logs_dir),
+                }
             )
             trace_observer.start_session(
                 metadata={
                     "remote_cwd": self._remote_cwd,
                     "mcp_server_count": len(self.mcp_servers),
-                    "logs_dir": str(self.logs_dir),
+                    "run_dir": str(run_context.run_dir),
                 }
             )
 
@@ -147,7 +183,7 @@ class OpenHarnessHarborAgent(BaseAgent):
                 messages_path=str(messages_path),
                 events_path=str(events_path),
             )
-            
+
             runtime = AgentRuntime(
                 workspace=workspace,
                 settings=resolved_settings,
@@ -176,15 +212,14 @@ class OpenHarnessHarborAgent(BaseAgent):
                 context.n_output_tokens = summary.output_tokens or None
                 context.n_cache_tokens = None
                 context.cost_usd = None
-                run_id = os.environ.get("OPENHARNESS_RUN_ID")
-                run_root = os.environ.get("OPENHARNESS_RUN_ROOT")
                 context.metadata = {
                     "agent_name": self.name(),
                     "agent_version": self.version(),
                     "model": resolved_model,
                     "trace_id": trace_observer.trace_id,
-                    "run_id": run_id,
-                    "run_root": run_root,
+                    "trace_url": trace_observer.trace_url,
+                    "run_id": run_context.run_id,
+                    "run_root": str(run_context.run_dir),
                     "remote_cwd": self._remote_cwd,
                     "messages_path": str(messages_path),
                     "events_path": str(events_path),
@@ -192,20 +227,6 @@ class OpenHarnessHarborAgent(BaseAgent):
                     "summary": asdict(summary),
                     "error": error_message,
                 }
-                if run_id is not None and run_root is not None:
-                    save_run_manifest(
-                        Path(run_root),
-                        {
-                            "run_id": run_id,
-                            "run_root": run_root,
-                            "agent_name": self.name(),
-                            "agent_version": self.version(),
-                            "model": resolved_model,
-                            "trace_id": trace_observer.trace_id,
-                            "summary": asdict(summary),
-                            "error": error_message,
-                        },
-                    )
                 trace_observer.end_session(
                     output={
                         "final_text": summary.final_text,
@@ -219,6 +240,25 @@ class OpenHarnessHarborAgent(BaseAgent):
                         "error": error_message,
                         "messages_path": str(messages_path),
                         "events_path": str(events_path),
+                    },
+                )
+                run_context.finish(
+                    status="failed" if error_message else "completed",
+                    error=error_message,
+                    metadata={
+                        "agent_name": self.name(),
+                        "agent_version": self.version(),
+                        "model": resolved_model,
+                        "trace_url": trace_observer.trace_url,
+                        "remote_cwd": self._remote_cwd,
+                    },
+                    results={
+                        "final_text": summary.final_text,
+                    },
+                    metrics={
+                        "input_tokens": summary.input_tokens,
+                        "output_tokens": summary.output_tokens,
+                        "total_tokens": summary.input_tokens + summary.output_tokens,
                     },
                 )
 
