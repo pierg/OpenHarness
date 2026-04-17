@@ -10,6 +10,7 @@ from openharness.experiments.cli import (
     results_command as cli_results,
     run as cli_run,
     status as cli_status,
+    preflight as cli_preflight,
 )
 
 
@@ -223,3 +224,16 @@ def rerun_cmd(
         fail_fast=fail_fast,
         emit_results=emit_results,
     )
+
+
+def preflight_app():
+    typer.run(preflight_cmd)
+
+
+def preflight_cmd(
+    langfuse: bool = typer.Option(
+        True, "--langfuse/--no-langfuse", help="Check Langfuse connection"
+    ),
+    docker: bool = typer.Option(True, "--docker/--no-docker", help="Check Docker daemon"),
+):
+    cli_preflight(langfuse=langfuse, docker=docker)

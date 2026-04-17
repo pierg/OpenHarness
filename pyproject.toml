@@ -66,6 +66,7 @@ status = "openharness.experiments.cli_shorthands:status_app"
 results = "openharness.experiments.cli_shorthands:results_app"
 plan = "openharness.experiments.cli_shorthands:plan_app"
 rerun = "openharness.experiments.cli_shorthands:rerun_app"
+preflight = "openharness.experiments.cli_shorthands:preflight_app"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/openharness", "ohmo"]

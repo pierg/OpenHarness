@@ -20,6 +20,7 @@ class LegContext(BaseModel):
     dry_run: bool
     resume: bool
     spec: ExperimentSpec
+    instance_id: str = ""  # experiment instance id (timestamped); used for tracing
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 

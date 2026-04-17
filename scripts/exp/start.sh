@@ -58,7 +58,8 @@ echo "    Log     : $LOG"
 ROOT=$(repo_root)
 # Wrap the command: tee to a log, and keep the shell open after it finishes
 # so you can attach and read the final output/errors before it closes.
-WRAPPED="cd $(printf '%q' "$ROOT") && ${CMD_QUOTED}2>&1 | tee $(printf '%q' "$LOG"); echo; echo '===> Job finished, exit=$?'; exec \"\${SHELL:-bash}\""
+# We source the .env inside the tmux session because tmux might drop environment variables.
+WRAPPED="cd $(printf '%q' "$ROOT") && if [ -f .env ]; then set -a; source .env; set +a; fi && ${CMD_QUOTED}2>&1 | tee $(printf '%q' "$LOG"); echo; echo '===> Job finished, exit=$?'; exec \"\${SHELL:-bash}\""
 
 tmux new-session -d -s "$SESSION" "$WRAPPED"
 

@@ -103,6 +103,22 @@ class HarborBackend(Backend):
         openharness_dir = Path(__file__).resolve().parents[4]
 
         merged_env: dict[str, str] = dict(ctx.env)
+        # Forward experiment context to the agent so it can enrich Langfuse
+        # traces with experiment_id / leg_id / agent_id / dataset and attach
+        # every trace of an experiment to a single Langfuse session for
+        # rollups in the dashboard.
+        merged_env.setdefault("OPENHARNESS_EXPERIMENT_ID", ctx.spec.id)
+        merged_env.setdefault("OPENHARNESS_INSTANCE_ID", ctx.instance_id)
+        merged_env.setdefault("OPENHARNESS_LEG_ID", leg.leg_id)
+        merged_env.setdefault("OPENHARNESS_AGENT_ID", leg.agent_id)
+        merged_env.setdefault("OPENHARNESS_DATASET", ctx.spec.dataset)
+        if leg.agent_config.architecture:
+            merged_env.setdefault(
+                "OPENHARNESS_AGENT_ARCHITECTURE", str(leg.agent_config.architecture)
+            )
+        # Group every trial in an experiment under one Langfuse session so the
+        # UI can show aggregate cost/tokens/score across legs.
+        merged_env.setdefault("OPENHARNESS_LANGFUSE_SESSION_ID", ctx.instance_id)
         overrides_env = getattr(leg, "overrides_env", None)
         if overrides_env:
             merged_env.update(overrides_env)

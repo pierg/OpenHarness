@@ -9,6 +9,9 @@ from pathlib import Path
 from typing import Optional
 
 import typer
+from dotenv import load_dotenv
+
+load_dotenv()
 
 __version__ = "0.1.6"
 

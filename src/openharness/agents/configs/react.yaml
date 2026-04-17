@@ -68,6 +68,7 @@ subagents:
       - edit_file
       - glob
       - grep
+      - think
     prompts:
       system: |
         {{ openharness_system_context }}
@@ -89,6 +90,10 @@ subagents:
         - When a tool returns no output or an empty result, that is a
           valid observation — report it as such and continue, do not
           ask whether to proceed.
+        - The reasoning has already been done by the upstream thinker
+          subagent — your job is to act. If you genuinely need a private
+          scratchpad slot before a complex tool call, use the `think`
+          tool. Never use `bash` with comment-only commands.
 
       user: |
         {{ instruction }}

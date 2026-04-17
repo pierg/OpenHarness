@@ -224,6 +224,7 @@ async def run_experiment(
                 dry_run=dry_run,
                 resume=resume,
                 spec=spec,
+                instance_id=instance_id,
             )
 
             if dry_run:

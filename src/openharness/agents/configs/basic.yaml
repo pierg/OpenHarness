@@ -17,6 +17,7 @@ tools:
   - edit_file
   - glob
   - grep
+  - think
 
 prompts:
   system: |
@@ -34,6 +35,10 @@ prompts:
       bugs; fix the application code instead.
     - When running commands like `wget`, avoid recursive flags that hang
       (like `wget -r`).
+    - For planning, drafting a regex, interpreting a noisy tool result, or
+      any other "think out loud" step, call the `think` tool. Do NOT use
+      `bash` with a command that is only shell comments — that wastes a
+      turn against the budget without making progress.
 
     Stop only after the task is verified or after you have found a concrete
     blocker that prevents further progress.

@@ -8,6 +8,9 @@ from pathlib import Path
 from typing import Iterable, Literal
 
 import typer
+from dotenv import load_dotenv
+
+load_dotenv()
 
 from openharness.experiments.manifest import (
     ExperimentManifest,
@@ -25,11 +28,72 @@ from openharness.experiments.results import (
 from openharness.experiments.runner import run_experiment
 from openharness.experiments.spec import load_experiment_spec, load_experiment_spec_full
 from openharness.experiments.logging import setup_experiment_logging
-from openharness.observability.langfuse import langfuse_agent_env_for_docker
+from openharness.observability.langfuse import (
+    create_trace_observer,
+    langfuse_agent_env_for_docker,
+)
 
 app = typer.Typer(help="Run and manage OpenHarness experiments.")
 
 log = logging.getLogger(__name__)
+
+
+def preflight_check(langfuse: bool = True, docker: bool = True):
+    """Run pre-flight checks before launching an experiment."""
+    if langfuse:
+        try:
+            # We use a short timeout for the auth check to avoid hanging
+            import os
+
+            if os.environ.get("OPENHARNESS_LANGFUSE_ENABLED") == "0":
+                log.info("Langfuse is explicitly disabled via env var.")
+            elif not os.environ.get("LANGFUSE_PUBLIC_KEY") or not os.environ.get(
+                "LANGFUSE_SECRET_KEY"
+            ):
+                log.warning("Langfuse keys are missing. Tracing will be disabled.")
+            else:
+                log.info("Checking Langfuse connection...")
+                # create_trace_observer does an auth_check if required=True
+                create_trace_observer(
+                    session_id="preflight",
+                    interface="cli",
+                    cwd=str(Path.cwd()),
+                    model="preflight",
+                    required=True,
+                )
+                log.info("Langfuse connection OK.")
+        except Exception as exc:
+            typer.echo(f"Error: Langfuse pre-flight check failed: {exc}", err=True)
+            typer.echo("Check your LANGFUSE_BASE_URL and API keys.", err=True)
+            raise typer.Exit(1)
+
+    if docker:
+        import subprocess
+
+        try:
+            log.info("Checking Docker daemon...")
+            subprocess.run(
+                ["docker", "info"], capture_output=True, check=True, timeout=10
+            )
+            log.info("Docker daemon OK.")
+        except (subprocess.CalledProcessError, FileNotFoundError, subprocess.TimeoutExpired):
+            typer.echo(
+                "Error: Docker is not running or not accessible. Harbor requires Docker.",
+                err=True,
+            )
+            raise typer.Exit(1)
+
+
+@app.command()
+def preflight(
+    langfuse: bool = typer.Option(
+        True, "--langfuse/--no-langfuse", help="Check Langfuse connection"
+    ),
+    docker: bool = typer.Option(True, "--docker/--no-docker", help="Check Docker daemon"),
+):
+    """Run pre-flight checks for connections and environment."""
+    preflight_check(langfuse=langfuse, docker=docker)
+    typer.echo("All pre-flight checks passed.")
 
 
 @app.command()
@@ -69,6 +133,9 @@ def run(
     experiment_root.mkdir(parents=True, exist_ok=True)
 
     setup_experiment_logging(experiment_root / "logs" / "runner.log")
+
+    if not dry_run:
+        preflight_check(langfuse=langfuse, docker=True)
 
     env = langfuse_agent_env_for_docker() if langfuse else {}
 
@@ -336,6 +403,9 @@ def rerun(
         experiment_spec = experiment_spec.model_copy(update={"fail_fast": True})
 
     setup_experiment_logging(root / "logs" / "runner.log")
+
+    if not dry_run:
+        preflight_check(langfuse=langfuse, docker=True)
 
     env = langfuse_agent_env_for_docker() if langfuse else {}
 

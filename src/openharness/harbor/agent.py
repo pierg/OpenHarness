@@ -135,6 +135,7 @@ class OpenHarnessHarborAgent(BaseAgent):
         with _temporary_environ(self._extra_env):
             settings = load_settings()
             resolved_settings = settings.merge_cli_overrides(model=self.model_name)
+            experiment_context = _experiment_context_from_env()
             # Harbor trials run unattended in an isolated container with no
             # human in the loop. Force the autonomous system prompt and
             # drop the host-developer personalization sections (CLAUDE.md,
@@ -168,13 +169,25 @@ class OpenHarnessHarborAgent(BaseAgent):
             )
             messages_path = run_context.artifacts.messages_path
             events_path = run_context.artifacts.events_path
+
+            task_name = _task_name_from_run_id(run_context.run_id)
+            trace_name = _build_trace_name(experiment_context, task_name, run_context.run_id)
+            trace_tags = _build_trace_tags(
+                experiment_context, task_name, resolved_model, run_context.run_id
+            )
+            session_id = (
+                experiment_context.get("instance_id") or job_run_id or uuid4().hex[:12]
+            )
+
             trace_observer = create_trace_observer(
-                session_id=job_run_id if job_run_id else uuid4().hex[:12],
+                session_id=session_id,
                 interface="harbor",
                 cwd=self._remote_cwd,
                 model=resolved_model,
                 provider=detect_provider(resolved_settings).name,
                 run_id=run_context.run_id,
+                trace_name=trace_name,
+                extra_tags=trace_tags,
             )
             run_context.bind_trace_observer(trace_observer)
             run_context.start(
@@ -189,6 +202,14 @@ class OpenHarnessHarborAgent(BaseAgent):
                     "remote_cwd": self._remote_cwd,
                     "mcp_server_count": len(self.mcp_servers),
                     "run_dir": str(run_context.run_dir),
+                    "task_name": task_name,
+                    "trial_id": run_context.run_id,
+                    "harbor_job_id": job_run_id,
+                    **{f"experiment.{k}": v for k, v in experiment_context.items() if v},
+                    "input": {
+                        "task_name": task_name,
+                        "instruction": instruction,
+                    },
                 }
             )
 
@@ -266,17 +287,24 @@ class OpenHarnessHarborAgent(BaseAgent):
                 }
                 trace_observer.end_session(
                     output={
+                        "status": "errored" if error_message else "completed",
                         "final_text": summary.final_text,
                         "usage": {
                             "input_tokens": summary.input_tokens,
                             "output_tokens": summary.output_tokens,
                             "total_tokens": summary.input_tokens + summary.output_tokens,
                         },
+                        "cost_usd": cost_usd,
+                        "error": error_message,
                     },
                     metadata={
                         "error": error_message,
                         "messages_path": str(messages_path),
                         "events_path": str(events_path),
+                        "input_tokens": summary.input_tokens,
+                        "output_tokens": summary.output_tokens,
+                        "total_tokens": summary.input_tokens + summary.output_tokens,
+                        "cost_usd": cost_usd,
                     },
                 )
                 run_context.finish(
@@ -328,3 +356,74 @@ def _temporary_environ(overrides: dict[str, str]):
                 os.environ.pop(key, None)
             else:
                 os.environ[key] = old_value
+
+
+def _experiment_context_from_env() -> dict[str, str]:
+    """Read experiment-context env vars injected by ``HarborBackend``.
+
+    Returns a dict with non-empty values only so consumers can spread it into
+    metadata without polluting traces with ``None``.
+    """
+    keys = (
+        ("experiment_id", "OPENHARNESS_EXPERIMENT_ID"),
+        ("instance_id", "OPENHARNESS_INSTANCE_ID"),
+        ("leg_id", "OPENHARNESS_LEG_ID"),
+        ("agent_id", "OPENHARNESS_AGENT_ID"),
+        ("agent_architecture", "OPENHARNESS_AGENT_ARCHITECTURE"),
+        ("dataset", "OPENHARNESS_DATASET"),
+    )
+    return {key: value for key, env_key in keys if (value := os.environ.get(env_key))}
+
+
+def _task_name_from_run_id(run_id: str) -> str:
+    """Strip Harbor's ``__<suffix>`` from a trial run id to recover the task name."""
+    if "__" in run_id:
+        return run_id.rsplit("__", 1)[0]
+    return run_id
+
+
+def _build_trace_name(
+    experiment_context: dict[str, str], task_name: str, run_id: str
+) -> str:
+    """Use the trial ``run_id`` as the Langfuse trace name.
+
+    Keeping the trace name aligned with ``run_id`` (e.g. ``regex-log__bNt7WXD``)
+    means a single string identifies the same trial across Langfuse, the
+    on-disk trial dir, ``rows.json``, ATIF trajectories, and Harbor's
+    ``result.json``. Agent / experiment / task context lives in tags +
+    metadata so users can still filter without overloading the name.
+    """
+    del experiment_context, task_name
+    return run_id
+
+
+def _build_trace_tags(
+    experiment_context: dict[str, str],
+    task_name: str,
+    model: str | None,
+    run_id: str | None = None,
+) -> list[str]:
+    """Build a tag list that lets users filter traces by experiment/agent/task/model.
+
+    ``run_id`` and ``trial_id`` are added as tags so the same identifier that
+    names the trace, the on-disk trial dir, and ``rows.json`` is also
+    searchable in the Langfuse UI sidebar.
+    """
+    tags: list[str] = []
+    for key, prefix in (
+        ("experiment_id", "experiment"),
+        ("leg_id", "leg"),
+        ("agent_id", "agent"),
+        ("dataset", "dataset"),
+    ):
+        value = experiment_context.get(key)
+        if value:
+            tags.append(f"{prefix}:{value}")
+    if task_name:
+        tags.append(f"task:{task_name}")
+    if model:
+        tags.append(f"model:{model}")
+    if run_id:
+        tags.append(f"run_id:{run_id}")
+        tags.append(f"trial_id:{run_id}")
+    return tags

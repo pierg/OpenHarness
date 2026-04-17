@@ -23,6 +23,7 @@ subagents:
       - edit_file
       - glob
       - grep
+      - think
     prompts:
       system: |
         {{ openharness_system_context }}
@@ -36,6 +37,10 @@ subagents:
         Do not modify the underlying system environment to fix application
         bugs; fix the application code instead. Avoid recursive flags that
         hang (like `wget -r`).
+
+        For planning a multi-step change or interpreting a noisy tool
+        result, call the `think` tool. Do NOT use `bash` with comment-only
+        commands as a scratchpad.
 
         Stop only after the task is verified or after you have found a
         concrete blocker that prevents further progress.
