@@ -1,3 +1,0 @@
-{
-  "final_text": "The regex expression to match the last date in the format YYYY-MM-DD in lines containing an IPv4 address is:\n\n```regex\n(?=.*?\\b(?:(?:25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9])\\.){3}(?:25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9])\\b)\\b\\d{4}-(?:0[1-9]|1[0-2])-(?:0[1-9]|[12][0-9]|3[01])\\b(?!.*?\\b\\d{4}-(?:0[1-9]|1[0-2])-(?:0[1-9]|[12][0-9]|3[01])\\b)\n```\n\nThis regex uses a positive lookahead to ensure the line contains an IPv4 address, matches the date, and uses a negative lookahead to ensure that no subsequent date exists in the same line, effectively selecting only the last date. The `\\b` anchors ensure that the matches are not part of larger alphanumeric strings."
-}

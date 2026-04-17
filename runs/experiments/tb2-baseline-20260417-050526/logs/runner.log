@@ -1,4 +1,0 @@
-2026-04-17 05:05:26,796 - openharness.experiments.cli - INFO - Starting experiment tb2-baseline instance=tb2-baseline-20260417-050526 agents=[basic, planner_executor, react] leg_concurrency=1 trials=all
-2026-04-17 05:05:28,999 - openharness.runs.harbor - DEBUG - Harbor job starting: job_id=tb2-baseline-20260417-050526-basic  job_dir=runs/experiments/tb2-baseline-20260417-050526/legs/basic
-2026-04-17 05:14:25,722 - openharness.runs.harbor - DEBUG - Harbor job starting: job_id=tb2-baseline-20260417-050526-planner_executor  job_dir=runs/experiments/tb2-baseline-20260417-050526/legs/planner_executor
-2026-04-17 05:23:20,955 - openharness.runs.harbor - DEBUG - Harbor job starting: job_id=tb2-baseline-20260417-050526-react  job_dir=runs/experiments/tb2-baseline-20260417-050526/legs/react

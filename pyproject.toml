@@ -28,6 +28,9 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+gemini = [
+    "google-genai>=1.0",
+]
 dev = [
     "pexpect>=4.9.0",
     "pytest>=8.0.0",
