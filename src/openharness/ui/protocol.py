@@ -15,18 +15,8 @@ from openharness.tasks.types import TaskRecord
 class FrontendRequest(BaseModel):
     """One request sent from the React frontend to the Python backend."""
 
-    type: Literal[
-        "submit_line",
-        "permission_response",
-        "question_response",
-        "list_sessions",
-        "select_command",
-        "apply_select_command",
-        "shutdown",
-    ]
+    type: Literal["submit_line", "permission_response", "question_response", "list_sessions", "shutdown"]
     line: str | None = None
-    command: str | None = None
-    value: str | None = None
     request_id: str | None = None
     allowed: bool | None = None
     answer: str | None = None
@@ -70,7 +60,6 @@ class BackendEvent(BaseModel):
         "state_snapshot",
         "tasks_snapshot",
         "transcript_item",
-        "compact_progress",
         "assistant_delta",
         "assistant_complete",
         "line_complete",
@@ -79,9 +68,6 @@ class BackendEvent(BaseModel):
         "clear_transcript",
         "modal_request",
         "select_request",
-        "todo_update",
-        "plan_mode_change",
-        "swarm_status",
         "error",
         "shutdown",
     ]
@@ -98,16 +84,6 @@ class BackendEvent(BaseModel):
     tool_input: dict[str, Any] | None = None
     output: str | None = None
     is_error: bool | None = None
-    compact_phase: str | None = None
-    compact_trigger: str | None = None
-    attempt: int | None = None
-    compact_checkpoint: str | None = None
-    compact_metadata: dict[str, Any] | None = None
-    # New fields for enhanced events
-    todo_markdown: str | None = None
-    plan_mode: str | None = None
-    swarm_teammates: list[dict[str, Any]] | None = None
-    swarm_notifications: list[dict[str, Any]] | None = None
 
     @classmethod
     def ready(

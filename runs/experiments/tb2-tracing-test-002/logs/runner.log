@@ -1,0 +1,7 @@
+2026-04-17 17:40:52,127 - openharness.experiments.cli - INFO - Checking Langfuse connection...
+2026-04-17 17:40:52,756 - openharness.experiments.cli - INFO - Langfuse connection OK.
+2026-04-17 17:40:52,756 - openharness.experiments.cli - INFO - Checking Docker daemon...
+2026-04-17 17:40:52,875 - openharness.experiments.cli - INFO - Docker daemon OK.
+2026-04-17 17:40:52,875 - openharness.experiments.cli - INFO - Starting experiment tb2-tracing-test instance=tb2-tracing-test-002 agents=[basic] leg_concurrency=1 trials=all
+2026-04-17 17:40:55,214 - openharness.runs.harbor - DEBUG - Harbor job starting: job_id=tb2-tracing-test-002-basic  job_dir=runs/experiments/tb2-tracing-test-002/legs/basic
+2026-04-17 17:42:05,894 - openharness.runs.harbor - DEBUG - Harbor job finished: job_id=tb2-tracing-test-002-basic  trials=1  passed=0

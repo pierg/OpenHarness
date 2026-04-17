@@ -1,0 +1,61 @@
+{
+    "id": "b793484d-a0f7-4149-a144-71129fe4aee7",
+    "started_at": "2026-04-17T05:14:34.175752",
+    "finished_at": null,
+    "n_total_trials": 89,
+    "stats": {
+        "n_trials": 32,
+        "n_errors": 32,
+        "evals": {
+            "openharness__terminal-bench": {
+                "n_trials": 0,
+                "n_errors": 32,
+                "metrics": [
+                    {
+                        "mean": 0.0
+                    }
+                ],
+                "reward_stats": {},
+                "exception_stats": {
+                    "ConnectTimeout": [
+                        "break-filter-js-from-html__knntSZB",
+                        "llm-inference-batching-scheduler__SVo2xTw",
+                        "reshard-c4-data__RxuQf8i",
+                        "gpt2-codegolf__5ZDxYng",
+                        "write-compressor__8SqEgTm",
+                        "merge-diff-arc-agi-task__Ttsqzus",
+                        "log-summary-date-ranges__pLDY9Ku",
+                        "pytorch-model-cli__n7ayLmV",
+                        "winning-avg-corewars__3CqYZdx",
+                        "largest-eigenval__Pjp6cWs",
+                        "password-recovery__7syUXB7",
+                        "regex-chess__qwh9qmk",
+                        "path-tracing-reverse__9jx2v4T",
+                        "portfolio-optimization__8YDkwga",
+                        "modernize-scientific-stack__f3nesNa",
+                        "torch-tensor-parallelism__MGTAzgg",
+                        "prove-plus-comm__Pi3YTEj",
+                        "path-tracing__zij8Uhq",
+                        "feal-linear-cryptanalysis__w7QpTAx",
+                        "caffe-cifar-10__WrRKHiL",
+                        "distribution-search__ZzAMGFz",
+                        "pypi-server__XBZ4TB6",
+                        "adaptive-rejection-sampler__aNL5R5o",
+                        "multi-source-data-merger__3mxkU7G",
+                        "configure-git-webserver__AsfyW5x",
+                        "chess-best-move__RdrVihv",
+                        "crack-7z-hash__mdauMMK",
+                        "custom-memory-heap-crash__tjJGerc",
+                        "cobol-modernization__uhHqDgj",
+                        "overfull-hbox__jNnFERy",
+                        "polyglot-rust-c__8Cmo2fL"
+                    ],
+                    "CancelledError": [
+                        "db-wal-recovery__heu6LDQ"
+                    ]
+                }
+            }
+        }
+    },
+    "trial_results": []
+}

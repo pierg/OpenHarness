@@ -1,0 +1,30 @@
+{
+    "id": "708ebc44-f40b-4188-8cf8-b567f6e1c843",
+    "started_at": "2026-04-17T16:53:07.845905",
+    "finished_at": "2026-04-17T16:54:38.527980",
+    "n_total_trials": 2,
+    "stats": {
+        "n_trials": 2,
+        "n_errors": 0,
+        "evals": {
+            "openharness__terminal-bench": {
+                "n_trials": 2,
+                "n_errors": 0,
+                "metrics": [
+                    {
+                        "mean": 0.0
+                    }
+                ],
+                "reward_stats": {
+                    "reward": {
+                        "0.0": [
+                            "log-summary-date-ranges__J6kEX87",
+                            "regex-log__W8uM6MR"
+                        ]
+                    }
+                },
+                "exception_stats": {}
+            }
+        }
+    }
+}

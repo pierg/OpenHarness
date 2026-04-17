@@ -1,0 +1,34 @@
+{
+  "schema_version": 1,
+  "run_id": "regex-log__GssEQfK",
+  "interface": "harbor",
+  "cwd": "/app",
+  "status": "completed",
+  "started_at": "2026-04-17T16:54:57.118276Z",
+  "ended_at": "2026-04-17T16:55:10.163368Z",
+  "error": null,
+  "trace_id": "2fb1c5d8b75ff1d72f24eb5bb680d4b8",
+  "trace_url": "http://10.128.0.4:3010/project/proj-openharness/traces/2fb1c5d8b75ff1d72f24eb5bb680d4b8",
+  "paths": {
+    "anchor": "run_dir",
+    "run_dir": ".",
+    "manifest": "run.json",
+    "messages": "messages.jsonl",
+    "events": "events.jsonl",
+    "results": "results.json",
+    "metrics": "metrics.json",
+    "logs": null,
+    "workspace": null
+  },
+  "metadata": {
+    "harbor_logs_dir": "agent",
+    "harbor_job_id": "tb2-baseline-smoke-20260417-165126-react",
+    "harbor_job_dir": "..",
+    "remote_cwd": "/app",
+    "mcp_server_count": 0,
+    "agent_name": "openharness",
+    "agent_version": "0.1.0",
+    "model": "gemini-3.1-flash-lite-preview",
+    "trace_url": "http://10.128.0.4:3010/project/proj-openharness/traces/2fb1c5d8b75ff1d72f24eb5bb680d4b8"
+  }
+}

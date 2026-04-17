@@ -7,7 +7,6 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:  # pragma: no cover
     from openharness.engine.messages import (
         ConversationMessage,
-        ImageBlock,
         TextBlock,
         ToolResultBlock,
         ToolUseBlock,
@@ -24,7 +23,6 @@ __all__ = [
     "AssistantTextDelta",
     "AssistantTurnComplete",
     "ConversationMessage",
-    "ImageBlock",
     "QueryEngine",
     "TextBlock",
     "ToolExecutionCompleted",
@@ -35,10 +33,9 @@ __all__ = [
 
 
 def __getattr__(name: str):
-    if name in {"ConversationMessage", "ImageBlock", "TextBlock", "ToolResultBlock", "ToolUseBlock"}:
+    if name in {"ConversationMessage", "TextBlock", "ToolResultBlock", "ToolUseBlock"}:
         from openharness.engine.messages import (
             ConversationMessage,
-            ImageBlock,
             TextBlock,
             ToolResultBlock,
             ToolUseBlock,
@@ -46,7 +43,6 @@ def __getattr__(name: str):
 
         return {
             "ConversationMessage": ConversationMessage,
-            "ImageBlock": ImageBlock,
             "TextBlock": TextBlock,
             "ToolResultBlock": ToolResultBlock,
             "ToolUseBlock": ToolUseBlock,

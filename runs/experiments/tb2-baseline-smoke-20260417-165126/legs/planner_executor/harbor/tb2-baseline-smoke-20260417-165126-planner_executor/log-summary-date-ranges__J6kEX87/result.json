@@ -1,0 +1,132 @@
+{
+    "id": "baf50607-aefc-4f99-894e-4667665918f7",
+    "task_name": "log-summary-date-ranges",
+    "trial_name": "log-summary-date-ranges__J6kEX87",
+    "trial_uri": "file:///home/pier_ridgesecurity_ai/OpenHarness/runs/experiments/tb2-baseline-smoke-20260417-165126/legs/planner_executor/harbor/tb2-baseline-smoke-20260417-165126-planner_executor/log-summary-date-ranges__J6kEX87",
+    "task_id": {
+        "git_url": "https://github.com/laude-institute/terminal-bench-2.git",
+        "git_commit_id": "69671fbaac6d67a7ef0dfec016cc38a64ef7a77c",
+        "path": "log-summary-date-ranges"
+    },
+    "source": "terminal-bench",
+    "task_checksum": "fe600befce59ff43dd85cb1db864652d4e6fa4706c6dd8a1d82118c1a76561ae",
+    "config": {
+        "task": {
+            "path": "log-summary-date-ranges",
+            "git_url": "https://github.com/laude-institute/terminal-bench-2.git",
+            "git_commit_id": "69671fbaac6d67a7ef0dfec016cc38a64ef7a77c",
+            "name": null,
+            "ref": null,
+            "overwrite": false,
+            "download_dir": null,
+            "source": "terminal-bench"
+        },
+        "trial_name": "log-summary-date-ranges__J6kEX87",
+        "trials_dir": "/home/pier_ridgesecurity_ai/OpenHarness/runs/experiments/tb2-baseline-smoke-20260417-165126/legs/planner_executor/harbor/tb2-baseline-smoke-20260417-165126-planner_executor",
+        "timeout_multiplier": 1.0,
+        "agent_timeout_multiplier": null,
+        "verifier_timeout_multiplier": null,
+        "agent_setup_timeout_multiplier": null,
+        "environment_build_timeout_multiplier": null,
+        "agent": {
+            "name": null,
+            "import_path": "openharness.harbor:OpenHarnessHarborAgent",
+            "model_name": "gemini-3.1-flash-lite-preview",
+            "override_timeout_sec": null,
+            "override_setup_timeout_sec": null,
+            "max_timeout_sec": null,
+            "kwargs": {
+                "agent_name": "planner_executor",
+                "remote_cwd": "/app",
+                "max_turns": 30,
+                "max_tokens": 8192,
+                "agent_config_yaml": "name: planner_executor\narchitecture: planner_executor\ndescription: Planner-executor Terminal-Bench baseline agent.\nmodel: gemini-3.1-flash-lite-preview\nmax_turns: 30\nmax_tokens: 8192\ntools:\n- bash\n- read_file\n- write_file\n- edit_file\n- glob\n- grep\ncomponents: []\ndefinition:\n  subagent_type: planner-executor\n  description: Baseline planner/executor workflow for Harbor and Terminal-Bench style\n    tasks.\n  runner: yaml_workflow\n  color: blue\n  permissions: []\n  plan_mode_required: false\n  allow_permission_prompts: false\n  skills: []\n  required_mcp_servers: []\n  background: false\nprompts: {}\nsubagents:\n  planner:\n    name: planner\n    architecture: simple\n    description: ''\n    model: gemini-3.1-flash-lite-preview\n    max_turns: 30\n    max_tokens: 8192\n    tools:\n    - read_file\n    - glob\n    - grep\n    components: []\n    prompts:\n      system: \"{{ openharness_system_context }}\\n\\nYou are a planner for a coding\\\n        \\ task. You produce a structured plan\\nthat a separate tool-using executor\\\n        \\ will carry out in the SAME\\nenvironment.\\n\\nYou have read-only tools (`read_file`,\\\n        \\ `glob`, `grep`). Use them to\\norient yourself before writing the plan. You\\\n        \\ have NO shell, write,\\nor edit tools and MUST NOT attempt to modify anything\\\n        \\ or pretend to\\ncall execution tools (no code fences like ```tool_code```,\\\n        \\ no\\npseudo-function calls).\\n\\nWhen you have gathered enough context, populate\\\n        \\ the response fields:\\n\\n- `reasoning`: a short paragraph explaining the\\\n        \\ approach, the\\n  relevant files / commands, and the verification you plan\\\n        \\ to use.\\n- `steps`: an ordered list of concrete action steps. Each entry\\\n        \\ is\\n  a single, self-contained instruction (e.g. a shell command to run\\n\\\n        \\  or a file edit to make). Include a final verification step so the\\n  executor\\\n        \\ knows when it is done.\\n\"\n      user: '{{ instruction }}\n\n        '\n    subagents: {}\n  executor:\n    name: executor\n    architecture: simple\n    description: ''\n    model: gemini-3.1-flash-lite-preview\n    max_turns: 30\n    max_tokens: 8192\n    tools:\n    - bash\n    - read_file\n    - write_file\n    - edit_file\n    - glob\n    - grep\n    components: []\n    prompts:\n      system: \"{{ openharness_system_context }}\\n\\nYou are an executor running inside\\\n        \\ a task environment. A planner has\\nproduced the plan below. Follow it, adjust\\\n        \\ as needed based on what\\nyou actually observe, and verify the result.\\n\\n\\\n        - Read the task instruction and inspect the filesystem before editing.\\n-\\\n        \\ Make the smallest correct changes; verify with available tests or\\n  task-specific\\\n        \\ checks before declaring success.\\n- Use non-interactive shell commands.\\\n        \\ Do not ask for human input.\\n- Do not modify the underlying system environment\\\n        \\ to fix application\\n  bugs; fix the application code instead.\\n- Avoid recursive\\\n        \\ flags that hang (like `wget -r`).\\n\\nStop only after the task is verified\\\n        \\ or after you have found a\\nconcrete blocker that prevents further progress.\\n\"\n      user: '# Task\n\n        {{ instruction }}\n\n\n        # Plan\n\n        ## Reasoning\n\n        {{ plan.reasoning }}\n\n\n        ## Steps\n\n        {% for step in plan.steps %}{{ loop.index }}. {{ step }}\n\n        {% endfor %}\n\n        '\n    subagents: {}\n",
+                "run_id": "tb2-baseline-smoke-20260417-165126-planner_executor"
+            },
+            "env": {
+                "LANGFUSE_PUBLIC_KEY": "pk-lf-openharness",
+                "LANGFUSE_SECRET_KEY": "sk-lf-openharness",
+                "LANGFUSE_BASE_URL": "http://10.128.0.4:3010",
+                "LANGFUSE_ENVIRONMENT": "local",
+                "OPENHARNESS_LANGFUSE_FLUSH_MODE": "live",
+                "OPENHARNESS_LANGFUSE_REQUIRED": "1"
+            }
+        },
+        "environment": {
+            "type": "docker",
+            "import_path": null,
+            "force_build": false,
+            "delete": true,
+            "override_cpus": null,
+            "override_memory_mb": null,
+            "override_storage_mb": null,
+            "override_gpus": null,
+            "suppress_override_warnings": false,
+            "mounts_json": null,
+            "env": {},
+            "kwargs": {}
+        },
+        "verifier": {
+            "override_timeout_sec": null,
+            "max_timeout_sec": null,
+            "disable": false
+        },
+        "artifacts": [],
+        "job_id": "708ebc44-f40b-4188-8cf8-b567f6e1c843"
+    },
+    "agent_info": {
+        "name": "openharness",
+        "version": "0.1.0",
+        "model_info": null
+    },
+    "agent_result": {
+        "n_input_tokens": 34830,
+        "n_cache_tokens": null,
+        "n_output_tokens": 1809,
+        "cost_usd": 0.011421,
+        "rollout_details": null,
+        "metadata": {
+            "agent_name": "openharness",
+            "agent_version": "0.1.0",
+            "model": "gemini-3.1-flash-lite-preview",
+            "trace_id": "7469c3b5a1fb5fa7f73d220435bf0fee",
+            "trace_url": "http://10.128.0.4:3010/project/proj-openharness/traces/7469c3b5a1fb5fa7f73d220435bf0fee",
+            "run_id": "log-summary-date-ranges__J6kEX87",
+            "run_root": "/home/pier_ridgesecurity_ai/OpenHarness/runs/experiments/tb2-baseline-smoke-20260417-165126/legs/planner_executor/harbor/tb2-baseline-smoke-20260417-165126-planner_executor/log-summary-date-ranges__J6kEX87",
+            "remote_cwd": "/app",
+            "messages_path": "/home/pier_ridgesecurity_ai/OpenHarness/runs/experiments/tb2-baseline-smoke-20260417-165126/legs/planner_executor/harbor/tb2-baseline-smoke-20260417-165126-planner_executor/log-summary-date-ranges__J6kEX87/messages.jsonl",
+            "events_path": "/home/pier_ridgesecurity_ai/OpenHarness/runs/experiments/tb2-baseline-smoke-20260417-165126/legs/planner_executor/harbor/tb2-baseline-smoke-20260417-165126-planner_executor/log-summary-date-ranges__J6kEX87/events.jsonl",
+            "mcp_server_count": 0,
+            "summary": {
+                "final_text": "The log files were analyzed based on the reference date of 2025-08-12. The counts for each severity (ERROR, WARNING, INFO) were calculated for the specified periods (today, last 7 days, last 30 days, month to date, and total) and saved to `/app/summary.csv`.\n\nThe contents of `/app/summary.csv` are:\n```csv\nperiod,severity,count\ntoday,ERROR,414\ntoday,WARNING,463\ntoday,INFO,1433\nlast_7_days,ERROR,3559\nlast_7_days,WARNING,4020\nlast_7_days,INFO,12203\nlast_30_days,ERROR,11432\nlast_30_days,WARNING,12847\nlast_30_days,INFO,38702\nmonth_to_date,ERROR,5594\nmonth_to_date,WARNING,6327\nmonth_to_date,INFO,19420\ntotal,ERROR,16774\ntotal,WARNING,18772\ntotal,INFO,56621\n```",
+                "input_tokens": 34830,
+                "output_tokens": 1809
+            },
+            "error": null
+        }
+    },
+    "verifier_result": {
+        "rewards": {
+            "reward": 0.0
+        }
+    },
+    "exception_info": null,
+    "started_at": "2026-04-17T16:53:13.467787Z",
+    "finished_at": "2026-04-17T16:53:56.213324Z",
+    "environment_setup": {
+        "started_at": "2026-04-17T16:53:13.469863Z",
+        "finished_at": "2026-04-17T16:53:17.768787Z"
+    },
+    "agent_setup": {
+        "started_at": "2026-04-17T16:53:17.768843Z",
+        "finished_at": "2026-04-17T16:53:17.768912Z"
+    },
+    "agent_execution": {
+        "started_at": "2026-04-17T16:53:17.768984Z",
+        "finished_at": "2026-04-17T16:53:30.431403Z"
+    },
+    "verifier": {
+        "started_at": "2026-04-17T16:53:30.431618Z",
+        "finished_at": "2026-04-17T16:53:45.164955Z"
+    }
+}

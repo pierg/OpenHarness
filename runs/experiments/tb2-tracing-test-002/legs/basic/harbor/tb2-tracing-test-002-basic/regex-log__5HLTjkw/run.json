@@ -1,0 +1,34 @@
+{
+  "schema_version": 1,
+  "run_id": "regex-log__5HLTjkw",
+  "interface": "harbor",
+  "cwd": "/app",
+  "status": "completed",
+  "started_at": "2026-04-17T17:41:10.935955Z",
+  "ended_at": "2026-04-17T17:41:22.568788Z",
+  "error": null,
+  "trace_id": "43c5c65e1dae8973237ffd0c3b4e58af",
+  "trace_url": "http://localhost:3010/project/proj-openharness/traces/43c5c65e1dae8973237ffd0c3b4e58af",
+  "paths": {
+    "anchor": "run_dir",
+    "run_dir": ".",
+    "manifest": "run.json",
+    "messages": "messages.jsonl",
+    "events": "events.jsonl",
+    "results": "results.json",
+    "metrics": "metrics.json",
+    "logs": null,
+    "workspace": null
+  },
+  "metadata": {
+    "harbor_logs_dir": "agent",
+    "harbor_job_id": "tb2-tracing-test-002-basic",
+    "harbor_job_dir": "..",
+    "remote_cwd": "/app",
+    "mcp_server_count": 0,
+    "agent_name": "openharness",
+    "agent_version": "0.1.0",
+    "model": "gemini-3.1-flash-lite-preview",
+    "trace_url": "http://localhost:3010/project/proj-openharness/traces/43c5c65e1dae8973237ffd0c3b4e58af"
+  }
+}

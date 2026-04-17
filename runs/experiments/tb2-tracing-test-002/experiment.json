@@ -1,0 +1,67 @@
+{
+  "schema_version": 2,
+  "experiment_id": "tb2-tracing-test",
+  "instance_id": "tb2-tracing-test-002",
+  "dataset": "terminal-bench@2.0",
+  "spec_path": "config.source.yaml",
+  "resolved_spec_path": "config.resolved.yaml",
+  "created_at": "2026-04-17T17:40:52.899147Z",
+  "updated_at": "2026-04-17T17:42:05.898595Z",
+  "reproducibility": {
+    "git_sha": "72004f553a5d9aa47459954202ebf0182816d844",
+    "git_dirty": true,
+    "harbor_version": "0.3.0",
+    "openharness_version": "0.1.6",
+    "python_version": "3.13.12",
+    "hostname": "pier-dev-engine"
+  },
+  "legs": [
+    {
+      "leg_id": "basic",
+      "agent_id": "basic",
+      "status": "succeeded",
+      "result_status": "all_failed",
+      "started_at": "2026-04-17T17:40:55.211249Z",
+      "finished_at": "2026-04-17T17:42:05.897446Z",
+      "duration_sec": 70.686197,
+      "harbor_dir": "legs/basic/harbor",
+      "harbor_result_path": "legs/basic/harbor/tb2-tracing-test-002-basic/result.json",
+      "agent_config_path": "legs/basic/agent.resolved.yaml",
+      "trials": [
+        {
+          "trial_id": "regex-log__5HLTjkw",
+          "task_name": "regex-log",
+          "trial_dir": "legs/basic/harbor/tb2-tracing-test-002-basic/regex-log__5HLTjkw",
+          "score": 0.0,
+          "passed": false,
+          "error": null,
+          "model": "gemini-3.1-flash-lite-preview",
+          "input_tokens": 19129,
+          "output_tokens": 1538,
+          "total_tokens": 20667,
+          "cost_usd": 0.00708925,
+          "duration_sec": 51.868317,
+          "agent_duration_sec": 12.001699,
+          "env_setup_duration_sec": 2.193974,
+          "verifier_duration_sec": 26.210249,
+          "trace_id": "43c5c65e1dae8973237ffd0c3b4e58af",
+          "trace_url": "http://localhost:3010/project/proj-openharness/traces/43c5c65e1dae8973237ffd0c3b4e58af"
+        }
+      ],
+      "aggregate": {
+        "n_trials": 1,
+        "n_passed": 0,
+        "n_failed": 1,
+        "n_errored": 0,
+        "n_errored_by_phase": {},
+        "mean_score": 0.0,
+        "total_input_tokens": 19129,
+        "total_output_tokens": 1538,
+        "total_tokens": 20667,
+        "total_cost_usd": 0.00708925
+      },
+      "error": null,
+      "traceback": null
+    }
+  ]
+}

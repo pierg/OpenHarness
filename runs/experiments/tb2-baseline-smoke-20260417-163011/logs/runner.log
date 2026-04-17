@@ -1,0 +1,11 @@
+2026-04-17 16:30:11,600 - openharness.experiments.cli - INFO - Checking Langfuse connection...
+2026-04-17 16:30:12,222 - openharness.experiments.cli - INFO - Langfuse connection OK.
+2026-04-17 16:30:12,222 - openharness.experiments.cli - INFO - Checking Docker daemon...
+2026-04-17 16:30:12,331 - openharness.experiments.cli - INFO - Docker daemon OK.
+2026-04-17 16:30:12,331 - openharness.experiments.cli - INFO - Starting experiment tb2-baseline instance=tb2-baseline-smoke-20260417-163011 agents=[basic, planner_executor, react] leg_concurrency=1 trials=all
+2026-04-17 16:30:14,830 - openharness.runs.harbor - DEBUG - Harbor job starting: job_id=tb2-baseline-smoke-20260417-163011-basic  job_dir=runs/experiments/tb2-baseline-smoke-20260417-163011/legs/basic
+2026-04-17 16:30:45,749 - openharness.runs.harbor - DEBUG - Harbor job finished: job_id=tb2-baseline-smoke-20260417-163011-basic  trials=2  passed=0
+2026-04-17 16:30:45,759 - openharness.runs.harbor - DEBUG - Harbor job starting: job_id=tb2-baseline-smoke-20260417-163011-planner_executor  job_dir=runs/experiments/tb2-baseline-smoke-20260417-163011/legs/planner_executor
+2026-04-17 16:31:14,184 - openharness.runs.harbor - DEBUG - Harbor job finished: job_id=tb2-baseline-smoke-20260417-163011-planner_executor  trials=2  passed=0
+2026-04-17 16:31:14,195 - openharness.runs.harbor - DEBUG - Harbor job starting: job_id=tb2-baseline-smoke-20260417-163011-react  job_dir=runs/experiments/tb2-baseline-smoke-20260417-163011/legs/react
+2026-04-17 16:31:42,502 - openharness.runs.harbor - DEBUG - Harbor job finished: job_id=tb2-baseline-smoke-20260417-163011-react  trials=2  passed=0

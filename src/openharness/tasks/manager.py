@@ -8,11 +8,11 @@ import shlex
 import time
 from dataclasses import replace
 from pathlib import Path
+from typing import Any
 from uuid import uuid4
 
 from openharness.config.paths import get_tasks_dir
 from openharness.tasks.types import TaskRecord, TaskStatus, TaskType
-from openharness.utils.shell import create_shell_subprocess
 
 
 class BackgroundTaskManager:
@@ -73,7 +73,7 @@ class BackgroundTaskManager:
                 raise ValueError(
                     "Local agent tasks require ANTHROPIC_API_KEY or an explicit command override"
                 )
-            cmd = ["python", "-m", "openharness", "--api-key", effective_api_key]
+            cmd = ["python", "-m", "openharness", "--headless", "--api-key", effective_api_key]
             if model:
                 cmd.extend(["--model", model])
             command = " ".join(shlex.quote(part) for part in cmd)
@@ -213,7 +213,9 @@ class BackgroundTaskManager:
 
         generation = self._generations.get(task_id, 0) + 1
         self._generations[task_id] = generation
-        process = await create_shell_subprocess(
+        process = await asyncio.create_subprocess_exec(
+            "/bin/bash",
+            "-lc",
             task.command,
             cwd=task.cwd,
             stdin=asyncio.subprocess.PIPE,

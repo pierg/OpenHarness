@@ -14,5 +14,3 @@ class MemoryHeader:
     title: str
     description: str
     modified_at: float
-    memory_type: str = ""
-    body_preview: str = ""

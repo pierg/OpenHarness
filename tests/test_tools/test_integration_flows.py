@@ -102,9 +102,7 @@ async def test_skill_and_config_flow_across_registry(tmp_path: Path, monkeypatch
     monkeypatch.setenv("OPENHARNESS_CONFIG_DIR", str(tmp_path / "config"))
     skills_dir = tmp_path / "config" / "skills"
     skills_dir.mkdir(parents=True)
-    pytest_dir = skills_dir / "pytest"
-    pytest_dir.mkdir()
-    (pytest_dir / "SKILL.md").write_text(
+    (skills_dir / "pytest.md").write_text(
         "# Pytest\nPytest fixtures help reuse setup.\n",
         encoding="utf-8",
     )
@@ -129,7 +127,6 @@ async def test_skill_and_config_flow_across_registry(tmp_path: Path, monkeypatch
 
 
 @pytest.mark.asyncio
-@pytest.mark.xfail(reason="Flaky timing-dependent test", strict=False)
 async def test_agent_send_message_flow_restarts_completed_agent(tmp_path: Path, monkeypatch):
     monkeypatch.setenv("OPENHARNESS_DATA_DIR", str(tmp_path / "data"))
     registry = create_default_tool_registry()
@@ -149,7 +146,7 @@ async def test_agent_send_message_flow_restarts_completed_agent(tmp_path: Path, 
     )
     task_id = create_result.output.split()[-1]
 
-    for _ in range(80):
+    for _ in range(40):
         output = await task_output.execute(task_output.input_model(task_id=task_id), context)
         if "AGENT_ECHO:ready" in output.output:
             break
@@ -163,8 +160,8 @@ async def test_agent_send_message_flow_restarts_completed_agent(tmp_path: Path, 
     )
     assert send_result.is_error is False
 
-    await asyncio.sleep(0.2)
-    for _ in range(80):
+    await asyncio.sleep(0.1)
+    for _ in range(40):
         output = await task_output.execute(task_output.input_model(task_id=task_id), context)
         if "AGENT_ECHO:agent ping" in output.output:
             break
@@ -226,7 +223,7 @@ async def test_notebook_and_cron_flow_across_registry(tmp_path: Path, monkeypatc
     assert "flow ok" in (tmp_path / "nb" / "demo.ipynb").read_text(encoding="utf-8")
 
     await cron_create.execute(
-        cron_create.input_model(name="flow", schedule="0 0 * * *", command="printf 'FLOW_CRON_OK'"),
+        cron_create.input_model(name="flow", schedule="daily", command="printf 'FLOW_CRON_OK'"),
         context,
     )
     list_result = await cron_list.execute(cron_list.input_model(), context)

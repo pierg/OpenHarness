@@ -1,0 +1,80 @@
+{
+  "leg_id": "react",
+  "agent_id": "react",
+  "status": "succeeded",
+  "result_status": "all_errored",
+  "started_at": "2026-04-17T16:31:14.190054Z",
+  "finished_at": "2026-04-17T16:31:42.507148Z",
+  "duration_sec": 28.317094,
+  "harbor_dir": "legs/react/harbor",
+  "harbor_result_path": "legs/react/harbor/tb2-baseline-smoke-20260417-163011-react/result.json",
+  "agent_config_path": "legs/react/agent.resolved.yaml",
+  "trials": [
+    {
+      "trial_id": "log-summary-date-ranges__vR2wG4c",
+      "task_name": "log-summary-date-ranges",
+      "trial_dir": "legs/react/harbor/tb2-baseline-smoke-20260417-163011-react/log-summary-date-ranges__vR2wG4c",
+      "score": null,
+      "passed": false,
+      "error": {
+        "exception_type": "ConnectError",
+        "message": "[Errno -2] Name or service not known",
+        "phase": "agent",
+        "occurred_at": "2026-04-17T16:31:29.712208",
+        "traceback": "Traceback (most recent call last):\n  File \"/home/pier_ridgesecurity_ai/.local/share/uv/tools/harbor/lib/python3.13/site-packages/httpx/_transports/default.py\", line 101, in map_httpcore_exceptions\n    yield\n  File \"/home/pier_ridgesecurity_ai/.local/share/uv/tools/harbor/lib/python3.13/site-packages/httpx/_transports/default.py\", line 250, in handle_request\n    resp = self._pool.handle_request(req)\n  File \"/home/pier_ridgesecurity_ai/.local/share/uv/tools/harbor/lib/python3.13/site-packages/httpcore/_sync/connection_pool.py\", line 256, in handle_request\n    raise exc from None\n  File \"/home/pier_ridgesecurity_ai/.local/share/uv/tools/harbor/lib/python3.13/site-packages/httpcore/_sync/connection_pool.py\", line 236, in handle_request\n    response = connection.handle_request(\n        pool_request.request\n    )\n  File \"/home/pier_ridgesecurity_ai/.local/share/uv/tools/harbor/lib/python3.13/site-packages/httpcore/_sync/connection.py\", line 101, in handle_request\n    raise exc\n  File \"/home/pier_ridgesecurity_ai/.local/share/uv/tools/harbor/lib/python3.13/site-packages/httpcore/_sync/connection.py\", line 78, in handle_request\n    stream = self._connect(request)\n  File \"/home/pier_ridgesecurity_ai/.local/share/uv/tools/harbor/lib/python3.13/site-packages/httpcore/_sync/connection.py\", line 124, in _connect\n    stream = self._network_backend.connect_tcp(**kwargs)\n  File \"/home/pier_ridgesecurity_ai/.local/share/uv/tools/harbor/lib/python3.13/site-packages/httpcore/_backends/sync.py\", line 207, in connect_tcp\n    with map_exceptions(exc_map):\n         ~~~~~~~~~~~~~~^^^^^^^^^\n  File \"/home/pier_ridgesecurity_ai/.local/share/uv/python/cpython-3.13.12-linux-x86_64-gnu/lib/python3.13/contextlib.py\", line 162, in __exit__\n    self.gen.throw(value)\n    ~~~~~~~~~~~~~~^^^^^^^\n  File \"/home/pier_ridgesecurity_ai/.local/share/uv/tools/harbor/lib/python3.13/site-packages/httpcore/_exceptions.py\", line 14, in map_exceptions\n    raise to_exc(exc) from exc\nhttpcore.ConnectError: [Errno -2] Name or service not known\n\nThe above exception was the direct cause of the following exception:\n\nTraceback (most recent call last):\n  File \"/home/pier_ridgesecurity_ai/.local/share/uv/tools/harbor/lib/python3.13/site-packages/harbor/trial/trial.py\", line 538, in run\n    await self._execute_agent()\n  File \"/home/pier_ridgesecurity_ai/.local/share/uv/tools/harbor/lib/python3.13/site-packages/harbor/trial/trial.py\", line 285, in _execute_agent\n    await asyncio.wait_for(\n    ...<6 lines>...\n    )\n  File \"/home/pier_ridgesecurity_ai/.local/share/uv/python/cpython-3.13.12-linux-x86_64-gnu/lib/python3.13/asyncio/tasks.py\", line 507, in wait_for\n    return await fut\n           ^^^^^^^^^\n  File \"/home/pier_ridgesecurity_ai/OpenHarness/src/openharness/harbor/agent.py\", line 171, in run\n    trace_observer = create_trace_observer(\n        session_id=job_run_id if job_run_id else uuid4().hex[:12],\n    ...<4 lines>...\n        run_id=run_context.run_id,\n    )\n  File \"/home/pier_ridgesecurity_ai/OpenHarness/src/openharness/observability/langfuse.py\", line 682, in create_trace_observer\n    if not client.auth_check():\n           ~~~~~~~~~~~~~~~~~^^\n  File \"/home/pier_ridgesecurity_ai/.local/share/uv/tools/harbor/lib/python3.13/site-packages/langfuse/_client/client.py\", line 3167, in auth_check\n    projects = self.api.projects.get()\n  File \"/home/pier_ridgesecurity_ai/.local/share/uv/tools/harbor/lib/python3.13/site-packages/langfuse/api/projects/client.py\", line 63, in get\n    _response = self._raw_client.get(request_options=request_options)\n  File \"/home/pier_ridgesecurity_ai/.local/share/uv/tools/harbor/lib/python3.13/site-packages/langfuse/api/projects/raw_client.py\", line 47, in get\n    _response = self._client_wrapper.httpx_client.request(\n        \"api/public/projects\",\n        method=\"GET\",\n        request_options=request_options,\n    )\n  File \"/home/pier_ridgesecurity_ai/.local/share/uv/tools/harbor/lib/python3.13/site-packages/langfuse/api/core/http_client.py\", line 308, in request\n    response = self.httpx_client.request(\n        method=method,\n    ...<19 lines>...\n        timeout=timeout,\n    )\n  File \"/home/pier_ridgesecurity_ai/.local/share/uv/tools/harbor/lib/python3.13/site-packages/httpx/_client.py\", line 825, in request\n    return self.send(request, auth=auth, follow_redirects=follow_redirects)\n           ~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/home/pier_ridgesecurity_ai/.local/share/uv/tools/harbor/lib/python3.13/site-packages/httpx/_client.py\", line 914, in send\n    response = self._send_handling_auth(\n        request,\n    ...<2 lines>...\n        history=[],\n    )\n  File \"/home/pier_ridgesecurity_ai/.local/share/uv/tools/harbor/lib/python3.13/site-packages/httpx/_client.py\", line 942, in _send_handling_auth\n    response = self._send_handling_redirects(\n        request,\n        follow_redirects=follow_redirects,\n        history=history,\n    )\n  File \"/home/pier_ridgesecurity_ai/.local/share/uv/tools/harbor/lib/python3.13/site-packages/httpx/_client.py\", line 979, in _send_handling_redirects\n    response = self._send_single_request(request)\n  File \"/home/pier_ridgesecurity_ai/.local/share/uv/tools/harbor/lib/python3.13/site-packages/httpx/_client.py\", line 1014, in _send_single_request\n    response = transport.handle_request(request)\n  File \"/home/pier_ridgesecurity_ai/.local/share/uv/tools/harbor/lib/python3.13/site-packages/httpx/_transports/default.py\", line 249, in handle_request\n    with map_httpcore_exceptions():\n         ~~~~~~~~~~~~~~~~~~~~~~~^^\n  File \"/home/pier_ridgesecurity_ai/.local/share/uv/python/cpython-3.13.12-linux-x86_64-gnu/lib/python3.13/contextlib.py\", line 162, in __exit__\n    self.gen.throw(value)\n    ~~~~~~~~~~~~~~^^^^^^^\n  File \"/home/pier_ridgesecurity_ai/.local/share/uv/tools/harbor/lib/python3.13/site-packages/httpx/_transports/default.py\", line 118, in map_httpcore_exceptions\n    raise mapped_exc(message) from exc\nhttpx.ConnectError: [Errno -2] Name or service not known\n"
+      },
+      "model": null,
+      "input_tokens": null,
+      "output_tokens": null,
+      "total_tokens": null,
+      "cost_usd": null,
+      "duration_sec": 13.618173,
+      "agent_duration_sec": 0.03724,
+      "env_setup_duration_sec": 2.774881,
+      "verifier_duration_sec": null,
+      "trace_id": null,
+      "trace_url": null
+    },
+    {
+      "trial_id": "regex-log__pQ5ZW5J",
+      "task_name": "regex-log",
+      "trial_dir": "legs/react/harbor/tb2-baseline-smoke-20260417-163011-react/regex-log__pQ5ZW5J",
+      "score": null,
+      "passed": false,
+      "error": {
+        "exception_type": "ConnectError",
+        "message": "[Errno -2] Name or service not known",
+        "phase": "agent",
+        "occurred_at": "2026-04-17T16:31:29.441361",
+        "traceback": "Traceback (most recent call last):\n  File \"/home/pier_ridgesecurity_ai/.local/share/uv/tools/harbor/lib/python3.13/site-packages/httpx/_transports/default.py\", line 101, in map_httpcore_exceptions\n    yield\n  File \"/home/pier_ridgesecurity_ai/.local/share/uv/tools/harbor/lib/python3.13/site-packages/httpx/_transports/default.py\", line 250, in handle_request\n    resp = self._pool.handle_request(req)\n  File \"/home/pier_ridgesecurity_ai/.local/share/uv/tools/harbor/lib/python3.13/site-packages/httpcore/_sync/connection_pool.py\", line 256, in handle_request\n    raise exc from None\n  File \"/home/pier_ridgesecurity_ai/.local/share/uv/tools/harbor/lib/python3.13/site-packages/httpcore/_sync/connection_pool.py\", line 236, in handle_request\n    response = connection.handle_request(\n        pool_request.request\n    )\n  File \"/home/pier_ridgesecurity_ai/.local/share/uv/tools/harbor/lib/python3.13/site-packages/httpcore/_sync/connection.py\", line 101, in handle_request\n    raise exc\n  File \"/home/pier_ridgesecurity_ai/.local/share/uv/tools/harbor/lib/python3.13/site-packages/httpcore/_sync/connection.py\", line 78, in handle_request\n    stream = self._connect(request)\n  File \"/home/pier_ridgesecurity_ai/.local/share/uv/tools/harbor/lib/python3.13/site-packages/httpcore/_sync/connection.py\", line 124, in _connect\n    stream = self._network_backend.connect_tcp(**kwargs)\n  File \"/home/pier_ridgesecurity_ai/.local/share/uv/tools/harbor/lib/python3.13/site-packages/httpcore/_backends/sync.py\", line 207, in connect_tcp\n    with map_exceptions(exc_map):\n         ~~~~~~~~~~~~~~^^^^^^^^^\n  File \"/home/pier_ridgesecurity_ai/.local/share/uv/python/cpython-3.13.12-linux-x86_64-gnu/lib/python3.13/contextlib.py\", line 162, in __exit__\n    self.gen.throw(value)\n    ~~~~~~~~~~~~~~^^^^^^^\n  File \"/home/pier_ridgesecurity_ai/.local/share/uv/tools/harbor/lib/python3.13/site-packages/httpcore/_exceptions.py\", line 14, in map_exceptions\n    raise to_exc(exc) from exc\nhttpcore.ConnectError: [Errno -2] Name or service not known\n\nThe above exception was the direct cause of the following exception:\n\nTraceback (most recent call last):\n  File \"/home/pier_ridgesecurity_ai/.local/share/uv/tools/harbor/lib/python3.13/site-packages/harbor/trial/trial.py\", line 538, in run\n    await self._execute_agent()\n  File \"/home/pier_ridgesecurity_ai/.local/share/uv/tools/harbor/lib/python3.13/site-packages/harbor/trial/trial.py\", line 285, in _execute_agent\n    await asyncio.wait_for(\n    ...<6 lines>...\n    )\n  File \"/home/pier_ridgesecurity_ai/.local/share/uv/python/cpython-3.13.12-linux-x86_64-gnu/lib/python3.13/asyncio/tasks.py\", line 507, in wait_for\n    return await fut\n           ^^^^^^^^^\n  File \"/home/pier_ridgesecurity_ai/OpenHarness/src/openharness/harbor/agent.py\", line 171, in run\n    trace_observer = create_trace_observer(\n        session_id=job_run_id if job_run_id else uuid4().hex[:12],\n    ...<4 lines>...\n        run_id=run_context.run_id,\n    )\n  File \"/home/pier_ridgesecurity_ai/OpenHarness/src/openharness/observability/langfuse.py\", line 682, in create_trace_observer\n    if not client.auth_check():\n           ~~~~~~~~~~~~~~~~~^^\n  File \"/home/pier_ridgesecurity_ai/.local/share/uv/tools/harbor/lib/python3.13/site-packages/langfuse/_client/client.py\", line 3167, in auth_check\n    projects = self.api.projects.get()\n  File \"/home/pier_ridgesecurity_ai/.local/share/uv/tools/harbor/lib/python3.13/site-packages/langfuse/api/projects/client.py\", line 63, in get\n    _response = self._raw_client.get(request_options=request_options)\n  File \"/home/pier_ridgesecurity_ai/.local/share/uv/tools/harbor/lib/python3.13/site-packages/langfuse/api/projects/raw_client.py\", line 47, in get\n    _response = self._client_wrapper.httpx_client.request(\n        \"api/public/projects\",\n        method=\"GET\",\n        request_options=request_options,\n    )\n  File \"/home/pier_ridgesecurity_ai/.local/share/uv/tools/harbor/lib/python3.13/site-packages/langfuse/api/core/http_client.py\", line 308, in request\n    response = self.httpx_client.request(\n        method=method,\n    ...<19 lines>...\n        timeout=timeout,\n    )\n  File \"/home/pier_ridgesecurity_ai/.local/share/uv/tools/harbor/lib/python3.13/site-packages/httpx/_client.py\", line 825, in request\n    return self.send(request, auth=auth, follow_redirects=follow_redirects)\n           ~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/home/pier_ridgesecurity_ai/.local/share/uv/tools/harbor/lib/python3.13/site-packages/httpx/_client.py\", line 914, in send\n    response = self._send_handling_auth(\n        request,\n    ...<2 lines>...\n        history=[],\n    )\n  File \"/home/pier_ridgesecurity_ai/.local/share/uv/tools/harbor/lib/python3.13/site-packages/httpx/_client.py\", line 942, in _send_handling_auth\n    response = self._send_handling_redirects(\n        request,\n        follow_redirects=follow_redirects,\n        history=history,\n    )\n  File \"/home/pier_ridgesecurity_ai/.local/share/uv/tools/harbor/lib/python3.13/site-packages/httpx/_client.py\", line 979, in _send_handling_redirects\n    response = self._send_single_request(request)\n  File \"/home/pier_ridgesecurity_ai/.local/share/uv/tools/harbor/lib/python3.13/site-packages/httpx/_client.py\", line 1014, in _send_single_request\n    response = transport.handle_request(request)\n  File \"/home/pier_ridgesecurity_ai/.local/share/uv/tools/harbor/lib/python3.13/site-packages/httpx/_transports/default.py\", line 249, in handle_request\n    with map_httpcore_exceptions():\n         ~~~~~~~~~~~~~~~~~~~~~~~^^\n  File \"/home/pier_ridgesecurity_ai/.local/share/uv/python/cpython-3.13.12-linux-x86_64-gnu/lib/python3.13/contextlib.py\", line 162, in __exit__\n    self.gen.throw(value)\n    ~~~~~~~~~~~~~~^^^^^^^\n  File \"/home/pier_ridgesecurity_ai/.local/share/uv/tools/harbor/lib/python3.13/site-packages/httpx/_transports/default.py\", line 118, in map_httpcore_exceptions\n    raise mapped_exc(message) from exc\nhttpx.ConnectError: [Errno -2] Name or service not known\n"
+      },
+      "model": null,
+      "input_tokens": null,
+      "output_tokens": null,
+      "total_tokens": null,
+      "cost_usd": null,
+      "duration_sec": 13.383401,
+      "agent_duration_sec": 0.357617,
+      "env_setup_duration_sec": 2.152582,
+      "verifier_duration_sec": null,
+      "trace_id": null,
+      "trace_url": null
+    }
+  ],
+  "aggregate": {
+    "n_trials": 2,
+    "n_passed": 0,
+    "n_failed": 0,
+    "n_errored": 2,
+    "n_errored_by_phase": {
+      "agent": 2
+    },
+    "mean_score": null,
+    "total_input_tokens": 0,
+    "total_output_tokens": 0,
+    "total_tokens": 0,
+    "total_cost_usd": 0.0
+  },
+  "error": null,
+  "traceback": null
+}

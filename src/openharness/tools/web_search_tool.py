@@ -10,7 +10,6 @@ import httpx
 from pydantic import BaseModel, Field
 
 from openharness.tools.base import BaseTool, ToolExecutionContext, ToolResult
-from openharness.utils.network_guard import NetworkGuardError, fetch_public_http_response
 
 
 class WebSearchToolInput(BaseModel):
@@ -43,14 +42,14 @@ class WebSearchTool(BaseTool):
         del context
         endpoint = arguments.search_url or "https://html.duckduckgo.com/html/"
         try:
-            response = await fetch_public_http_response(
-                endpoint,
-                params={"q": arguments.query},
-                headers={"User-Agent": "OpenHarness/0.1"},
-                timeout=20.0,
-            )
-            response.raise_for_status()
-        except (httpx.HTTPError, NetworkGuardError) as exc:
+            async with httpx.AsyncClient(follow_redirects=True, timeout=20.0) as client:
+                response = await client.get(
+                    endpoint,
+                    params={"q": arguments.query},
+                    headers={"User-Agent": "OpenHarness/0.1"},
+                )
+                response.raise_for_status()
+        except httpx.HTTPError as exc:
             return ToolResult(output=f"web_search failed: {exc}", is_error=True)
 
         results = _parse_search_results(response.text, limit=arguments.max_results)

@@ -2,6 +2,7 @@
 
 import pytest
 
+from openharness.coordinator import get_team_registry
 from openharness.coordinator.coordinator_mode import TeamRegistry
 
 

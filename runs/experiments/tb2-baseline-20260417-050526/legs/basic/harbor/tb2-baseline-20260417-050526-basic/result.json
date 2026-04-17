@@ -1,0 +1,58 @@
+{
+    "id": "76860171-e1a1-4186-8e63-64f2fe313988",
+    "started_at": "2026-04-17T05:05:36.401800",
+    "finished_at": null,
+    "n_total_trials": 89,
+    "stats": {
+        "n_trials": 31,
+        "n_errors": 31,
+        "evals": {
+            "openharness__terminal-bench": {
+                "n_trials": 0,
+                "n_errors": 31,
+                "metrics": [
+                    {
+                        "mean": 0.0
+                    }
+                ],
+                "reward_stats": {},
+                "exception_stats": {
+                    "ConnectTimeout": [
+                        "break-filter-js-from-html__PKfzFz5",
+                        "reshard-c4-data__gPeDV37",
+                        "llm-inference-batching-scheduler__4jCVyFo",
+                        "gpt2-codegolf__AYAFhDo",
+                        "write-compressor__sPHN7T4",
+                        "merge-diff-arc-agi-task__6S8ookU",
+                        "log-summary-date-ranges__fLi6YhA",
+                        "pytorch-model-cli__ZzNdo5e",
+                        "largest-eigenval__S8CT4z7",
+                        "winning-avg-corewars__bsC9ucj",
+                        "password-recovery__kbB4a86",
+                        "regex-chess__jerpWDC",
+                        "portfolio-optimization__LfGhZhq",
+                        "path-tracing-reverse__XhfoKYQ",
+                        "torch-tensor-parallelism__8BNJrf7",
+                        "modernize-scientific-stack__x6Vx9s7",
+                        "feal-linear-cryptanalysis__7bpwQBe",
+                        "caffe-cifar-10__S4wHuKY",
+                        "path-tracing__cFeNa8h",
+                        "prove-plus-comm__peHA7ra",
+                        "distribution-search__XjHh3bA",
+                        "pypi-server__idxhjFi",
+                        "adaptive-rejection-sampler__tyjXGBo",
+                        "multi-source-data-merger__96HRvfL",
+                        "configure-git-webserver__3wQssmR",
+                        "crack-7z-hash__a3pssbv",
+                        "custom-memory-heap-crash__mNei39e",
+                        "chess-best-move__zjUddxp",
+                        "cobol-modernization__V59WjZH",
+                        "overfull-hbox__W26W2py",
+                        "polyglot-rust-c__N5Ge8RT"
+                    ]
+                }
+            }
+        }
+    },
+    "trial_results": []
+}

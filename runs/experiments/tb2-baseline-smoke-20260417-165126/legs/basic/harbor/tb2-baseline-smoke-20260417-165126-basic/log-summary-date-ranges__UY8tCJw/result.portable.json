@@ -1,0 +1,137 @@
+{
+  "schema_version": 1,
+  "anchor": "experiment_root",
+  "trial_dir": "legs/basic/harbor/tb2-baseline-smoke-20260417-165126-basic/log-summary-date-ranges__UY8tCJw",
+  "result": {
+    "id": "306de076-88e5-4e8f-bcbb-a058b6535b41",
+    "task_name": "log-summary-date-ranges",
+    "trial_name": "log-summary-date-ranges__UY8tCJw",
+    "trial_uri": "legs/basic/harbor/tb2-baseline-smoke-20260417-165126-basic/log-summary-date-ranges__UY8tCJw",
+    "task_id": {
+      "git_url": "https://github.com/laude-institute/terminal-bench-2.git",
+      "git_commit_id": "69671fbaac6d67a7ef0dfec016cc38a64ef7a77c",
+      "path": "log-summary-date-ranges"
+    },
+    "source": "terminal-bench",
+    "task_checksum": "fe600befce59ff43dd85cb1db864652d4e6fa4706c6dd8a1d82118c1a76561ae",
+    "config": {
+      "task": {
+        "path": "log-summary-date-ranges",
+        "git_url": "https://github.com/laude-institute/terminal-bench-2.git",
+        "git_commit_id": "69671fbaac6d67a7ef0dfec016cc38a64ef7a77c",
+        "name": null,
+        "ref": null,
+        "overwrite": false,
+        "download_dir": null,
+        "source": "terminal-bench"
+      },
+      "trial_name": "log-summary-date-ranges__UY8tCJw",
+      "trials_dir": "legs/basic/harbor/tb2-baseline-smoke-20260417-165126-basic",
+      "timeout_multiplier": 1.0,
+      "agent_timeout_multiplier": null,
+      "verifier_timeout_multiplier": null,
+      "agent_setup_timeout_multiplier": null,
+      "environment_build_timeout_multiplier": null,
+      "agent": {
+        "name": null,
+        "import_path": "openharness.harbor:OpenHarnessHarborAgent",
+        "model_name": "gemini-3.1-flash-lite-preview",
+        "override_timeout_sec": null,
+        "override_setup_timeout_sec": null,
+        "max_timeout_sec": null,
+        "kwargs": {
+          "agent_name": "basic",
+          "remote_cwd": "/app",
+          "max_turns": 30,
+          "max_tokens": 8192,
+          "agent_config_yaml": "name: basic\narchitecture: simple\ndescription: Basic single-loop OpenHarness Terminal-Bench baseline agent.\nmodel: gemini-3.1-flash-lite-preview\nmax_turns: 30\nmax_tokens: 8192\ntools:\n- bash\n- read_file\n- write_file\n- edit_file\n- glob\n- grep\ncomponents: []\ndefinition:\n  subagent_type: yaml-basic\n  description: Baseline YAML coding agent for Harbor and Terminal-Bench style tasks.\n  runner: yaml_workflow\n  color: cyan\n  permissions: []\n  plan_mode_required: false\n  allow_permission_prompts: false\n  skills: []\n  required_mcp_servers: []\n  background: false\nprompts:\n  system: \"{{ openharness_system_context }}\\n\\nYou are a coding agent running inside\\\n    \\ a task environment. You have shell,\\nfile, and search tools available.\\n\\n-\\\n    \\ Read the task instruction carefully and inspect the filesystem before\\n  editing\\\n    \\ anything.\\n- Make the smallest correct changes; verify your work with available\\n\\\n    \\  tests or task-specific checks before declaring success.\\n- Use non-interactive\\\n    \\ shell commands. Do not ask for human input.\\n- Do not modify the underlying\\\n    \\ system environment to fix application\\n  bugs; fix the application code instead.\\n\\\n    - When running commands like `wget`, avoid recursive flags that hang\\n  (like\\\n    \\ `wget -r`).\\n\\nStop only after the task is verified or after you have found\\\n    \\ a concrete\\nblocker that prevents further progress.\\n\"\n  user: '{{ instruction }}\n\n    '\nsubagents: {}\n",
+          "run_id": "tb2-baseline-smoke-20260417-165126-basic"
+        },
+        "env": {
+          "LANGFUSE_PUBLIC_KEY": "pk-lf-openharness",
+          "LANGFUSE_SECRET_KEY": "sk-lf-openharness",
+          "LANGFUSE_BASE_URL": "http://10.128.0.4:3010",
+          "LANGFUSE_ENVIRONMENT": "local",
+          "OPENHARNESS_LANGFUSE_FLUSH_MODE": "live",
+          "OPENHARNESS_LANGFUSE_REQUIRED": "1"
+        }
+      },
+      "environment": {
+        "type": "docker",
+        "import_path": null,
+        "force_build": false,
+        "delete": true,
+        "override_cpus": null,
+        "override_memory_mb": null,
+        "override_storage_mb": null,
+        "override_gpus": null,
+        "suppress_override_warnings": false,
+        "mounts_json": null,
+        "env": {},
+        "kwargs": {}
+      },
+      "verifier": {
+        "override_timeout_sec": null,
+        "max_timeout_sec": null,
+        "disable": false
+      },
+      "artifacts": [],
+      "job_id": "0d0abbf5-1814-4365-8833-39cc729736bf"
+    },
+    "agent_info": {
+      "name": "openharness",
+      "version": "0.1.0",
+      "model_info": null
+    },
+    "agent_result": {
+      "n_input_tokens": 209369,
+      "n_cache_tokens": null,
+      "n_output_tokens": 2777,
+      "cost_usd": 0.05650775,
+      "rollout_details": null,
+      "metadata": {
+        "agent_name": "openharness",
+        "agent_version": "0.1.0",
+        "model": "gemini-3.1-flash-lite-preview",
+        "trace_id": "2bf61241c6c0b6d1e9316a71107d3cee",
+        "trace_url": "http://10.128.0.4:3010/project/proj-openharness/traces/2bf61241c6c0b6d1e9316a71107d3cee",
+        "run_id": "log-summary-date-ranges__UY8tCJw",
+        "run_root": "legs/basic/harbor/tb2-baseline-smoke-20260417-165126-basic/log-summary-date-ranges__UY8tCJw",
+        "remote_cwd": "/app",
+        "messages_path": "legs/basic/harbor/tb2-baseline-smoke-20260417-165126-basic/log-summary-date-ranges__UY8tCJw/messages.jsonl",
+        "events_path": "legs/basic/harbor/tb2-baseline-smoke-20260417-165126-basic/log-summary-date-ranges__UY8tCJw/events.jsonl",
+        "mcp_server_count": 0,
+        "summary": {
+          "final_text": "The log analysis has been completed, and the results have been saved to `/app/summary.csv`. The analysis covered all log files in `/app/logs` and calculated the counts for ERROR, WARNING, and INFO severities for the specified date ranges, using 2025-08-12 as the reference date.\n\nThe contents of `/app/summary.csv` are:\n```csv\nperiod,severity,count\ntoday,ERROR,370\ntoday,WARNING,463\ntoday,INFO,1433\nlast_7_days,ERROR,2969\nlast_7_days,WARNING,4020\nlast_7_days,INFO,12203\nlast_30_days,ERROR,9594\nlast_30_days,WARNING,12847\nlast_30_days,INFO,38702\nmonth_to_date,ERROR,4682\nmonth_to_date,WARNING,6327\nmonth_to_date,INFO,19420\ntotal,ERROR,14160\ntotal,WARNING,18772\ntotal,INFO,56621\n```",
+          "input_tokens": 209369,
+          "output_tokens": 2777
+        },
+        "error": null
+      }
+    },
+    "verifier_result": {
+      "rewards": {
+        "reward": 1.0
+      }
+    },
+    "exception_info": null,
+    "started_at": "2026-04-17T16:51:42.734011Z",
+    "finished_at": "2026-04-17T16:52:45.822390Z",
+    "environment_setup": {
+      "started_at": "2026-04-17T16:51:42.735569Z",
+      "finished_at": "2026-04-17T16:51:47.140548Z"
+    },
+    "agent_setup": {
+      "started_at": "2026-04-17T16:51:47.140586Z",
+      "finished_at": "2026-04-17T16:51:47.140646Z"
+    },
+    "agent_execution": {
+      "started_at": "2026-04-17T16:51:47.140715Z",
+      "finished_at": "2026-04-17T16:52:18.928304Z"
+    },
+    "verifier": {
+      "started_at": "2026-04-17T16:52:18.928470Z",
+      "finished_at": "2026-04-17T16:52:33.581162Z"
+    }
+  }
+}

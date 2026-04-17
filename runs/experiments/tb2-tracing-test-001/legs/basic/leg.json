@@ -1,0 +1,47 @@
+{
+  "leg_id": "basic",
+  "agent_id": "basic",
+  "status": "succeeded",
+  "result_status": "all_failed",
+  "started_at": "2026-04-17T17:34:07.542771Z",
+  "finished_at": "2026-04-17T17:35:24.377745Z",
+  "duration_sec": 76.834974,
+  "harbor_dir": "legs/basic/harbor",
+  "harbor_result_path": "legs/basic/harbor/tb2-tracing-test-001-basic/result.json",
+  "agent_config_path": "legs/basic/agent.resolved.yaml",
+  "trials": [
+    {
+      "trial_id": "regex-log__bNt7WXD",
+      "task_name": "regex-log",
+      "trial_dir": "legs/basic/harbor/tb2-tracing-test-001-basic/regex-log__bNt7WXD",
+      "score": 0.0,
+      "passed": false,
+      "error": null,
+      "model": "gemini-3.1-flash-lite-preview",
+      "input_tokens": 34429,
+      "output_tokens": 1635,
+      "total_tokens": 36064,
+      "cost_usd": 0.01105975,
+      "duration_sec": 56.71968,
+      "agent_duration_sec": 17.833619,
+      "env_setup_duration_sec": 2.311683,
+      "verifier_duration_sec": 25.417587,
+      "trace_id": "1225c0121c343649e24ec400fbf63bc2",
+      "trace_url": "http://localhost:3010/project/proj-openharness/traces/1225c0121c343649e24ec400fbf63bc2"
+    }
+  ],
+  "aggregate": {
+    "n_trials": 1,
+    "n_passed": 0,
+    "n_failed": 1,
+    "n_errored": 0,
+    "n_errored_by_phase": {},
+    "mean_score": 0.0,
+    "total_input_tokens": 34429,
+    "total_output_tokens": 1635,
+    "total_tokens": 36064,
+    "total_cost_usd": 0.01105975
+  },
+  "error": null,
+  "traceback": null
+}

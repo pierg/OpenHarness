@@ -6,7 +6,6 @@ import asyncio
 import fnmatch
 import json
 import os
-import shlex
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -14,7 +13,7 @@ from typing import Any
 import httpx
 
 from openharness.api.client import ApiMessageCompleteEvent, ApiMessageRequest, SupportsStreamingMessages
-from openharness.engine.messages import ConversationMessage
+from openharness.engine.messages import ConversationMessage, TextBlock
 from openharness.hooks.events import HookEvent
 from openharness.hooks.loader import HookRegistry
 from openharness.hooks.schemas import (
@@ -25,8 +24,6 @@ from openharness.hooks.schemas import (
     PromptHookDefinition,
 )
 from openharness.hooks.types import AggregatedHookResult, HookResult
-from openharness.sandbox import SandboxUnavailableError
-from openharness.utils.shell import create_shell_subprocess
 
 
 @dataclass
@@ -48,18 +45,6 @@ class HookExecutor:
     def update_registry(self, registry: HookRegistry) -> None:
         """Replace the active hook registry."""
         self._registry = registry
-
-    def update_context(
-        self,
-        *,
-        api_client: SupportsStreamingMessages | None = None,
-        default_model: str | None = None,
-    ) -> None:
-        """Update the active hook execution context."""
-        if api_client is not None:
-            self._context.api_client = api_client
-        if default_model is not None:
-            self._context.default_model = default_model
 
     async def execute(self, event: HookEvent, payload: dict[str, Any]) -> AggregatedHookResult:
         """Execute all matching hooks for an event."""
@@ -83,26 +68,20 @@ class HookExecutor:
         event: HookEvent,
         payload: dict[str, Any],
     ) -> HookResult:
-        command = _inject_arguments(hook.command, payload, shell_escape=True)
-        try:
-            process = await create_shell_subprocess(
-                command,
-                cwd=self._context.cwd,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-                env={
-                    **os.environ,
-                    "OPENHARNESS_HOOK_EVENT": event.value,
-                    "OPENHARNESS_HOOK_PAYLOAD": json.dumps(payload),
-                },
-            )
-        except SandboxUnavailableError as exc:
-            return HookResult(
-                hook_type=hook.type,
-                success=False,
-                blocked=hook.block_on_failure,
-                reason=str(exc),
-            )
+        command = _inject_arguments(hook.command, payload)
+        process = await asyncio.create_subprocess_exec(
+            "/bin/bash",
+            "-lc",
+            command,
+            cwd=str(self._context.cwd),
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+            env={
+                **os.environ,
+                "OPENHARNESS_HOOK_EVENT": event.value,
+                "OPENHARNESS_HOOK_PAYLOAD": json.dumps(payload),
+            },
+        )
 
         try:
             stdout, stderr = await asyncio.wait_for(
@@ -220,13 +199,8 @@ def _matches_hook(hook: HookDefinition, payload: dict[str, Any]) -> bool:
     return fnmatch.fnmatch(subject, matcher)
 
 
-def _inject_arguments(
-    template: str, payload: dict[str, Any], *, shell_escape: bool = False
-) -> str:
-    serialized = json.dumps(payload, ensure_ascii=True)
-    if shell_escape:
-        serialized = shlex.quote(serialized)
-    return template.replace("$ARGUMENTS", serialized)
+def _inject_arguments(template: str, payload: dict[str, Any]) -> str:
+    return template.replace("$ARGUMENTS", json.dumps(payload, ensure_ascii=True))
 
 
 def _parse_hook_json(text: str) -> dict[str, Any]:

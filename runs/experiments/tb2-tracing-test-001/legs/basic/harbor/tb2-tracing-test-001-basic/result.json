@@ -1,0 +1,29 @@
+{
+    "id": "fb90f95e-d25a-49fa-b1ee-66e608d01b51",
+    "started_at": "2026-04-17T17:34:16.313103",
+    "finished_at": "2026-04-17T17:35:18.525768",
+    "n_total_trials": 1,
+    "stats": {
+        "n_trials": 1,
+        "n_errors": 0,
+        "evals": {
+            "openharness__terminal-bench": {
+                "n_trials": 1,
+                "n_errors": 0,
+                "metrics": [
+                    {
+                        "mean": 0.0
+                    }
+                ],
+                "reward_stats": {
+                    "reward": {
+                        "0.0": [
+                            "regex-log__bNt7WXD"
+                        ]
+                    }
+                },
+                "exception_stats": {}
+            }
+        }
+    }
+}

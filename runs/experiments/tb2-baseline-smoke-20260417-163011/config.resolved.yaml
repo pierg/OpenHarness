@@ -1,0 +1,41 @@
+id: tb2-baseline
+dataset: terminal-bench@2.0
+agents:
+- id: basic
+  overrides: {}
+- id: planner_executor
+  overrides: {}
+- id: react
+  overrides: {}
+defaults:
+  model: gemini-3.1-flash-lite-preview
+  max_turns: 30
+  max_tokens: 8192
+  n_concurrent: 2
+  n_attempts: 1
+task_filter:
+  include_tasks:
+  - regex-log
+  - log-summary-date-ranges
+  exclude_tasks: []
+environment:
+  type: docker
+  kwargs: {}
+fail_fast: false
+leg_concurrency: 1
+profiles:
+  smoke:
+    task_filter:
+      include_tasks:
+      - regex-log
+      - log-summary-date-ranges
+    defaults:
+      n_concurrent: 2
+  demo:
+    task_filter:
+      include_tasks:
+      - build-*
+      - git-*
+      n_tasks: 2
+    defaults:
+      n_concurrent: 2

@@ -2,13 +2,10 @@
 
 from __future__ import annotations
 
-import base64
-import mimetypes
-from pathlib import Path
 from typing import Any, Annotated, Literal
 from uuid import uuid4
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field
 
 
 class TextBlock(BaseModel):
@@ -16,25 +13,6 @@ class TextBlock(BaseModel):
 
     type: Literal["text"] = "text"
     text: str
-
-
-class ImageBlock(BaseModel):
-    """Image content encoded inline for multimodal providers."""
-
-    type: Literal["image"] = "image"
-    media_type: str
-    data: str
-    source_path: str = ""
-
-    @classmethod
-    def from_path(cls, path: str | Path) -> "ImageBlock":
-        """Load a local image file into a base64-backed content block."""
-        resolved = Path(path).expanduser().resolve()
-        media_type, _ = mimetypes.guess_type(str(resolved))
-        if not media_type or not media_type.startswith("image/"):
-            raise ValueError(f"Unsupported image attachment: {resolved}")
-        payload = base64.b64encode(resolved.read_bytes()).decode("ascii")
-        return cls(media_type=media_type, data=payload, source_path=str(resolved))
 
 
 class ToolUseBlock(BaseModel):
@@ -55,10 +33,7 @@ class ToolResultBlock(BaseModel):
     is_error: bool = False
 
 
-ContentBlock = Annotated[
-    TextBlock | ImageBlock | ToolUseBlock | ToolResultBlock,
-    Field(discriminator="type"),
-]
+ContentBlock = Annotated[TextBlock | ToolUseBlock | ToolResultBlock, Field(discriminator="type")]
 
 
 class ConversationMessage(BaseModel):
@@ -67,23 +42,10 @@ class ConversationMessage(BaseModel):
     role: Literal["user", "assistant"]
     content: list[ContentBlock] = Field(default_factory=list)
 
-    @field_validator("content", mode="before")
-    @classmethod
-    def _normalize_content(cls, value: Any) -> list[Any]:
-        """Normalize legacy/null payloads before block validation."""
-        if value is None:
-            return []
-        return value
-
     @classmethod
     def from_user_text(cls, text: str) -> "ConversationMessage":
         """Construct a user message from raw text."""
         return cls(role="user", content=[TextBlock(text=text)])
-
-    @classmethod
-    def from_user_content(cls, content: list[ContentBlock]) -> "ConversationMessage":
-        """Construct a user message from explicit content blocks."""
-        return cls(role="user", content=list(content))
 
     @property
     def text(self) -> str:
@@ -104,41 +66,11 @@ class ConversationMessage(BaseModel):
             "content": [serialize_content_block(block) for block in self.content],
         }
 
-    def is_effectively_empty(self) -> bool:
-        """Return True when the message carries no useful content."""
-        if self.content:
-            for block in self.content:
-                if isinstance(block, TextBlock) and block.text.strip():
-                    return False
-                if isinstance(block, (ImageBlock, ToolUseBlock, ToolResultBlock)):
-                    return False
-        return True
-
-
-def sanitize_conversation_messages(messages: list[ConversationMessage]) -> list[ConversationMessage]:
-    """Drop legacy empty assistant messages while preserving other content."""
-    sanitized: list[ConversationMessage] = []
-    for message in messages:
-        if message.role == "assistant" and message.is_effectively_empty():
-            continue
-        sanitized.append(message)
-    return sanitized
-
 
 def serialize_content_block(block: ContentBlock) -> dict[str, Any]:
     """Convert a local content block into the provider wire format."""
     if isinstance(block, TextBlock):
         return {"type": "text", "text": block.text}
-
-    if isinstance(block, ImageBlock):
-        return {
-            "type": "image",
-            "source": {
-                "type": "base64",
-                "media_type": block.media_type,
-                "data": block.data,
-            },
-        }
 
     if isinstance(block, ToolUseBlock):
         return {

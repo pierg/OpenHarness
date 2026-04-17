@@ -1,0 +1,40 @@
+name: basic
+architecture: simple
+description: Basic single-loop OpenHarness Terminal-Bench baseline agent.
+model: gemini-3.1-flash-lite-preview
+max_turns: 10
+max_tokens: 8192
+tools:
+- bash
+- read_file
+- write_file
+- edit_file
+- glob
+- grep
+components: []
+definition:
+  subagent_type: yaml-basic
+  description: Baseline YAML coding agent for Harbor and Terminal-Bench style tasks.
+  runner: yaml_workflow
+  color: cyan
+  permissions: []
+  plan_mode_required: false
+  allow_permission_prompts: false
+  skills: []
+  required_mcp_servers: []
+  background: false
+prompts:
+  system: "{{ openharness_system_context }}\n\nYou are a coding agent running inside\
+    \ a task environment. You have shell,\nfile, and search tools available.\n\n-\
+    \ Read the task instruction carefully and inspect the filesystem before\n  editing\
+    \ anything.\n- Make the smallest correct changes; verify your work with available\n\
+    \  tests or task-specific checks before declaring success.\n- Use non-interactive\
+    \ shell commands. Do not ask for human input.\n- Do not modify the underlying\
+    \ system environment to fix application\n  bugs; fix the application code instead.\n\
+    - When running commands like `wget`, avoid recursive flags that hang\n  (like\
+    \ `wget -r`).\n\nStop only after the task is verified or after you have found\
+    \ a concrete\nblocker that prevents further progress.\n"
+  user: '{{ instruction }}
+
+    '
+subagents: {}
