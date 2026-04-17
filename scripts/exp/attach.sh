@@ -25,9 +25,10 @@ if [[ -z "$SESSION" ]]; then
     SESSION=$(tmux ls -F '#S' 2>/dev/null)
     echo "Auto-attaching to the only active job: $SESSION"
   else
-    echo "Usage: scripts/exp/attach.sh <session_name>"
+    CALL_DIR=$(dirname "$0")
+    echo "Usage: $0 <session_name>"
     echo ""
-    scripts/exp/list.sh
+    "$CALL_DIR/list.sh"
     exit 1
   fi
 fi

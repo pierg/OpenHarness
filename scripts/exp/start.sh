@@ -16,11 +16,12 @@ SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 source "$SCRIPT_DIR/_lib.sh"
 
 if [[ $# -eq 0 ]]; then
-  echo "Usage: scripts/exp/start.sh <uv run args...>"
+  CALL_DIR=$(dirname "$0")
+  echo "Usage: $0 <uv run args...>"
   echo "Examples:"
-  echo "  scripts/exp/start.sh exec tb2-baseline"
-  echo "  scripts/exp/start.sh exec tb2-baseline --profile smoke"
-  echo "  scripts/exp/start.sh rerun tb2-baseline-smoke-20260416-205703"
+  echo "  $CALL_DIR/start.sh exec tb2-baseline"
+  echo "  $CALL_DIR/start.sh exec tb2-baseline --profile smoke"
+  echo "  $CALL_DIR/start.sh rerun tb2-baseline-smoke-20260416-205703"
   exit 1
 fi
 
@@ -61,13 +62,14 @@ WRAPPED="cd $(printf '%q' "$ROOT") && ${CMD_QUOTED}2>&1 | tee $(printf '%q' "$LO
 
 tmux new-session -d -s "$SESSION" "$WRAPPED"
 
+CALL_DIR=$(dirname "$0")
 cat <<EOF
 
 OK. Job is running detached.
 
-  List jobs  : scripts/exp/list.sh
-  Attach     : scripts/exp/attach.sh $SESSION
-  Stop job   : scripts/exp/stop.sh $SESSION
+  List jobs  : $CALL_DIR/list.sh
+  Attach     : $CALL_DIR/attach.sh $SESSION
+  Stop job   : $CALL_DIR/stop.sh $SESSION
   Tail log   : tail -f $LOG
-  Run status : scripts/exp/status.sh (once manifest is written)
+  Run status : $CALL_DIR/status.sh (once manifest is written)
 EOF
