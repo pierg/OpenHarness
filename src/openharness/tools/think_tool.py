@@ -13,6 +13,7 @@ from __future__ import annotations
 from pydantic import BaseModel, Field
 
 from openharness.tools.base import BaseTool, ToolExecutionContext, ToolResult
+from openharness.workspace import Workspace
 
 
 class ThinkToolInput(BaseModel):
@@ -42,6 +43,9 @@ class ThinkTool(BaseTool):
         "write comment-only commands as a scratchpad — use this tool instead."
     )
     input_model = ThinkToolInput
+
+    def __init__(self, workspace: Workspace | None = None) -> None:
+        del workspace
 
     def is_read_only(self, arguments: ThinkToolInput) -> bool:
         del arguments
