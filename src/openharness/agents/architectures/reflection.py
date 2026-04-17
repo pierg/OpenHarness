@@ -47,6 +47,11 @@ class ReflectionAgent:
                 f"ReflectionAgent config '{config.name}' must define a 'critic' subagent."
             )
         self._critic_config = config.subagents["critic"]
+        # NOTE: On a Reflection *parent* config, ``max_turns`` controls
+        # the number of worker→critic refinement attempts, NOT a
+        # conversation turn budget. The worker subagent has its own
+        # ``max_turns`` for its conversation, and the critic is a
+        # one-shot structured-output call. See docs/template-variables.md.
         self._max_attempts = max(1, config.max_turns)
 
     @property

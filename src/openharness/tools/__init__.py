@@ -48,6 +48,7 @@ from openharness.tools.task_stop_tool import TaskStopTool
 from openharness.tools.task_update_tool import TaskUpdateTool
 from openharness.tools.team_create_tool import TeamCreateTool
 from openharness.tools.team_delete_tool import TeamDeleteTool
+from openharness.tools.think_tool import ThinkTool
 from openharness.tools.todo_write_tool import TodoWriteTool
 from openharness.tools.tool_search_tool import ToolSearchTool
 from openharness.tools.web_fetch_tool import WebFetchTool
@@ -62,6 +63,7 @@ WORKSPACE_TOOLS: dict[str, type[BaseTool]] = {
     "glob": GlobTool,
     "grep": GrepTool,
     "notebook_edit": NotebookEditTool,
+    "think": ThinkTool,
     "todo_write": TodoWriteTool,
     "enter_worktree": EnterWorktreeTool,
     "exit_worktree": ExitWorktreeTool,
@@ -161,6 +163,7 @@ _TOOL_ALIAS_OVERRIDES = {
     "grep": "grep",
     "notebookedit": "notebook_edit",
     "notebook_edit": "notebook_edit",
+    "think": "think",
     "todowrite": "todo_write",
     "todo_write": "todo_write",
     "enterworktree": "enter_worktree",
@@ -294,6 +297,7 @@ def create_default_tool_registry(
         GlobTool(),
         GrepTool(),
         SkillTool(),
+        ThinkTool(),
         ToolSearchTool(),
         WebFetchTool(),
         WebSearchTool(),

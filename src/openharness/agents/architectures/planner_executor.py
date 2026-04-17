@@ -48,11 +48,19 @@ class PlannerExecutorAgent:
     @trace_agent_run
     async def run(self, task: TaskDefinition, runtime: AgentRuntime) -> AgentRunResult:
         log.info("Running planner...")
-        plan_result = await self._planner.run(task, runtime)
+        # Use structured output so the executor template can render
+        # individual fields (`plan.reasoning`, `plan.steps`) cleanly
+        # rather than dumping a free-form string. The runtime
+        # auto-injects the JSON schema instruction for us.
+        plan = await runtime.run_agent_config(
+            self._planner.config,
+            task,
+            output_type=Plan,
+        )
 
-        log.info("Running executor with plan...")
+        log.info("Running executor with plan (steps=%d)...", len(plan.steps))
         executor_task = TaskDefinition(
             instruction=task.instruction,
-            payload={**task.payload, "plan": plan_result.output},
+            payload={**task.payload, "plan": plan},
         )
         return await self._executor.run(executor_task, runtime)

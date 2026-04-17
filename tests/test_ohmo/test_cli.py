@@ -76,7 +76,9 @@ def test_ohmo_init_interactive_writes_gateway_config(tmp_path: Path, monkeypatch
     assert config["channel_configs"]["telegram"]["allow_from"] == ["123456"]
 
 
-def test_ohmo_init_interactive_allows_blank_allow_from_for_secure_default(tmp_path: Path, monkeypatch):
+def test_ohmo_init_interactive_allows_blank_allow_from_for_secure_default(
+    tmp_path: Path, monkeypatch
+):
     runner = CliRunner()
     workspace = tmp_path / ".ohmo-home"
     monkeypatch.setattr("sys.stdin.isatty", lambda: True)
@@ -85,7 +87,7 @@ def test_ohmo_init_interactive_allows_blank_allow_from_for_secure_default(tmp_pa
         [
             "1",  # provider profile
             "y",  # enable telegram
-            "",   # allow_from -> deny all until explicitly configured
+            "",  # allow_from -> deny all until explicitly configured
             "telegram-token",
             "y",  # reply_to_message
             "n",  # slack
@@ -110,20 +112,20 @@ def test_ohmo_init_interactive_writes_feishu_gateway_config(tmp_path: Path, monk
     monkeypatch.setattr("sys.stdout.isatty", lambda: True)
     user_input = "\n".join(
         [
-            "1",         # provider profile
-            "n",         # telegram
-            "n",         # slack
-            "n",         # discord
-            "y",         # feishu
-            "feishu-user-1",         # allow_from
-            "cli_app",   # app_id
-            "cli_secret",# app_secret
-            "enc_key",   # encrypt_key
-            "verify_me", # verification_token
-            "OK",        # react_emoji
-            "y",         # send_progress
-            "n",         # send_tool_hints
-            "n",         # allow_remote_admin_commands
+            "1",  # provider profile
+            "n",  # telegram
+            "n",  # slack
+            "n",  # discord
+            "y",  # feishu
+            "feishu-user-1",  # allow_from
+            "cli_app",  # app_id
+            "cli_secret",  # app_secret
+            "enc_key",  # encrypt_key
+            "verify_me",  # verification_token
+            "OK",  # react_emoji
+            "y",  # send_progress
+            "n",  # send_tool_hints
+            "n",  # allow_remote_admin_commands
         ]
     )
     result = runner.invoke(app, ["init", "--workspace", str(workspace)], input=user_input)
@@ -150,15 +152,15 @@ def test_ohmo_config_interactive_can_restart_gateway(tmp_path: Path, monkeypatch
     monkeypatch.setattr("ohmo.cli.start_gateway_process", lambda cwd, workspace: 4321)
     user_input = "\n".join(
         [
-            "4",          # provider profile -> codex
-            "n",          # telegram
-            "n",          # slack
-            "n",          # discord
-            "y",          # feishu
-            "feishu-user-1",          # allow_from
-            "cli_app",    # app_id
-            "cli_secret", # app_secret
-            "",           # encrypt_key
+            "4",  # provider profile -> codex
+            "n",  # telegram
+            "n",  # slack
+            "n",  # discord
+            "y",  # feishu
+            "feishu-user-1",  # allow_from
+            "cli_app",  # app_id
+            "cli_secret",  # app_secret
+            "",  # encrypt_key
             "verify_me",  # verification_token
             "OK",  # react_emoji
             "y",  # send_progress

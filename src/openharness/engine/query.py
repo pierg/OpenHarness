@@ -40,7 +40,7 @@ from openharness.engine.stream_events import (
 from openharness.hooks import HookEvent, HookExecutor
 from openharness.observability import NullTraceObserver, TraceObserver
 from openharness.permissions.checker import PermissionChecker
-from openharness.tools.base import ToolExecutionContext
+from openharness.tools.base import ToolExecutionContext, ToolResult
 from openharness.tools.base import ToolRegistry
 
 AUTO_COMPACT_STATUS_MESSAGE = "Auto-compacting conversation memory to keep things fast and focused."
@@ -458,8 +458,9 @@ async def run_single_turn(
 
         model_handle.update(
             output=_trace_model_output(final_message),
+            usage_details=_trace_usage_details(usage),
+            cost_details=_trace_cost_details(context.model, usage),
             metadata={
-                "usage": usage.model_dump(mode="json"),
                 "tool_calls": _trace_tool_calls(final_message.tool_uses) or None,
             },
         )
@@ -610,8 +611,9 @@ async def run_query(
 
                 model_handle.update(
                     output=_trace_model_output(final_message),
+                    usage_details=_trace_usage_details(usage),
+                    cost_details=_trace_cost_details(context.model, usage),
                     metadata={
-                        "usage": usage.model_dump(mode="json"),
                         "tool_calls": _trace_tool_calls(final_message.tool_uses) or None,
                     },
                 )
@@ -861,18 +863,30 @@ async def _execute_tool_call(
 
         log.debug("executing %s ...", tool_name)
         t0 = time.monotonic()
-        result = await tool.execute(
-            parsed_input,
-            ToolExecutionContext(
-                cwd=context.cwd,
-                metadata={
-                    "tool_registry": context.tool_registry,
-                    "ask_user_prompt": context.ask_user_prompt,
-                    "trace_observer": context.trace_observer,
-                    **(context.tool_metadata or {}),
-                },
-            ),
-        )
+        try:
+            result = await tool.execute(
+                parsed_input,
+                ToolExecutionContext(
+                    cwd=context.cwd,
+                    metadata={
+                        "tool_registry": context.tool_registry,
+                        "ask_user_prompt": context.ask_user_prompt,
+                        "trace_observer": context.trace_observer,
+                        **(context.tool_metadata or {}),
+                    },
+                ),
+            )
+        except Exception as exc:
+            log.exception(
+                "tool execution raised: name=%s id=%s",
+                tool_name,
+                tool_use_id,
+                exc_info=exc,
+            )
+            result = ToolResult(
+                output=f"Tool {tool_name} failed: {type(exc).__name__}: {exc}",
+                is_error=True,
+            )
         elapsed = time.monotonic() - t0
         log.debug(
             "executed %s in %.2fs err=%s output_len=%d",
@@ -987,6 +1001,41 @@ def _trace_model_output(message: ConversationMessage) -> dict[str, Any]:
         "content": _truncate_trace_text(message.text.strip()),
         "tool_calls": _trace_tool_calls(message.tool_uses) or None,
     }
+
+
+def _trace_usage_details(usage: UsageSnapshot) -> dict[str, int] | None:
+    """Convert ``UsageSnapshot`` to Langfuse's native ``usage_details`` shape.
+
+    Langfuse uses these field names for token rollups in the UI; passing them
+    inside ``metadata`` instead silently disables the cost/token aggregations
+    surfaced at the trace and session level.
+    """
+    if usage.input_tokens == 0 and usage.output_tokens == 0:
+        return None
+    return {
+        "input": usage.input_tokens,
+        "output": usage.output_tokens,
+        "total": usage.input_tokens + usage.output_tokens,
+    }
+
+
+def _trace_cost_details(model: str, usage: UsageSnapshot) -> dict[str, float] | None:
+    """Estimate per-call cost and shape it for Langfuse ``cost_details``."""
+    if usage.input_tokens == 0 and usage.output_tokens == 0:
+        return None
+    try:
+        from openharness.observability.cost import estimate_cost  # noqa: PLC0415
+
+        total = estimate_cost(
+            model=model,
+            input_tokens=usage.input_tokens,
+            output_tokens=usage.output_tokens,
+        )
+    except Exception:
+        return None
+    if total is None:
+        return None
+    return {"total": float(total)}
 
 
 def _trace_tool_calls(tool_uses: list[ToolUseBlock]) -> list[dict[str, Any]]:

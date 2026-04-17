@@ -36,11 +36,11 @@ class OpenHarnessHarborAgentSpec:
     """Agent-specific options exposed through the Harbor wrapper.
 
     ``agent_name`` selects which YAML config the factory loads inside the
-    container (e.g. ``"default"``, ``"react_example"``).
+    container (e.g. ``"basic"``, ``"react"``).
     """
 
     import_path: str = DEFAULT_HARBOR_AGENT_IMPORT_PATH
-    agent_name: str = "default"
+    agent_name: str = "basic"
     model: str | None = None
     remote_cwd: str = "/app"
     max_turns: int | None = None
