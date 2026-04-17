@@ -28,6 +28,43 @@ from pydantic import BaseModel
 log = logging.getLogger(__name__)
 
 
+def _resolve_public_host_env() -> str | None:
+    """Return the externally reachable Langfuse base URL, if configured.
+
+    Falls back to ``LANGFUSE_PUBLIC_HOST`` if set, otherwise ``None`` so the
+    caller keeps the ingestion URL (which is reachable from inside Docker but
+    typically not from the developer's laptop).
+    """
+    return os.environ.get("LANGFUSE_PUBLIC_HOST") or None
+
+
+def rewrite_trace_url_for_public(url: str, public_host: str | None = None) -> str:
+    """Rewrite a Langfuse trace URL so its host matches ``public_host``.
+
+    Useful when the agent runs inside Docker and must POST traces to a
+    container-routable host (e.g. ``http://10.128.0.4:3010``) but humans open
+    the same trace from their laptop, where the same instance is reachable as
+    ``http://localhost:3010`` via SSH port forwarding.
+
+    Returns the URL unchanged when no public host is provided or when the URL
+    is malformed.
+    """
+    target = public_host or _resolve_public_host_env()
+    if not target or not url:
+        return url
+    try:
+        from urllib.parse import urlparse, urlunparse  # noqa: PLC0415
+
+        parsed = urlparse(url)
+        target_parsed = urlparse(target if "://" in target else f"http://{target}")
+        if not parsed.scheme or not parsed.netloc:
+            return url
+        return urlunparse(parsed._replace(scheme=target_parsed.scheme, netloc=target_parsed.netloc))
+    except Exception:
+        log.debug("Failed to rewrite trace URL %s with public host %s", url, target)
+        return url
+
+
 @dataclass(frozen=True)
 class TraceIdentity:
     """Deterministic trace identity for a run."""
@@ -267,12 +304,14 @@ def langfuse_agent_env_for_docker() -> dict[str, str]:
         "LANGFUSE_SECRET_KEY",
         "LANGFUSE_HOST",
         "LANGFUSE_BASE_URL",
+        "LANGFUSE_PUBLIC_HOST",
         "LANGFUSE_ENVIRONMENT",
         "LANGFUSE_RELEASE",
         "LANGFUSE_SAMPLE_RATE",
         "OPENHARNESS_LANGFUSE_FLUSH_MODE",
         "OPENHARNESS_LANGFUSE_REQUIRED",
         "OPENHARNESS_LANGFUSE_VERIFY",
+        "OPENHARNESS_LANGFUSE_SESSION_ID",
     )
     env = {key: os.environ[key] for key in keys if key in os.environ}
     if env.get("LANGFUSE_HOST") in {"http://localhost:3000", "http://127.0.0.1:3000"}:
@@ -303,6 +342,24 @@ def _coerce_jsonable(value: Any) -> Any:
     return str(value)
 
 
+# Keys passed through to Langfuse as first-class observation fields rather than
+# being JSON-coerced into ``metadata``. Langfuse uses them for usage/cost
+# rollups, error indicators, and the rich generation UI; coercing them to
+# strings would silently disable those features.
+_PASSTHROUGH_OBSERVATION_FIELDS = frozenset(
+    {
+        "usage_details",
+        "cost_details",
+        "model",
+        "model_parameters",
+        "level",
+        "status_message",
+        "completion_start_time",
+        "prompt",
+    }
+)
+
+
 class _LangfuseObservationHandle:
     """Thin wrapper over a Langfuse observation context manager."""
 
@@ -322,7 +379,14 @@ class _LangfuseObservationHandle:
     def update(self, **kwargs: Any) -> None:
         if self._closed:
             return
-        payload = {k: _coerce_jsonable(v) for k, v in kwargs.items() if v is not None}
+        payload: dict[str, Any] = {}
+        for key, value in kwargs.items():
+            if value is None:
+                continue
+            if key in _PASSTHROUGH_OBSERVATION_FIELDS:
+                payload[key] = value
+            else:
+                payload[key] = _coerce_jsonable(value)
         if payload:
             self._observation.update(**payload)
 
@@ -353,6 +417,9 @@ class LangfuseTraceObserver:
         user_id: str | None = None,
         flush_mode: str = "session_end",
         trace_url_required: bool = False,
+        trace_name: str | None = None,
+        extra_tags: list[str] | None = None,
+        public_host: str | None = None,
     ) -> None:
         self._client = client
         self._propagate_fn = propagate_fn
@@ -365,9 +432,11 @@ class LangfuseTraceObserver:
         self._user_id = user_id
         self._flush_mode = flush_mode
         self._trace_url_required = trace_url_required
+        self._extra_tags = list(extra_tags or [])
+        self._public_host = public_host
         self._propagation_context: Any | None = None
         self._session_handle: _LangfuseObservationHandle | None = None
-        self.trace_name = run_id or f"openharness.{interface}"
+        self.trace_name = trace_name or run_id or f"openharness.{interface}"
         self.trace_id: str | None = None
         self.trace_url: str | None = None
 
@@ -377,6 +446,9 @@ class LangfuseTraceObserver:
         tags = ["openharness", self._interface]
         if self._provider:
             tags.append(self._provider)
+        for tag in self._extra_tags:
+            if tag and tag not in tags:
+                tags.append(tag)
         self.trace_id = self._client.create_trace_id(
             seed=self.run_id or f"{self._interface}:{self._session_id}"
         )
@@ -388,19 +460,28 @@ class LangfuseTraceObserver:
             tags=tags,
         )
         self._propagation_context.__enter__()
+
+        session_metadata = {
+            "interface": self._interface,
+            "cwd": self._cwd,
+            "model": self._model,
+            "provider": self._provider,
+            "run_id": self.run_id,
+            **(metadata or {}),
+        }
+        # When the caller provides an explicit ``input``, surface it on the
+        # session observation. Otherwise fall back to the working directory so
+        # the trace card isn't blank.
+        session_input = session_metadata.pop("input", None)
+        if session_input is None:
+            session_input = {"cwd": self._cwd}
+
         self._session_handle = self._start_observation(
             name="session",
             as_type="agent",
             trace_context={"trace_id": self.trace_id},
-            input={"cwd": self._cwd},
-            metadata={
-                "interface": self._interface,
-                "cwd": self._cwd,
-                "model": self._model,
-                "provider": self._provider,
-                "run_id": self.run_id,
-                **(metadata or {}),
-            },
+            input=session_input,
+            metadata=session_metadata,
         )
         self._flush_if_live()
 
@@ -517,7 +598,9 @@ class LangfuseTraceObserver:
                 raise RuntimeError("Unable to resolve Langfuse trace URL.") from exc
             log.debug("Unable to resolve Langfuse trace URL: %s", exc, exc_info=True)
             return None
-        return str(trace_url) if trace_url else None
+        if trace_url is None:
+            return None
+        return rewrite_trace_url_for_public(str(trace_url), self._public_host)
 
     def _start_observation(
         self,
@@ -615,6 +698,8 @@ def create_trace_observer(
     provider: str | None = None,
     run_id: str | None = None,
     required: bool | None = None,
+    trace_name: str | None = None,
+    extra_tags: list[str] | None = None,
 ) -> TraceObserver:
     """Return a ``LangfuseTraceObserver`` when the environment is configured, else a ``NullTraceObserver``.
 
@@ -626,6 +711,9 @@ def create_trace_observer(
     - ``LANGFUSE_HOST`` or ``LANGFUSE_BASE_URL`` — override the Langfuse endpoint.
       Set this to point to a local or self-hosted instance, e.g. ``http://localhost:3000``.
       Defaults to the Langfuse cloud endpoint when unset.
+    - ``LANGFUSE_PUBLIC_HOST`` — externally reachable host (e.g. ``http://localhost:3010``)
+      used when emitting trace URLs into on-disk artifacts. Lets agents POST traces
+      to a container-internal address while humans open them via SSH-tunneled localhost.
     - ``LANGFUSE_ENVIRONMENT``, ``LANGFUSE_RELEASE``, ``LANGFUSE_SAMPLE_RATE`` — forwarded to the SDK.
     - ``OPENHARNESS_LANGFUSE_ENABLED=0`` — force-disable tracing regardless of other variables.
     - ``OPENHARNESS_LANGFUSE_REQUIRED=1`` — raise a clear startup error instead
@@ -635,8 +723,11 @@ def create_trace_observer(
       traces become visible during long-running local runs.
     - ``OPENHARNESS_RUN_ID`` — when set (or when ``run_id`` is passed explicitly),
       Langfuse traces use that value as the trace name and deterministic trace seed.
+    - ``OPENHARNESS_LANGFUSE_SESSION_ID`` — explicit Langfuse session ID grouping
+      multiple traces (e.g. all trials of one experiment instance).
     """
     resolved_run_id = run_id or os.environ.get("OPENHARNESS_RUN_ID")
+    resolved_session_id = os.environ.get("OPENHARNESS_LANGFUSE_SESSION_ID") or session_id
     required = (
         _env_truthy(os.environ.get("OPENHARNESS_LANGFUSE_REQUIRED", "0"))
         if required is None
@@ -696,7 +787,7 @@ def create_trace_observer(
     return LangfuseTraceObserver(
         client=client,
         propagate_fn=propagate_attributes,
-        session_id=session_id,
+        session_id=resolved_session_id,
         interface=interface,
         cwd=cwd,
         model=model,
@@ -705,6 +796,9 @@ def create_trace_observer(
         user_id=user_id,
         flush_mode=os.environ.get("OPENHARNESS_LANGFUSE_FLUSH_MODE", "session_end"),
         trace_url_required=required,
+        trace_name=trace_name,
+        extra_tags=extra_tags,
+        public_host=_resolve_public_host_env(),
     )
 
 
@@ -768,4 +862,68 @@ def resolve_langfuse_trace_identity(
         return unavailable("Unable to resolve Langfuse trace URL.", cause=exc)
     if trace_url is None and required:
         return unavailable("Unable to resolve Langfuse trace URL.")
-    return TraceIdentity(trace_id=trace_id, trace_url=str(trace_url) if trace_url else None)
+    public_url = (
+        rewrite_trace_url_for_public(str(trace_url), _resolve_public_host_env())
+        if trace_url
+        else None
+    )
+    return TraceIdentity(trace_id=trace_id, trace_url=public_url)
+
+
+# ---------------------------------------------------------------------------
+# Score helper (post-hoc trace scoring)
+# ---------------------------------------------------------------------------
+
+
+def score_trace(
+    *,
+    trace_id: str,
+    name: str,
+    value: float | str,
+    data_type: str = "NUMERIC",
+    comment: str | None = None,
+) -> bool:
+    """Attach a Langfuse score to an existing trace.
+
+    Returns ``True`` if the score was emitted, ``False`` otherwise. Errors are
+    swallowed and logged at debug level so a failed Langfuse call never breaks
+    the experiment runner.
+
+    ``data_type`` should be one of ``NUMERIC``, ``CATEGORICAL``, ``BOOLEAN``.
+    """
+    if not _env_truthy(os.environ.get("OPENHARNESS_LANGFUSE_ENABLED", "1")):
+        return False
+    if not os.environ.get("LANGFUSE_PUBLIC_KEY") or not os.environ.get("LANGFUSE_SECRET_KEY"):
+        log.debug("Skipping Langfuse score; credentials not configured.")
+        return False
+    if not trace_id:
+        return False
+
+    try:
+        from langfuse import Langfuse  # noqa: PLC0415
+    except ImportError:
+        log.debug("Skipping Langfuse score; langfuse package not installed.")
+        return False
+
+    try:
+        client = Langfuse(
+            public_key=os.environ["LANGFUSE_PUBLIC_KEY"],
+            secret_key=os.environ["LANGFUSE_SECRET_KEY"],
+            base_url=os.environ.get("LANGFUSE_BASE_URL") or None,
+            host=os.environ.get("LANGFUSE_HOST") or None,
+            environment=os.environ.get("LANGFUSE_ENVIRONMENT") or None,
+        )
+        kwargs: dict[str, Any] = {
+            "trace_id": trace_id,
+            "name": name,
+            "value": value,
+            "data_type": data_type,
+        }
+        if comment:
+            kwargs["comment"] = comment
+        client.create_score(**kwargs)
+        client.flush()
+        return True
+    except Exception as exc:
+        log.debug("Failed to emit Langfuse score for trace %s: %s", trace_id, exc, exc_info=True)
+        return False

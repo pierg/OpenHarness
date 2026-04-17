@@ -38,6 +38,7 @@ dependencies = [
     "discord.py>=2.0.0",
     "lark-oapi>=1.5.0",
     "genai-prices>=0.0.56",
+    "python-dotenv>=1.0.0",
 ]
 
 [project.optional-dependencies]

@@ -25,9 +25,10 @@ from openharness.tools.lsp_tool import LspTool, LspToolInput
 from openharness.tools.notebook_edit_tool import NotebookEditTool, NotebookEditToolInput
 from openharness.tools.remote_trigger_tool import RemoteTriggerTool, RemoteTriggerToolInput
 from openharness.tools.skill_tool import SkillTool, SkillToolInput
+from openharness.tools.think_tool import ThinkTool, ThinkToolInput
 from openharness.tools.todo_write_tool import TodoWriteTool, TodoWriteToolInput
 from openharness.tools.tool_search_tool import ToolSearchTool, ToolSearchToolInput
-from openharness.tools import create_default_tool_registry
+from openharness.tools import WORKSPACE_TOOLS, create_default_tool_registry, normalize_tool_name
 
 
 @pytest.mark.asyncio
@@ -76,6 +77,38 @@ async def test_glob_and_grep(tmp_path: Path):
         context,
     )
     assert "a.py:1:def alpha():" in file_root_result.output
+
+
+@pytest.mark.asyncio
+async def test_think_tool_echoes_thought_and_is_read_only(tmp_path: Path):
+    tool = ThinkTool()
+    args = ThinkToolInput(thought="Plan: enumerate octets, then date, then negative lookahead.")
+
+    assert tool.is_read_only(args) is True
+
+    result = await tool.execute(args, ToolExecutionContext(cwd=tmp_path))
+    assert result.is_error is False
+    assert result.output == "Plan: enumerate octets, then date, then negative lookahead."
+
+    schema = tool.to_api_schema()
+    assert schema["name"] == "think"
+    assert "thought" in schema["input_schema"]["properties"]
+
+
+def test_think_tool_registered_in_workspace_tools_and_default_registry():
+    assert "think" in WORKSPACE_TOOLS
+    assert WORKSPACE_TOOLS["think"] is ThinkTool
+    assert normalize_tool_name("Think") == "think"
+    assert normalize_tool_name("think") == "think"
+
+    registry = create_default_tool_registry()
+    tool = registry.get("think")
+    assert isinstance(tool, ThinkTool)
+
+
+def test_think_tool_input_rejects_empty_thought():
+    with pytest.raises(ValueError):
+        ThinkToolInput(thought="")
 
 
 @pytest.mark.asyncio
