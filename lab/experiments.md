@@ -12,7 +12,7 @@
 
 -   **Hypothesis:** the post-reset baseline runs cleanly across all of `terminal-bench@2.0` and produces a real per-agent pass-rate distribution to anchor every future ablation.
 -   **Variant:** Current post-reset state (3.1-flash-lite-preview)
--   **Run:** [`runs/experiments/tb2-baseline-20260417-230953/`](../runs/experiments/tb2-baseline-20260417-230953/)
+-   **Run:** [`runs/experiments/tb2-baseline-20260417-232435/`](../runs/experiments/tb2-baseline-20260417-232435/)
 
 ### Results
 
