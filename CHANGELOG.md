@@ -6,6 +6,11 @@ The format is based on Keep a Changelog, and this project currently tracks chang
 
 ## [Unreleased]
 
+### Upstream Integration
+
+- Integrated upstream `HKUDS/OpenHarness` `main` through `9caf700` (`2026-04-15`), covering secure default channel allowlists, profile materialization for base_url resolution, and openai_compat format support.
+- Integration approach: Mixed (merge + manual port). Adapted `src/openharness/ui/runtime.py` and `src/openharness/api/factory.py` so upstream profile and format improvements work with the fork's centralized client factory.
+
 ### Added
 
 - Docker as an alternative sandbox backend (`sandbox.backend = "docker"`) for stronger execution isolation with configurable resource limits, network isolation, and automatic image management.
