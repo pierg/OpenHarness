@@ -6,7 +6,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Awaitable, Callable
 
-from openharness.api.client import AnthropicApiClient, SupportsStreamingMessages
+from openharness.api.client import SupportsStreamingMessages
+from openharness.api.factory import create_api_client
 from openharness.api.provider import auth_status, detect_provider
 from openharness.bridge import get_bridge_manager
 from openharness.commands import CommandContext, CommandResult, create_default_command_registry
@@ -106,10 +107,7 @@ async def build_runtime(
     )
     cwd = str(Path.cwd())
     plugins = load_plugins(settings, cwd)
-    resolved_api_client = api_client or AnthropicApiClient(
-        api_key=settings.resolve_api_key(),
-        base_url=settings.base_url,
-    )
+    resolved_api_client = api_client or create_api_client(settings)
     mcp_manager = McpClientManager(load_mcp_server_configs(settings, plugins))
     await mcp_manager.connect_all()
     tool_registry = create_default_tool_registry(mcp_manager)
