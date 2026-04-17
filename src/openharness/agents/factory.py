@@ -32,7 +32,7 @@ class AgentFactory:
     Usage::
 
         factory = AgentFactory.with_default_configs()
-        agent   = factory.create("default")
+        agent   = factory.create("basic")
     """
 
     def __init__(self, agents_dir: str | Path | None = None) -> None:

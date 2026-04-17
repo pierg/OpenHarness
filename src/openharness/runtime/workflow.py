@@ -47,7 +47,7 @@ class Workflow:
     async def run(
         self,
         task: TaskDefinition,
-        agent_name: str = "default",
+        agent_name: str = "basic",
         *,
         api_client: SupportsStreamingMessages | None = None,
         log_paths: AgentLogPaths | None = None,

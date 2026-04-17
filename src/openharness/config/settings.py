@@ -14,7 +14,7 @@ import os
 import re
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
@@ -229,7 +229,7 @@ def default_provider_profiles() -> dict[str, ProviderProfile]:
             provider="gemini",
             api_format="google",
             auth_source="gemini_api_key",
-            default_model="gemini-2.5-flash",
+            default_model="gemini-3.1-flash-lite-preview",
         ),
     }
 
@@ -287,7 +287,7 @@ def resolve_model_setting(
         if is_claude_family_provider(provider):
             return _CLAUDE_ALIAS_TARGETS["sonnet"]
         if provider == "gemini":
-            return "gemini-2.5-flash"
+            return "gemini-3.1-flash-lite-preview"
         return "gpt-5.4"
 
     if is_claude_family_provider(provider):
@@ -475,6 +475,16 @@ class Settings(BaseModel):
     effort: str = "medium"
     passes: int = 1
     verbose: bool = False
+
+    # Execution mode. ``"interactive"`` (default) renders the full
+    # CLI-oriented system prompt (mentions of "the user", permission
+    # prompts, delegation guidance, host CLAUDE.md / memory / skills).
+    # ``"autonomous"`` renders a slimmed prompt for unattended trial /
+    # batch execution (e.g. Harbor, experiments) where there is no
+    # human to interact with — drops user-facing language and the
+    # host-machine personalization sections that would otherwise leak
+    # into the trial container's prompt.
+    session_mode: Literal["interactive", "autonomous"] = "interactive"
 
     def merged_profiles(self) -> dict[str, ProviderProfile]:
         """Return the saved profiles merged over the built-in catalog."""

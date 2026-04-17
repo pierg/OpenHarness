@@ -245,7 +245,7 @@ async def test_agent_tool_projects_yaml_definition_into_spawn_config(tmp_path: P
             class Result:
                 success = True
                 task_id = "task-123"
-                agent_id = "yaml-default@default"
+                agent_id = "yaml-basic@basic"
                 backend_type = "in_process"
                 error = None
 
@@ -266,7 +266,7 @@ async def test_agent_tool_projects_yaml_definition_into_spawn_config(tmp_path: P
         AgentToolInput(
             description="compose",
             prompt="Solve it",
-            subagent_type="yaml-default",
+            subagent_type="yaml-basic",
             mode="in_process_teammate",
         ),
         ToolExecutionContext(cwd=tmp_path),
@@ -275,6 +275,14 @@ async def test_agent_tool_projects_yaml_definition_into_spawn_config(tmp_path: P
     assert result.is_error is False
     config = captured["config"]
     assert config.runner == "yaml_workflow"
-    assert config.agent_config_name == "default"
+    assert config.agent_config_name == "basic"
     assert config.allowed_tools is not None
-    assert "agent" in config.allowed_tools
+    assert set(config.allowed_tools) == {
+        "bash",
+        "read_file",
+        "write_file",
+        "edit_file",
+        "glob",
+        "grep",
+        "think",
+    }

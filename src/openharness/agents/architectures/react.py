@@ -54,6 +54,11 @@ class ReActAgent:
             raise ValueError(f"ReActAgent config '{config.name}' must define an 'actor' subagent.")
         self._thinker_config = config.subagents["thinker"]
         self._actor_config = config.subagents["actor"]
+        # NOTE: On a ReAct *parent* config, ``max_turns`` controls the
+        # number of think→act cycles, NOT a conversation turn budget
+        # (the parent has no conversation of its own — only the
+        # ``thinker`` and ``actor`` subagents do, each with their own
+        # ``max_turns``). See docs/template-variables.md.
         self._max_steps = max(1, config.max_turns)
 
     @property
@@ -75,27 +80,60 @@ class ReActAgent:
                 output_type=Thought,
             )
 
+            pending_action = thought.action.strip()
+
+            # Always execute a non-empty action before honouring is_finished.
+            # The model often emits its terminal "save the file" action
+            # together with is_finished=true; dropping that action would
+            # silently lose the side-effect the task verifies.
+            if pending_action:
+                if thought.is_finished:
+                    log.info(
+                        "ReAct step %d — running terminal action before finishing: %s",
+                        step,
+                        pending_action,
+                    )
+                else:
+                    log.info("ReAct step %d — acting: %s", step, pending_action)
+                action_result = await runtime.run_agent_config(
+                    self._actor_config,
+                    TaskDefinition(
+                        instruction=pending_action,
+                        payload=task.payload,
+                    ),
+                )
+                observations.append(
+                    {
+                        "step": str(step),
+                        "reasoning": thought.reasoning,
+                        "action": pending_action,
+                        "observation": action_result,
+                    }
+                )
+            else:
+                action_result = ""
+
             if thought.is_finished:
                 log.info("ReAct finished at step %d", step)
-                return runtime.build_result(thought.final_answer)
+                final_text = thought.final_answer or action_result
+                return runtime.build_result(final_text)
 
-            log.info("ReAct step %d — acting: %s", step, thought.action)
-            action_result = await runtime.run_agent_config(
-                self._actor_config,
-                TaskDefinition(
-                    instruction=thought.action,
-                    payload=task.payload,
-                ),
-            )
-
-            observations.append(
-                {
-                    "step": str(step),
-                    "reasoning": thought.reasoning,
-                    "action": thought.action,
-                    "observation": action_result,
-                }
-            )
+            if not pending_action:
+                # No-op turn (no action, not finished) — record it so the
+                # thinker sees its own indecision and can recover next step
+                # rather than spinning forever on identical empty turns.
+                log.warning("ReAct step %d — thinker emitted no action and did not finish", step)
+                observations.append(
+                    {
+                        "step": str(step),
+                        "reasoning": thought.reasoning,
+                        "action": "",
+                        "observation": (
+                            "(no action produced — emit a concrete next "
+                            "action or set is_finished=true)"
+                        ),
+                    }
+                )
 
         last_obs = observations[-1]["observation"] if observations else ""
         return runtime.build_result(last_obs)

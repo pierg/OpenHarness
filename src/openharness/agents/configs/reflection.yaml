@@ -1,18 +1,20 @@
-name: reflection_example
-description: Reflection architecture — worker + critic with iterative refinement.
+name: reflection
+description: Reflection (worker + critic) Terminal-Bench baseline agent.
 architecture: reflection
+model: gemini-3.1-flash-lite-preview
 max_turns: 2
+max_tokens: 8192
 definition:
   subagent_type: reflection
-  description: Worker/critic workflow with iterative self-review. Use this when you want the agent to generate an answer, critique it, and retry before returning.
+  description: Baseline worker/critic workflow for Harbor and Terminal-Bench style tasks.
   runner: yaml_workflow
   color: yellow
 
 subagents:
   worker:
     name: worker
-    model: gemini-2.5-flash-lite
-    max_turns: 10
+    model: gemini-3.1-flash-lite-preview
+    max_turns: 30
     max_tokens: 8192
     tools:
       - bash
@@ -21,21 +23,40 @@ subagents:
       - edit_file
       - glob
       - grep
+      - think
     prompts:
       system: |
         {{ openharness_system_context }}
 
-        # Worker Persona
-        You are a coding agent. Solve the task using the provided tools.
-        Be concise and prefer small, accurate edits.
+        You are a coding agent running inside a task environment. Read the
+        task instructions carefully, inspect the filesystem before editing,
+        make the smallest correct changes, and verify with available tests
+        or task-specific checks.
+
+        Use non-interactive shell commands. Do not ask for human input.
+        Do not modify the underlying system environment to fix application
+        bugs; fix the application code instead. Avoid recursive flags that
+        hang (like `wget -r`).
+
+        For planning a multi-step change or interpreting a noisy tool
+        result, call the `think` tool. Do NOT use `bash` with comment-only
+        commands as a scratchpad.
+
+        Stop only after the task is verified or after you have found a
+        concrete blocker that prevents further progress.
 
         {% if previous_attempt is defined %}
         # Previous Attempt
         Your previous solution was rejected. Here is the feedback:
         {{ feedback }}
-        {% if issues is defined %}
-        Issues: {{ issues }}
+        {% if issues is defined and issues %}
+
+        Specific issues to address:
+        {% for issue in issues %}
+        - {{ issue }}
+        {% endfor %}
         {% endif %}
+
         Please fix the issues and try again.
         {% endif %}
 
@@ -44,14 +65,23 @@ subagents:
 
   critic:
     name: critic
-    model: gemini-2.5-flash-lite
+    model: gemini-3.1-flash-lite-preview
     max_turns: 1
-    max_tokens: 1024
+    max_tokens: 2048
     tools: []
     prompts:
       system: |
-        You are a code reviewer. You will be given a task and a proposed solution.
-        Evaluate whether the solution correctly and completely solves the task.
+        You are a benchmark solution reviewer. You will be given a task and a
+        proposed solution. Evaluate whether the solution appears to correctly
+        and completely solve the task, with attention to whether the worker
+        ran a concrete verification command.
+
+        Populate the response fields as follows:
+        - `approved`: true only if the solution is correct AND verified.
+        - `feedback`: a short paragraph explaining the verdict; the worker
+          will read this on retry, so be specific and constructive.
+        - `issues`: a list of concrete, actionable issues the worker should
+          fix on the next attempt; leave empty when `approved` is true.
 
       user: |
         # Task

@@ -162,7 +162,7 @@ def test_coordinator_user_context_includes_tools(monkeypatch):
     assert "workerToolsContext" in ctx
     assert "availableAgentsContext" in ctx
     assert "bash" in ctx["workerToolsContext"]
-    assert "yaml-default" in ctx["availableAgentsContext"]
+    assert "yaml-basic" in ctx["availableAgentsContext"]
 
 
 def test_coordinator_user_context_with_mcp_clients(monkeypatch):
@@ -181,7 +181,7 @@ def test_coordinator_system_prompt_mentions_dynamic_catalog(monkeypatch):
     monkeypatch.setenv("CLAUDE_CODE_COORDINATOR_MODE", "1")
     prompt = get_coordinator_system_prompt()
     assert "Current agent catalog" in prompt
-    assert "yaml-default" in prompt
+    assert "yaml-basic" in prompt
 
 
 # ---------------------------------------------------------------------------

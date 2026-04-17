@@ -142,7 +142,25 @@ def run_harbor_job(spec: HarborJobSpec) -> HarborRunResult:
     command[0] = executable
     result_path = resolved_jobs_dir / resolved_job_name / "result.json"
 
-    subprocess.run(command, check=True)
+    if spec.quiet:
+        log_path = resolved_jobs_dir / resolved_job_name / "harbor_cli.log"
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+        with open(log_path, "w") as f:
+            try:
+                subprocess.run(command, check=True, stdout=f, stderr=subprocess.STDOUT)
+            except subprocess.CalledProcessError as e:
+                # If Harbor crashes and we are quiet, the user will have NO idea why.
+                # Read the log and append it to the exception.
+                try:
+                    with open(log_path, "r") as lf:
+                        tail = "".join(lf.readlines()[-20:])
+                    raise RuntimeError(
+                        f"Harbor failed with code {e.returncode}. Last 20 lines of log:\n{tail}"
+                    ) from e
+                except Exception:
+                    raise e
+    else:
+        subprocess.run(command, check=True)
 
     return HarborRunResult(
         command=tuple(command),
@@ -251,9 +269,10 @@ def _build_agent_env(spec: HarborJobSpec) -> dict[str, str]:
 
 
 def _build_agent_kwargs(spec: HarborJobSpec) -> dict[str, Any]:
-    base_cwd = spec.run_cwd.expanduser().resolve() if spec.run_cwd is not None else Path.cwd()
-    run_root = get_project_runs_dir(base_cwd) / spec.job_name
+    # The agent derives its own run_root from Harbor's trial_dir, so we do not
+    # inject a synthetic <cwd>/runs/<job_name> path here — that directory does
+    # not exist on disk and resulted in misleading `harbor_job_dir` metadata
+    # in run.json.
     kwargs = spec.agent.harbor_kwargs()
     kwargs["run_id"] = spec.job_name
-    kwargs["run_root"] = str(run_root)
     return kwargs

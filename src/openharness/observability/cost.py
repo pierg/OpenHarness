@@ -1,4 +1,4 @@
-"""Estimate LLM call cost using genai-prices."""
+"""Estimate LLM call cost using genai-prices, with a small fallback table."""
 
 from __future__ import annotations
 
@@ -24,6 +24,28 @@ PROVIDER_MAP: dict[str, str] = {
     "azure": "azure",
 }
 
+# Per-million-token (USD) pricing for models not yet shipped in
+# genai_prices' database (typically brand-new preview models).  Keep
+# this table small — the upstream package is the source of truth and
+# anything in here should be removed once it's published there.  Prices
+# below assume the closest non-preview sibling's rate as a placeholder
+# until Google publishes preview pricing.
+FALLBACK_PRICES_PER_MILLION: dict[str, tuple[float, float]] = {
+    # gemini-3.1-flash-lite-preview: priced in line with gemini-2.5-flash-lite
+    # ($0.10 input / $0.40 output per million tokens) until Google
+    # publishes the preview tier.
+    "gemini-3.1-flash-lite-preview": (0.10, 0.40),
+}
+
+
+def _fallback_estimate(*, model: str, input_tokens: int, output_tokens: int) -> float | None:
+    """Estimate cost using ``FALLBACK_PRICES_PER_MILLION``."""
+    rates = FALLBACK_PRICES_PER_MILLION.get(model)
+    if rates is None:
+        return None
+    in_rate, out_rate = rates
+    return (input_tokens * in_rate + output_tokens * out_rate) / 1_000_000
+
 
 def estimate_cost(
     *,
@@ -45,9 +67,11 @@ def estimate_cost(
             model_ref=model,
             provider_id=provider_id,
         )
-        return float(result.total_price) if result.total_price is not None else None
+        if result.total_price is not None:
+            return float(result.total_price)
     except Exception:
         _log.debug(
             "Cost estimation failed for model=%s provider=%s", model, provider, exc_info=True
         )
-        return None
+
+    return _fallback_estimate(model=model, input_tokens=input_tokens, output_tokens=output_tokens)
