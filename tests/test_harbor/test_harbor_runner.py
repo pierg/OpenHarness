@@ -45,8 +45,8 @@ def test_build_harbor_run_command_maps_agent_task_and_environment_specs() -> Non
             tool=HarborToolSpec(version="0.3.0"),
             agent=OpenHarnessHarborAgentSpec(
                 agent_name="react",
-                model="gemini-3.1-flash-lite-preview-lite",
-                agent_config_yaml="name: react\narchitecture: simple\nmodel: gemini-3.1-flash-lite-preview-lite\n",
+                model="gemini-3.1-flash-lite-preview",
+                agent_config_yaml="name: react\narchitecture: simple\nmodel: gemini-3.1-flash-lite-preview\n",
             ),
             task=HarborTaskSpec(path=Path("/tmp/task")),
             environment=HarborEnvironmentSpec(type="docker", override_cpus=2),
@@ -57,7 +57,7 @@ def test_build_harbor_run_command_maps_agent_task_and_environment_specs() -> Non
     assert command[:4] == ["harbor", "run", "--yes", "--n-concurrent"]
     assert "--agent-import-path" in command
     assert "openharness.harbor:OpenHarnessHarborAgent" in command
-    assert "--model" in command and "gemini-3.1-flash-lite-preview-lite" in command
+    assert "--model" in command and "gemini-3.1-flash-lite-preview" in command
     assert "--path" in command and str(Path("/tmp/task").resolve()) in command
     assert "--env" in command and "docker" in command
     assert "--override-cpus" in command
@@ -89,7 +89,7 @@ def test_resolve_harbor_job_name_unique_suffix(tmp_path: Path) -> None:
             job_name="demo-job",
             jobs_dir=tmp_path,
             tool=HarborToolSpec(version="0.3.0"),
-            agent=OpenHarnessHarborAgentSpec(model="gemini-3.1-flash-lite-preview-lite"),
+            agent=OpenHarnessHarborAgentSpec(model="gemini-3.1-flash-lite-preview"),
             task=HarborTaskSpec(path=Path("/tmp/task")),
             environment=HarborEnvironmentSpec(type="docker"),
             existing_job_policy=HarborExistingJobPolicy.UNIQUE,
@@ -108,7 +108,7 @@ def test_resolve_harbor_job_name_errors_on_collision(tmp_path: Path) -> None:
                 job_name="demo-job",
                 jobs_dir=tmp_path,
                 tool=HarborToolSpec(version="0.3.0"),
-                agent=OpenHarnessHarborAgentSpec(model="gemini-3.1-flash-lite-preview-lite"),
+                agent=OpenHarnessHarborAgentSpec(model="gemini-3.1-flash-lite-preview"),
                 task=HarborTaskSpec(path=Path("/tmp/task")),
                 environment=HarborEnvironmentSpec(type="docker"),
             )
@@ -140,7 +140,7 @@ def test_run_harbor_job_returns_result_path(
             jobs_dir=jobs_dir,
             run_cwd=tmp_path,
             tool=HarborToolSpec(version="0.3.0"),
-            agent=OpenHarnessHarborAgentSpec(model="gemini-3.1-flash-lite-preview-lite"),
+            agent=OpenHarnessHarborAgentSpec(model="gemini-3.1-flash-lite-preview"),
             task=HarborTaskSpec(path=task_dir),
             environment=HarborEnvironmentSpec(type="docker"),
             metadata={"example": "harbor_fix_bug"},
@@ -266,7 +266,7 @@ def test_run_harbor_agent_returns_job_result_with_trials(
             job=HarborJobSpec(
                 jobs_dir=tmp_path / "harbor_jobs",
                 tool=HarborToolSpec(version="0.3.0"),
-                agent=OpenHarnessHarborAgentSpec(model="gemini-3.1-flash-lite-preview-lite"),
+                agent=OpenHarnessHarborAgentSpec(model="gemini-3.1-flash-lite-preview"),
                 task=HarborTaskSpec(path=tmp_path / "task"),
                 environment=HarborEnvironmentSpec(type="docker"),
             ),
