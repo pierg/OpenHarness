@@ -27,6 +27,16 @@ class _MinimalWorkspace:
 
 
 @pytest.fixture(autouse=True)
+def _fake_gemini_api_key(monkeypatch: pytest.MonkeyPatch) -> None:
+    """`_prepare_query` builds a real API client for the configured model.
+
+    The Gemini settings path raises if no key is resolvable from env or config
+    file; CI has neither, so seed a dummy value. No API call is ever made.
+    """
+    monkeypatch.setenv("GOOGLE_API_KEY", "test-key-not-used")
+
+
+@pytest.fixture(autouse=True)
 def quiet_runtime_context(monkeypatch):
     """Stub `build_runtime_system_prompt` so tests are deterministic."""
     captured: dict = {}
