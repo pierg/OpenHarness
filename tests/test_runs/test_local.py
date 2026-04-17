@@ -27,7 +27,9 @@ class _StaticApiClient:
 
 
 @pytest.mark.asyncio
-async def test_run_local_agent_writes_run_artifacts(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_run_local_agent_writes_run_artifacts(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     monkeypatch.setenv("OPENHARNESS_CONFIG_DIR", str(tmp_path / "config"))
     monkeypatch.setenv("OPENHARNESS_DATA_DIR", str(tmp_path / "data"))
     monkeypatch.setenv("OPENHARNESS_LANGFUSE_ENABLED", "0")

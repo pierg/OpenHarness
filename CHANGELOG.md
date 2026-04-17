@@ -20,6 +20,7 @@ The format is based on Keep a Changelog, and this project currently tracks chang
 - `CONTRIBUTING.md` reframed as fork development notes with setup, checks, example policy, and docs policy.
 - `docs/examples.md` with concrete OpenHarness usage patterns and demo commands.
 - GitHub issue templates and a pull request template.
+- Built-in `codex` output style for compact, low-noise transcript rendering in React TUI.
 
 ### Fixed
 
@@ -35,8 +36,10 @@ The format is based on Keep a Changelog, and this project currently tracks chang
 - Memory scanner now parses YAML frontmatter.
 - Memory search matches against body content in addition to metadata.
 - Memory search tokenizer handles Han characters for multilingual queries.
-- Fixed duplicate response in React TUI caused by double Enter key submission.
-- Fixed concurrent permission modals overwriting each other in TUI default mode.
+- Fixed duplicate response in React TUI caused by double Enter key submission in the input handler.
+- Fixed concurrent permission modals overwriting each other in TUI default mode when the LLM returns multiple tool calls in one response; `_ask_permission` now serialises callers via an `asyncio.Lock` so each modal is shown and resolved before the next one is emitted.
+- Fixed grep tool crashing with `ValueError` / `LimitOverrunError` when ripgrep outputs a line longer than 64 KB (e.g. minified assets or lock files). The asyncio subprocess stream limit is now 8 MB and oversized lines are skipped rather than terminating the session.
+- Reduced React TUI redraw pressure when `output_style=codex` by avoiding token-level assistant buffer flushes during streaming.
 
 ### Changed
 

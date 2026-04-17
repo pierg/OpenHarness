@@ -9,6 +9,8 @@ from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
+import logging
+
 from openharness.agents.contracts import TaskDefinition
 from openharness.agents.config import AgentConfig
 from openharness.agents.factory import AgentFactory
@@ -19,12 +21,15 @@ from harbor.models.task.config import MCPServerConfig
 from openharness.api.client import SupportsStreamingMessages
 from openharness.api.provider import detect_provider
 from openharness.config import load_settings
+from openharness.harbor.trajectory import write_atif
 from openharness.observability import create_trace_observer
 from openharness.permissions.modes import PermissionMode
 from openharness.runtime.session import AgentLogPaths, AgentRuntime
 from openharness.runs.context import RunContext
 from openharness.tools.base import ToolRegistryFactory
 from openharness.workspace.harbor import HarborWorkspace
+
+_log = logging.getLogger(__name__)
 
 
 OPENHARNESS_HARBOR_VERSION = "0.1.0"
@@ -43,7 +48,7 @@ class OpenHarnessHarborAgent(BaseAgent):
     The ``agent_name`` selects which YAML config the factory loads.
     """
 
-    SUPPORTS_ATIF = False
+    SUPPORTS_ATIF = True
 
     def __init__(
         self,
@@ -129,31 +134,29 @@ class OpenHarnessHarborAgent(BaseAgent):
             settings = load_settings()
             resolved_settings = settings.merge_cli_overrides(model=self.model_name)
             resolved_model = self.model_name or resolved_settings.model
-            run_id = self._run_id or os.environ.get("OPENHARNESS_RUN_ID")
-            run_root = self._run_root or os.environ.get("OPENHARNESS_RUN_ROOT")
-            if run_id is not None and run_root is not None:
-                run_context = RunContext.from_run_root(
-                    run_root,
-                    interface="harbor",
-                    run_id=run_id,
-                    cwd=self._remote_cwd,
-                    metadata={
-                        "harbor_logs_dir": str(self.logs_dir),
-                    },
-                )
-            else:
-                run_context = RunContext.create(
-                    self.logs_dir,
-                    interface="harbor",
-                    run_id=run_id,
-                    metadata={
-                        "harbor_logs_dir": str(self.logs_dir),
-                    },
-                )
+            trial_dir = self.logs_dir.parent
+            job_run_id = self._run_id or os.environ.get("OPENHARNESS_RUN_ID")
+            job_run_root = self._run_root or os.environ.get("OPENHARNESS_RUN_ROOT")
+
+            # The agent is running in self.logs_dir which is usually trial_dir/agent
+            # We want OpenHarness artifacts to live alongside Harbor's trial artifacts
+            trial_run_id = trial_dir.name
+
+            run_context = RunContext.from_run_root(
+                run_root=trial_dir,
+                interface="harbor",
+                run_id=trial_run_id,
+                cwd=self._remote_cwd,
+                metadata={
+                    "harbor_logs_dir": str(self.logs_dir),
+                    "harbor_job_id": job_run_id,
+                    "harbor_job_dir": job_run_root,
+                },
+            )
             messages_path = run_context.artifacts.messages_path
             events_path = run_context.artifacts.events_path
             trace_observer = create_trace_observer(
-                session_id=uuid4().hex[:12],
+                session_id=job_run_id if job_run_id else uuid4().hex[:12],
                 interface="harbor",
                 cwd=self._remote_cwd,
                 model=resolved_model,
@@ -208,10 +211,18 @@ class OpenHarnessHarborAgent(BaseAgent):
                 error_message = str(exc)
                 raise
             finally:
+                from openharness.observability.cost import estimate_cost
+
+                cost_usd = estimate_cost(
+                    model=resolved_model,
+                    provider=detect_provider(resolved_settings).name,
+                    input_tokens=summary.input_tokens,
+                    output_tokens=summary.output_tokens,
+                )
                 context.n_input_tokens = summary.input_tokens or None
                 context.n_output_tokens = summary.output_tokens or None
                 context.n_cache_tokens = None
-                context.cost_usd = None
+                context.cost_usd = cost_usd
                 context.metadata = {
                     "agent_name": self.name(),
                     "agent_version": self.version(),
@@ -259,8 +270,24 @@ class OpenHarnessHarborAgent(BaseAgent):
                         "input_tokens": summary.input_tokens,
                         "output_tokens": summary.output_tokens,
                         "total_tokens": summary.input_tokens + summary.output_tokens,
+                        "cost_usd": cost_usd,
                     },
                 )
+
+                try:
+                    trajectory_path = self.logs_dir / "trajectory.json"
+                    write_atif(
+                        messages_path,
+                        trajectory_path,
+                        session_id=run_context.run_id,
+                        agent_name=self._agent_name,
+                        agent_version=self.version() or OPENHARNESS_HARBOR_VERSION,
+                        model_name=resolved_model,
+                        input_tokens=summary.input_tokens,
+                        output_tokens=summary.output_tokens,
+                    )
+                except Exception:
+                    _log.debug("Failed to write ATIF trajectory", exc_info=True)
 
 
 @contextmanager

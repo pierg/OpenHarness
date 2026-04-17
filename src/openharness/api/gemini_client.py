@@ -175,9 +175,7 @@ class GeminiApiClient:
 # ---------------------------------------------------------------------------
 
 
-def _build_gemini_tools(
-    tools: list[dict[str, Any]], types: Any
-) -> list[Any]:
+def _build_gemini_tools(tools: list[dict[str, Any]], types: Any) -> list[Any]:
     """Convert OpenHarness / Anthropic tool schemas to Gemini FunctionDeclarations."""
     if not tools:
         return []
@@ -196,9 +194,7 @@ def _build_gemini_tools(
     return [types.Tool(function_declarations=declarations)]
 
 
-def _build_gemini_contents(
-    messages: list[ConversationMessage], types: Any
-) -> list[Any]:
+def _build_gemini_contents(messages: list[ConversationMessage], types: Any) -> list[Any]:
     """Convert ConversationMessages to Gemini Content objects.
 
     Tool result blocks require the original function name for Gemini's
@@ -219,9 +215,7 @@ def _build_gemini_contents(
             if isinstance(block, TextBlock):
                 parts.append(types.Part.from_text(text=block.text))
             elif isinstance(block, ToolUseBlock):
-                parts.append(
-                    types.Part.from_function_call(name=block.name, args=block.input)
-                )
+                parts.append(types.Part.from_function_call(name=block.name, args=block.input))
             elif isinstance(block, ToolResultBlock):
                 func_name = tool_name_by_id.get(block.tool_use_id, block.tool_use_id)
                 parts.append(

@@ -46,6 +46,7 @@ def test_gemini_with_vertex_project_skips_api_key(monkeypatch, _stub_genai):
     # Re-import factory to pick up the patched class
     import importlib
     import openharness.api.factory as factory_mod
+
     importlib.reload(factory_mod)
 
     factory_mod.create_api_client(
@@ -56,5 +57,7 @@ def test_gemini_with_vertex_project_skips_api_key(monkeypatch, _stub_genai):
 
 def test_anthropic_base_url_forwarded(monkeypatch):
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test")
-    client = create_api_client(Settings(model="claude-sonnet-4-20250514", base_url="https://proxy/"))
+    client = create_api_client(
+        Settings(model="claude-sonnet-4-20250514", base_url="https://proxy/")
+    )
     assert isinstance(client, AnthropicApiClient)

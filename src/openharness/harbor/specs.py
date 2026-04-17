@@ -119,11 +119,11 @@ class HarborJobSpec:
     task: HarborTaskSpec
     environment: HarborEnvironmentSpec
     agent: OpenHarnessHarborAgentSpec
-    jobs_dir: Path
-    run_cwd: Path | None = None
     job_name: str = field(
         default_factory=lambda: datetime.now().strftime("openharness-harbor-%Y%m%d-%H%M%S-%f")
     )
+    jobs_dir: Path | None = None
+    run_cwd: Path | None = None
     tool: HarborToolSpec = field(default_factory=HarborToolSpec)
     yes: bool = True
     debug: bool = False
@@ -144,5 +144,3 @@ class HarborRunResult:
     job_name: str
     jobs_dir: Path
     result_path: Path
-    trace_id: str | None = None
-    trace_url: str | None = None

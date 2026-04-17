@@ -87,7 +87,9 @@ def test_try_session_memory_compaction_reduces_long_history():
     messages = [
         ConversationMessage(role="user", content=[TextBlock(text=(f"user {index} " * 200).strip())])
         if index % 2 == 0
-        else ConversationMessage(role="assistant", content=[TextBlock(text=(f"assistant {index} " * 200).strip())])
+        else ConversationMessage(
+            role="assistant", content=[TextBlock(text=(f"assistant {index} " * 200).strip())]
+        )
         for index in range(20)
     ]
 
@@ -153,7 +155,9 @@ async def test_compact_conversation_runs_hooks_and_preserves_carryover_state(tmp
     hook_executor = _HookExecutorStub()
     messages = [
         ConversationMessage(role="user", content=[ImageBlock.from_path(image_path)]),
-        ConversationMessage(role="assistant", content=[TextBlock(text="Looking at the attachment")]),
+        ConversationMessage(
+            role="assistant", content=[TextBlock(text="Looking at the attachment")]
+        ),
         ConversationMessage(
             role="assistant",
             content=[ToolUseBlock(name="read_file", input={"path": str(image_path)})],
@@ -179,7 +183,10 @@ async def test_compact_conversation_runs_hooks_and_preserves_carryover_state(tmp
                     "Look into issue #98",
                     "Confirm issue #98 and fix the logger formatting bug",
                 ],
-                "active_artifacts": [str(image_path), "src/openharness/channels/impl/matrix.py:398"],
+                "active_artifacts": [
+                    str(image_path),
+                    "src/openharness/channels/impl/matrix.py:398",
+                ],
                 "verified_state": ["Issue #98 is about logger placeholder formatting"],
                 "next_step": "Patch the logger formatting and rerun focused tests",
             },
@@ -202,7 +209,10 @@ async def test_compact_conversation_runs_hooks_and_preserves_carryover_state(tmp
         },
     )
 
-    assert [event for event, _payload in hook_executor.events] == [HookEvent.PRE_COMPACT, HookEvent.POST_COMPACT]
+    assert [event for event, _payload in hook_executor.events] == [
+        HookEvent.PRE_COMPACT,
+        HookEvent.POST_COMPACT,
+    ]
     rebuilt = build_post_compact_messages(compacted)
     joined = "\n\n".join(message.text for message in rebuilt)
     assert rebuilt[0].text.startswith("[Compact boundary marker]")
@@ -248,7 +258,9 @@ async def test_compact_post_messages_keep_boundary_summary_recent_then_attachmen
                 "verified_state": ["Focused compact test fixture prepared"],
                 "next_step": "Run the focused compact tests",
             },
-            "read_file_state": [{"path": "/tmp/demo.py", "span": "lines 1-20", "preview": "print('hi')"}],
+            "read_file_state": [
+                {"path": "/tmp/demo.py", "span": "lines 1-20", "preview": "print('hi')"}
+            ],
             "recent_work_log": ["Ran pytest -q tests/test_services/test_compact.py [ok]"],
             "recent_verified_work": ["Focused compact test fixture prepared"],
         },
@@ -266,8 +278,12 @@ async def test_compact_post_messages_keep_boundary_summary_recent_then_attachmen
 
 @pytest.mark.asyncio
 async def test_auto_compact_records_richer_checkpoint_metadata(monkeypatch):
-    monkeypatch.setattr("openharness.services.compact.try_session_memory_compaction", lambda *args, **kwargs: None)
-    monkeypatch.setattr("openharness.services.compact.should_autocompact", lambda *args, **kwargs: True)
+    monkeypatch.setattr(
+        "openharness.services.compact.try_session_memory_compaction", lambda *args, **kwargs: None
+    )
+    monkeypatch.setattr(
+        "openharness.services.compact.should_autocompact", lambda *args, **kwargs: True
+    )
     long_text = "alpha " * 50000
     messages = [
         ConversationMessage(role="user", content=[TextBlock(text=long_text)]),
@@ -306,8 +322,12 @@ async def test_auto_compact_if_needed_returns_original_messages_after_timeout(mo
         await asyncio.sleep(0.05)
 
     monkeypatch.setattr("openharness.services.compact.COMPACT_TIMEOUT_SECONDS", 0.01)
-    monkeypatch.setattr("openharness.services.compact.try_session_memory_compaction", lambda *args, **kwargs: None)
-    monkeypatch.setattr("openharness.services.compact.should_autocompact", lambda *args, **kwargs: True)
+    monkeypatch.setattr(
+        "openharness.services.compact.try_session_memory_compaction", lambda *args, **kwargs: None
+    )
+    monkeypatch.setattr(
+        "openharness.services.compact.should_autocompact", lambda *args, **kwargs: True
+    )
     long_text = "alpha " * 50000
     messages = [
         ConversationMessage(role="user", content=[TextBlock(text=long_text)]),
@@ -331,19 +351,25 @@ async def test_auto_compact_if_needed_returns_original_messages_after_timeout(mo
 
 
 def test_get_autocompact_threshold_respects_manual_override():
-    assert get_autocompact_threshold(
-        "claude-sonnet-4-6",
-        auto_compact_threshold_tokens=12345,
-    ) == 12345
+    assert (
+        get_autocompact_threshold(
+            "claude-sonnet-4-6",
+            auto_compact_threshold_tokens=12345,
+        )
+        == 12345
+    )
 
 
 def test_should_autocompact_uses_custom_context_window():
     messages = [
         ConversationMessage(role="user", content=[TextBlock(text="alpha " * 6000)]),
     ]
-    assert should_autocompact(
-        messages,
-        "claude-sonnet-4-6",
-        AutoCompactState(),
-        context_window_tokens=4000,
-    ) is True
+    assert (
+        should_autocompact(
+            messages,
+            "claude-sonnet-4-6",
+            AutoCompactState(),
+            context_window_tokens=4000,
+        )
+        is True
+    )

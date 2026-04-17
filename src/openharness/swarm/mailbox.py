@@ -176,16 +176,16 @@ class TeammateMailbox:
         # Offload blocking I/O to thread pool
         loop = asyncio.get_event_loop()
         await loop.run_in_executor(None, _write_atomic)
-        
+
         from loguru import logger as log
-        
+
         # Colorize prefix based on sender
         colors = ["cyan", "magenta", "green", "yellow", "blue", "red"]
         sender_color = colors[hash(msg.sender) % len(colors)]
-        
-        sender_clean = msg.sender.split('@')[0] if '@' in msg.sender else msg.sender
-        recipient_clean = msg.recipient.split('@')[0] if '@' in msg.recipient else msg.recipient
-        
+
+        sender_clean = msg.sender.split("@")[0] if "@" in msg.sender else msg.sender
+        recipient_clean = msg.recipient.split("@")[0] if "@" in msg.recipient else msg.recipient
+
         prefix = f"<{sender_color}>[{sender_clean} -> {recipient_clean}]</{sender_color}>"
         log.opt(colors=True).info(f"{prefix} {msg.summary or '...'}")
 
@@ -341,9 +341,7 @@ def create_shutdown_request(sender: str, recipient: str) -> MailboxMessage:
     return _make_message("shutdown", sender, recipient, {})
 
 
-def create_idle_notification(
-    sender: str, recipient: str, summary: str
-) -> MailboxMessage:
+def create_idle_notification(sender: str, recipient: str, summary: str) -> MailboxMessage:
     """Create an idle-notification message with a brief summary."""
     return _make_message(
         "idle_notification",

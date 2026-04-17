@@ -563,11 +563,11 @@ _BUILTIN_AGENTS: list[AgentDefinition] = [
         name="Explore",
         description=(
             "Fast agent specialized for exploring codebases. Use this when you need to "
-            "quickly find files by patterns (eg. \"src/components/**/*.tsx\"), search code "
-            "for keywords (eg. \"API endpoints\"), or answer questions about the codebase "
-            "(eg. \"how do API endpoints work?\"). When calling this agent, specify the "
-            "desired thoroughness level: \"quick\" for basic searches, \"medium\" for "
-            "moderate exploration, or \"very thorough\" for comprehensive analysis across "
+            'quickly find files by patterns (eg. "src/components/**/*.tsx"), search code '
+            'for keywords (eg. "API endpoints"), or answer questions about the codebase '
+            '(eg. "how do API endpoints work?"). When calling this agent, specify the '
+            'desired thoroughness level: "quick" for basic searches, "medium" for '
+            'moderate exploration, or "very thorough" for comprehensive analysis across '
             "multiple locations and naming conventions."
         ),
         disallowed_tools=["agent", "exit_plan_mode", "file_edit", "file_write", "notebook_edit"],
@@ -754,9 +754,7 @@ def load_agents_dir(directory: Path) -> list[AgentDefinition]:
             tools = _parse_str_list(frontmatter.get("tools"))
 
             # --- disallowed tools ---
-            disallowed_raw = frontmatter.get(
-                "disallowedTools", frontmatter.get("disallowed_tools")
-            )
+            disallowed_raw = frontmatter.get("disallowedTools", frontmatter.get("disallowed_tools"))
             disallowed_tools = _parse_str_list(disallowed_raw)
 
             # --- model ---
@@ -852,9 +850,7 @@ def load_agents_dir(directory: Path) -> list[AgentDefinition]:
                 critical_system_reminder = csr_raw
 
             # --- requiredMcpServers ---
-            rms_raw = frontmatter.get(
-                "requiredMcpServers", frontmatter.get("required_mcp_servers")
-            )
+            rms_raw = frontmatter.get("requiredMcpServers", frontmatter.get("required_mcp_servers"))
             required_mcp_servers = _parse_str_list(rms_raw)
 
             # --- permissions (Python-specific) ---
@@ -933,7 +929,11 @@ def _load_yaml_agent_definitions(cwd: str | None = None) -> list[AgentDefinition
     for item in iter_catalog_agent_configs(cwd):
         config = item.config
         metadata = config.definition
-        tool_names = list(metadata.tools) if metadata and metadata.tools is not None else _collect_tools(config)
+        tool_names = (
+            list(metadata.tools)
+            if metadata and metadata.tools is not None
+            else _collect_tools(config)
+        )
 
         definitions.append(
             AgentDefinition(
@@ -941,8 +941,7 @@ def _load_yaml_agent_definitions(cwd: str | None = None) -> list[AgentDefinition
                 description=(
                     metadata.description
                     if metadata and metadata.description
-                    else config.description
-                    or f"Composable YAML agent '{config.name}'"
+                    else config.description or f"Composable YAML agent '{config.name}'"
                 ),
                 system_prompt=(
                     metadata.system_prompt
@@ -954,7 +953,9 @@ def _load_yaml_agent_definitions(cwd: str | None = None) -> list[AgentDefinition
                 ),
                 system_prompt_mode=metadata.system_prompt_mode if metadata else None,
                 tools=tool_names or None,
-                disallowed_tools=list(metadata.disallowed_tools) if metadata and metadata.disallowed_tools else None,
+                disallowed_tools=list(metadata.disallowed_tools)
+                if metadata and metadata.disallowed_tools
+                else None,
                 color=metadata.color if metadata else None,
                 permission_mode=metadata.permission_mode if metadata else None,
                 permissions=list(metadata.permissions) if metadata else [],
@@ -970,18 +971,14 @@ def _load_yaml_agent_definitions(cwd: str | None = None) -> list[AgentDefinition
                 filename=item.path.stem,
                 base_dir=str(item.path.parent),
                 subagent_type=(
-                    metadata.subagent_type
-                    if metadata and metadata.subagent_type
-                    else config.name
+                    metadata.subagent_type if metadata and metadata.subagent_type else config.name
                 ),
                 source=_project_source(item.source),
                 runner=metadata.runner if metadata else "yaml_workflow",
                 agent_config_name=config.name,
                 agent_architecture=config.architecture,
                 plan_mode_required=metadata.plan_mode_required if metadata else False,
-                allow_permission_prompts=(
-                    metadata.allow_permission_prompts if metadata else False
-                ),
+                allow_permission_prompts=(metadata.allow_permission_prompts if metadata else False),
             )
         )
     return definitions

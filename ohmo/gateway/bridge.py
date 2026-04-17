@@ -107,7 +107,9 @@ class OhmoGatewayBridge:
                 name=f"ohmo-session:{session_key}",
             )
             self._session_tasks[session_key] = task
-            task.add_done_callback(lambda finished, key=session_key: self._cleanup_task(key, finished))
+            task.add_done_callback(
+                lambda finished, key=session_key: self._cleanup_task(key, finished)
+            )
 
     def stop(self) -> None:
         self._running = False

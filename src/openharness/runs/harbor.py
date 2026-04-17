@@ -3,76 +3,141 @@
 from __future__ import annotations
 
 import json
+import logging
 from dataclasses import replace
 from pathlib import Path
-from typing import Any
 
-from openharness.config.paths import get_project_runs_dir
 from openharness.harbor import run_harbor_job
-from openharness.runs.specs import HarborAgentRunSpec, RunLaunchResult
+from openharness.runs.specs import HarborAgentRunSpec, HarborJobResult, TrialResult
 from openharness.services.runs import generate_run_id
 
+log = logging.getLogger(__name__)
 
-def run_harbor_agent(spec: HarborAgentRunSpec) -> RunLaunchResult:
-    """Launch a Harbor job while reserving canonical OpenHarness run artifacts."""
-    resolved_run_id = spec.run_id or generate_run_id()
+
+def run_harbor_agent(spec: HarborAgentRunSpec) -> HarborJobResult:
+    """Launch a Harbor job and return a HarborJobResult with per-trial data."""
+    job_id = spec.run_id or generate_run_id()
+    run_cwd = Path(spec.cwd).expanduser().resolve()
+
+    from openharness.config.paths import get_project_runs_dir
+
+    job_dir = get_project_runs_dir(run_cwd) / job_id
+    jobs_dir = spec.job.jobs_dir or (job_dir / "harbor_jobs")
+
+    log.debug("Harbor job starting: job_id=%s  job_dir=%s", job_id, job_dir)
+
     job_spec = replace(
         spec.job,
-        job_name=resolved_run_id,
-        run_cwd=Path(spec.cwd).expanduser().resolve(),
+        job_name=job_id,
+        jobs_dir=jobs_dir,
+        run_cwd=run_cwd,
         metadata={
             **spec.job.metadata,
             **spec.metadata,
         },
     )
     harbor_result = run_harbor_job(job_spec)
-    run_dir = get_project_runs_dir(spec.cwd) / resolved_run_id
-    trace_metadata = _read_harbor_trace_metadata(harbor_result.result_path)
-    return RunLaunchResult(
-        run_id=resolved_run_id,
-        run_dir=run_dir,
-        manifest_path=run_dir / "run.json",
-        trace_id=getattr(harbor_result, "trace_id", None) or trace_metadata.get("trace_id"),
-        trace_url=getattr(harbor_result, "trace_url", None) or trace_metadata.get("trace_url"),
-        result_path=run_dir / "results.json",
-        metrics_path=run_dir / "metrics.json",
-        external_result_path=harbor_result.result_path,
+
+    trials = _collect_trial_results(harbor_result.result_path)
+
+    log.debug(
+        "Harbor job finished: job_id=%s  trials=%d  passed=%d",
+        job_id,
+        len(trials),
+        sum(1 for t in trials if t.passed),
+    )
+
+    return HarborJobResult(
+        job_id=job_id,
+        job_dir=job_dir,
+        harbor_result_path=harbor_result.result_path,
+        trials=trials,
     )
 
 
-def _read_harbor_trace_metadata(result_path: Path) -> dict[str, str]:
-    paths = [result_path]
-    if result_path.parent.exists():
-        paths.extend(sorted(result_path.parent.glob("*/result.json")))
-    for path in paths:
-        if not path.exists():
+def _collect_trial_results(job_result_path: Path) -> list[TrialResult]:
+    """Walk the Harbor job directory and build a TrialResult for each trial."""
+    job_dir = job_result_path.parent
+    if not job_dir.exists():
+        return []
+
+    trials: list[TrialResult] = []
+    for trial_dir in sorted(job_dir.iterdir()):
+        if not trial_dir.is_dir():
             continue
-        try:
-            payload = json.loads(path.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError):
-            continue
-        metadata = _find_trace_metadata(payload)
-        if metadata:
-            return metadata
-    return {}
+
+        trial_id = trial_dir.name
+        task_name = trial_id.rsplit("__", 1)[0] if "__" in trial_id else trial_id
+
+        harbor_data = _read_harbor_result(trial_dir)
+        oh_data = _read_openharness_run(trial_dir)
+
+        agent_result = harbor_data.get("agent_result", {})
+        metadata = agent_result.get("metadata", {})
+        verifier = harbor_data.get("verifier_result", {})
+        rewards = verifier.get("rewards", {})
+        score = rewards.get("reward") if rewards else None
+        exception = harbor_data.get("exception_info")
+
+        trials.append(
+            TrialResult(
+                trial_id=trial_id,
+                task_name=task_name,
+                trial_dir=trial_dir,
+                score=float(score) if isinstance(score, (int, float)) else None,
+                trace_id=oh_data.get("trace_id") or metadata.get("trace_id"),
+                trace_url=oh_data.get("trace_url") or metadata.get("trace_url"),
+                error=str(exception) if exception else None,
+                input_tokens=agent_result.get("n_input_tokens"),
+                output_tokens=agent_result.get("n_output_tokens"),
+                cost_usd=agent_result.get("cost_usd"),
+                model=metadata.get("model"),
+                duration_sec=_duration_sec(
+                    harbor_data.get("started_at"), harbor_data.get("finished_at")
+                ),
+                agent_duration_sec=_phase_duration(harbor_data.get("agent_execution")),
+                env_setup_duration_sec=_phase_duration(harbor_data.get("environment_setup")),
+                verifier_duration_sec=_phase_duration(harbor_data.get("verifier")),
+            )
+        )
+
+    return trials
 
 
-def _find_trace_metadata(value: Any) -> dict[str, str]:
-    if isinstance(value, dict):
-        metadata = {}
-        if isinstance(value.get("trace_id"), str) and value["trace_id"]:
-            metadata["trace_id"] = value["trace_id"]
-        if isinstance(value.get("trace_url"), str) and value["trace_url"]:
-            metadata["trace_url"] = value["trace_url"]
-        if metadata:
-            return metadata
-        for nested in value.values():
-            found = _find_trace_metadata(nested)
-            if found:
-                return found
-    if isinstance(value, list):
-        for nested in value:
-            found = _find_trace_metadata(nested)
-            if found:
-                return found
-    return {}
+def _read_harbor_result(trial_dir: Path) -> dict:
+    path = trial_dir / "result.json"
+    if not path.exists():
+        return {}
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+
+
+def _read_openharness_run(trial_dir: Path) -> dict:
+    path = trial_dir / "run.json"
+    if not path.exists():
+        return {}
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+
+
+def _duration_sec(started: str | None, finished: str | None) -> float | None:
+    if not started or not finished:
+        return None
+    try:
+        from datetime import datetime
+
+        s = datetime.fromisoformat(started.replace("Z", "+00:00"))
+        f = datetime.fromisoformat(finished.replace("Z", "+00:00"))
+        return (f - s).total_seconds()
+    except (ValueError, TypeError):
+        return None
+
+
+def _phase_duration(phase: dict | None) -> float | None:
+    if not phase:
+        return None
+    return _duration_sec(phase.get("started_at"), phase.get("finished_at"))

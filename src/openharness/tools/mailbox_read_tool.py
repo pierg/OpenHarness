@@ -88,7 +88,9 @@ class MailboxReadTool(BaseTool):
                 ],
                 "summaries": [
                     message.summary
-                    or _preview_text(message.payload.get("content") or message.payload.get("text") or "")
+                    or _preview_text(
+                        message.payload.get("content") or message.payload.get("text") or ""
+                    )
                     for message in selected
                 ],
             },
@@ -101,7 +103,5 @@ class MailboxReadTool(BaseTool):
 
         team_name = team or os.environ.get("CLAUDE_CODE_TEAM_NAME")
         if not team_name:
-            raise ValueError(
-                "Mailbox team is required when agent_id is not in 'agent@team' form"
-            )
+            raise ValueError("Mailbox team is required when agent_id is not in 'agent@team' form")
         return agent_id, team_name

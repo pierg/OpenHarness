@@ -72,10 +72,14 @@ def test_ohmo_loaders_merge_shared_and_private_skills_and_plugins(tmp_path, monk
     shared_skills.mkdir(parents=True)
     shared_skill_dir = shared_skills / "shared_skill"
     shared_skill_dir.mkdir(parents=True)
-    (shared_skill_dir / "SKILL.md").write_text("# shared skill\n\nFrom shared config.\n", encoding="utf-8")
+    (shared_skill_dir / "SKILL.md").write_text(
+        "# shared skill\n\nFrom shared config.\n", encoding="utf-8"
+    )
     private_skill_dir = get_skills_dir(workspace) / "private_skill"
     private_skill_dir.mkdir(parents=True)
-    (private_skill_dir / "SKILL.md").write_text("# private skill\n\nFrom ohmo workspace.\n", encoding="utf-8")
+    (private_skill_dir / "SKILL.md").write_text(
+        "# private skill\n\nFrom ohmo workspace.\n", encoding="utf-8"
+    )
 
     shared_plugins = config_dir / "plugins"
     shared_plugins.mkdir(parents=True)
@@ -152,7 +156,9 @@ def test_plugin_loader_supports_directory_skill_layout(tmp_path, monkeypatch):
     workspace = tmp_path / ".ohmo-home"
     initialize_workspace(workspace)
 
-    _write_plugin_with_skill_dir(get_plugins_dir(workspace), "pika_plugin", "pikastream-video-meeting")
+    _write_plugin_with_skill_dir(
+        get_plugins_dir(workspace), "pika_plugin", "pikastream-video-meeting"
+    )
 
     plugins = load_plugins(load_settings(), tmp_path, extra_roots=[get_plugins_dir(workspace)])
     plugin = next(p for p in plugins if p.manifest.name == "pika_plugin")

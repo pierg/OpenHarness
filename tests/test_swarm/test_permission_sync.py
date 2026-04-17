@@ -88,6 +88,7 @@ async def test_send_permission_request_writes_to_leader(tmp_path, monkeypatch):
     await send_permission_request(req, "myteam", "worker1", "leader")
 
     from openharness.swarm.mailbox import TeammateMailbox
+
     mailbox = TeammateMailbox("myteam", "leader")
     messages = await mailbox.read_all(unread_only=False)
     assert len(messages) == 1
@@ -107,6 +108,7 @@ async def test_send_permission_response_writes_to_worker(tmp_path, monkeypatch):
     await send_permission_response(resp, "myteam", "worker1", "leader")
 
     from openharness.swarm.mailbox import TeammateMailbox
+
     mailbox = TeammateMailbox("myteam", "worker1")
     messages = await mailbox.read_all(unread_only=False)
     assert len(messages) == 1

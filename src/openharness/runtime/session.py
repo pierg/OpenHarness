@@ -311,7 +311,12 @@ class AgentRuntime:
         )
         system_prompt += schema_instruction
 
-        user_payload = {"instruction": task.instruction, "payload": task.payload, **task.payload, **extra}
+        user_payload = {
+            "instruction": task.instruction,
+            "payload": task.payload,
+            **task.payload,
+            **extra,
+        }
         user_message = config.render_prompt("user", **user_payload)
 
         tool_registry = self._build_tool_registry(config.tools)

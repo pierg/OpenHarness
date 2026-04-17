@@ -105,9 +105,7 @@ class TestConvertMessagesToOpenai:
         }
 
     def test_assistant_text_message(self):
-        msg = ConversationMessage(
-            role="assistant", content=[TextBlock(text="I'll help you.")]
-        )
+        msg = ConversationMessage(role="assistant", content=[TextBlock(text="I'll help you.")])
         result = _convert_messages_to_openai([msg], None)
         assert result[0]["role"] == "assistant"
         assert result[0]["content"] == "I'll help you."
@@ -136,9 +134,7 @@ class TestConvertMessagesToOpenai:
         msg = ConversationMessage(
             role="user",
             content=[
-                ToolResultBlock(
-                    tool_use_id="call_1", content="file contents here", is_error=False
-                ),
+                ToolResultBlock(tool_use_id="call_1", content="file contents here", is_error=False),
             ],
         )
         result = _convert_messages_to_openai([msg], None)
@@ -155,17 +151,13 @@ class TestConvertMessagesToOpenai:
                 role="assistant",
                 content=[
                     TextBlock(text="I'll read that."),
-                    ToolUseBlock(
-                        id="call_abc", name="read_file", input={"path": "/tmp/test.txt"}
-                    ),
+                    ToolUseBlock(id="call_abc", name="read_file", input={"path": "/tmp/test.txt"}),
                 ],
             ),
             ConversationMessage(
                 role="user",
                 content=[
-                    ToolResultBlock(
-                        tool_use_id="call_abc", content="hello world", is_error=False
-                    )
+                    ToolResultBlock(tool_use_id="call_abc", content="hello world", is_error=False)
                 ],
             ),
             ConversationMessage(
@@ -199,13 +191,19 @@ class TestConvertMessagesToOpenai:
 
 class TestNormalizeOpenAIBaseUrl:
     def test_preserves_explicit_v1_path(self):
-        assert _normalize_openai_base_url("https://jarodfund.xyz/openai/v1") == "https://jarodfund.xyz/openai/v1"
+        assert (
+            _normalize_openai_base_url("https://jarodfund.xyz/openai/v1")
+            == "https://jarodfund.xyz/openai/v1"
+        )
 
     def test_adds_default_v1_when_path_missing(self):
         assert _normalize_openai_base_url("https://api.example.com") == "https://api.example.com/v1"
 
     def test_strips_trailing_slash_without_dropping_path(self):
-        assert _normalize_openai_base_url("https://api.example.com/openai/v1/") == "https://api.example.com/openai/v1"
+        assert (
+            _normalize_openai_base_url("https://api.example.com/openai/v1/")
+            == "https://api.example.com/openai/v1"
+        )
 
 
 class TestTokenLimitParams:
@@ -311,7 +309,6 @@ def test_openai_client_init_passes_timeout(monkeypatch):
     OpenAICompatibleClient(api_key="test-key", timeout=45.0)
 
     assert captured["timeout"] == 45.0
-
 
 
 class TestStreamMessageTokenParams:

@@ -34,7 +34,9 @@ class PlannerExecutorAgent:
     The executor receives the plan steps and executes them with tools.
     """
 
-    def __init__(self, config: AgentConfig, *, planner: Agent, executor: Agent, **_rest: Any) -> None:
+    def __init__(
+        self, config: AgentConfig, *, planner: Agent, executor: Agent, **_rest: Any
+    ) -> None:
         self._config = config
         self._planner = planner
         self._executor = executor

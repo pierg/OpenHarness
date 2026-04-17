@@ -237,6 +237,51 @@ class NullTraceObserver:
 # ---------------------------------------------------------------------------
 
 
+def configure_local_langfuse() -> str:
+    """Require a live local Langfuse instance for tests/examples."""
+    if not os.environ.get("LANGFUSE_HOST") and not os.environ.get("LANGFUSE_BASE_URL"):
+        os.environ["LANGFUSE_HOST"] = "http://localhost:3000"
+    os.environ.setdefault("OPENHARNESS_LANGFUSE_FLUSH_MODE", "live")
+    os.environ.setdefault("OPENHARNESS_LANGFUSE_REQUIRED", "1")
+    missing = [
+        key for key in ("LANGFUSE_PUBLIC_KEY", "LANGFUSE_SECRET_KEY") if not os.environ.get(key)
+    ]
+    if missing:
+        host = os.environ.get("LANGFUSE_HOST") or os.environ.get("LANGFUSE_BASE_URL")
+        raise RuntimeError(
+            "Local Langfuse is required for examples. Start Langfuse, create a "
+            f"project at {host}, and export: {', '.join(missing)}."
+        )
+    return (
+        os.environ.get("LANGFUSE_HOST")
+        or os.environ.get("LANGFUSE_BASE_URL")
+        or "http://localhost:3000"
+    )
+
+
+def langfuse_agent_env_for_docker() -> dict[str, str]:
+    """Return Langfuse env vars adjusted for a Docker-hosted agent."""
+    configure_local_langfuse()
+    keys = (
+        "LANGFUSE_PUBLIC_KEY",
+        "LANGFUSE_SECRET_KEY",
+        "LANGFUSE_HOST",
+        "LANGFUSE_BASE_URL",
+        "LANGFUSE_ENVIRONMENT",
+        "LANGFUSE_RELEASE",
+        "LANGFUSE_SAMPLE_RATE",
+        "OPENHARNESS_LANGFUSE_FLUSH_MODE",
+        "OPENHARNESS_LANGFUSE_REQUIRED",
+        "OPENHARNESS_LANGFUSE_VERIFY",
+    )
+    env = {key: os.environ[key] for key in keys if key in os.environ}
+    if env.get("LANGFUSE_HOST") in {"http://localhost:3000", "http://127.0.0.1:3000"}:
+        env["LANGFUSE_HOST"] = "http://host.docker.internal:3000"
+    if env.get("LANGFUSE_BASE_URL") in {"http://localhost:3000", "http://127.0.0.1:3000"}:
+        env["LANGFUSE_BASE_URL"] = "http://host.docker.internal:3000"
+    return env
+
+
 def _env_truthy(value: str | None) -> bool:
     return value is not None and value.strip().lower() in {"1", "true", "yes", "on"}
 

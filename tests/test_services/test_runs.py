@@ -32,7 +32,9 @@ def test_create_run_artifacts_minimal(tmp_path: Path):
 
 
 def test_create_run_artifacts_with_logs_and_workspace(tmp_path: Path):
-    run = create_run_artifacts(tmp_path, run_id="run-abc123def456", with_logs=True, with_workspace=True)
+    run = create_run_artifacts(
+        tmp_path, run_id="run-abc123def456", with_logs=True, with_workspace=True
+    )
     assert run.logs_dir == run.run_dir / "logs"
     assert run.workspace_dir == run.run_dir / "workspace"
     assert run.logs_dir is not None and run.logs_dir.is_dir()

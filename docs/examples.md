@@ -125,6 +125,29 @@ Shows:
 
 If Docker is not running, this example should exit with a clear prerequisite message.
 
+## 5. Harbor Registry Task
+
+Run:
+
+```bash
+.venv/bin/python examples/harbor_registry_task/run.py
+```
+
+By default this evaluates the YAML-defined `harbor_registry_agent` on the existing
+Harbor registry task `cookbook/hello-world`.
+
+Shows:
+
+- Harbor registry task source
+- Docker execution
+- OpenHarness Harbor agent adapter
+- YAML config passed into Harbor through `agent_config_yaml`
+- host-side run artifacts
+- Harbor aggregate and trial results
+- trace URL propagation across the Harbor boundary
+
+If Docker is not running, this example should exit with a clear prerequisite message.
+
 ## Smoke Test
 
 Run all examples:
@@ -134,6 +157,7 @@ Run all examples:
 .venv/bin/python examples/local_workflow_coordinator_worker_fix_bug/run.py
 .venv/bin/python examples/local_docker_sandbox_fix_bug/run.py
 .venv/bin/python examples/harbor_fix_bug/run.py
+.venv/bin/python examples/harbor_registry_task/run.py
 ```
 
 Expected:
@@ -145,6 +169,8 @@ Expected:
 - Docker sandbox example exits cleanly when Docker is not running
 - Harbor example passes when Docker is running
 - Harbor example exits cleanly when Docker is not running
+- Harbor registry example passes when Docker is running
+- Harbor registry example exits cleanly when Docker is not running
 
 ## Adding Examples
 

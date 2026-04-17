@@ -74,7 +74,7 @@ async def test_web_search_tool_reads_results(tmp_path, monkeypatch):
 
 def test_html_to_text_handles_large_html_quickly():
     html = "<html><head><style>.x{color:red}</style><script>var x=1;</script></head><body>"
-    html += ("<div><span>Issue item</span><a href='/x'>link</a></div>" * 6000)
+    html += "<div><span>Issue item</span><a href='/x'>link</a></div>" * 6000
     html += "</body></html>"
 
     started = time.time()

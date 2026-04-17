@@ -41,7 +41,11 @@ def remove_memory_entry(workspace: str | Path | None, name: str) -> bool:
 
     index_path = get_memory_index_path(workspace)
     if index_path.exists():
-        lines = [line for line in index_path.read_text(encoding="utf-8").splitlines() if path.name not in line]
+        lines = [
+            line
+            for line in index_path.read_text(encoding="utf-8").splitlines()
+            if path.name not in line
+        ]
         index_path.write_text("\n".join(lines).rstrip() + "\n", encoding="utf-8")
     return True
 

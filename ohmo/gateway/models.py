@@ -30,4 +30,3 @@ class GatewayState(BaseModel):
     provider_profile: str = "codex"
     enabled_channels: list[str] = Field(default_factory=list)
     last_error: str | None = None
-
