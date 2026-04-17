@@ -203,12 +203,24 @@ class AgentRuntime:
             text = await conv.run_to_completion(loop_guard=loop_guard)
 
             if output_type is not None:
-                parsed = _parse_structured_output(text, output_type)
-                span.update(
-                    output=parsed,
-                    metadata={"message_count": len(conv.messages)},
-                )
-                return parsed
+                max_retries = 3
+                for attempt in range(max_retries):
+                    parsed = None
+                    try:
+                        parsed = _parse_structured_output(text, output_type)
+                    except ValidationError as e:
+                        if attempt < max_retries - 1:
+                            error_msg = f"Your output was not a valid JSON matching the schema. Error: {e}\nPlease correct the JSON and return ONLY the JSON object without any backticks, markdown formatting, or trailing commas."
+                            conv.inject(ConversationMessage.from_user_text(error_msg))
+                            text = await conv.run_to_completion(loop_guard=loop_guard)
+                            continue
+                        else:
+                            raise
+                    span.update(
+                        output=parsed,
+                        metadata={"message_count": len(conv.messages)},
+                    )
+                    return parsed
 
             span.update(
                 output=text,
