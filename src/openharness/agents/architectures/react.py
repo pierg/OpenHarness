@@ -23,6 +23,7 @@ from pydantic import BaseModel
 
 from openharness.agents.config import AgentConfig
 from openharness.agents.contracts import AgentRunResult, TaskDefinition
+from openharness.observability import trace_agent_run
 from openharness.runtime.session import AgentRuntime
 
 log = logging.getLogger(__name__)
@@ -59,6 +60,7 @@ class ReActAgent:
     def config(self) -> AgentConfig:
         return self._config
 
+    @trace_agent_run
     async def run(self, task: TaskDefinition, runtime: AgentRuntime) -> AgentRunResult:
         observations: list[dict[str, str]] = []
 

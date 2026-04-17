@@ -1,6 +1,11 @@
 name: planner_executor_example
 description: An example configuration of a planner-executor agent architecture.
 architecture: planner_executor
+definition:
+  subagent_type: planner-executor
+  description: Multi-stage planner/executor workflow. Use this when the task benefits from an explicit planning pass before implementation.
+  runner: yaml_workflow
+  color: blue
 
 # The top level model/tools/turns are usually not heavily used by the orchestrator
 # itself unless you want to pass defaults, but subagents define their own rules.

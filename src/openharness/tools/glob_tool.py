@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+import shutil
 from pathlib import Path
 
 from pydantic import BaseModel, Field
@@ -19,11 +21,7 @@ class GlobToolInput(BaseModel):
 
 
 class GlobTool(BaseTool):
-    """List files matching a glob pattern.
-
-    Uses Python-native ``Path.glob`` for local workspaces and falls back to
-    ``find`` via ``workspace.run_shell`` for remote substrates.
-    """
+    """List files matching a glob pattern."""
 
     name = "glob"
     description = "List files matching a glob pattern."
@@ -40,18 +38,13 @@ class GlobTool(BaseTool):
         workspace = self._workspace or LocalWorkspace(context.cwd)
 
         if isinstance(workspace, LocalWorkspace):
-            return self._execute_local(arguments, workspace)
-        return await self._execute_via_shell(arguments, workspace)
+            root = _resolve_path(Path(workspace.cwd), arguments.root)
+            matches = await _glob(root, arguments.pattern, limit=arguments.limit)
+            if not matches:
+                return ToolResult(output="(no matches)")
+            return ToolResult(output="\n".join(matches))
 
-    def _execute_local(self, arguments: GlobToolInput, workspace: LocalWorkspace) -> ToolResult:
-        root = _resolve_path(Path(workspace.cwd), arguments.root)
-        matches = sorted(
-            str(path.relative_to(root))
-            for path in root.glob(arguments.pattern)
-        )
-        if not matches:
-            return ToolResult(output="(no matches)")
-        return ToolResult(output="\n".join(matches[: arguments.limit]))
+        return await self._execute_via_shell(arguments, workspace)
 
     async def _execute_via_shell(self, arguments: GlobToolInput, workspace: Workspace) -> ToolResult:
         root = arguments.root or workspace.cwd
@@ -78,3 +71,54 @@ def _resolve_path(base: Path, candidate: str | None) -> Path:
 def _sq(s: str) -> str:
     """Shell-quote a string."""
     return "'" + s.replace("'", "'\\''") + "'"
+
+
+def _looks_like_git_repo(path: Path) -> bool:
+    """Heuristic: include hidden paths for code repositories, not arbitrary dirs."""
+    current = path
+    for _ in range(6):
+        git_dir = current / ".git"
+        if git_dir.exists():
+            return True
+        if current.parent == current:
+            break
+        current = current.parent
+    return False
+
+
+async def _glob(root: Path, pattern: str, *, limit: int) -> list[str]:
+    """Fast local glob implementation with ripgrep fallback."""
+    rg = shutil.which("rg")
+    if rg and ("**" in pattern or "/" in pattern):
+        include_hidden = _looks_like_git_repo(root)
+        cmd = [rg, "--files"]
+        if include_hidden:
+            cmd.append("--hidden")
+        cmd.extend(["--glob", pattern, "."])
+
+        process = await asyncio.create_subprocess_exec(
+            *cmd,
+            cwd=str(root),
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+
+        lines: list[str] = []
+        try:
+            assert process.stdout is not None
+            while len(lines) < limit:
+                raw = await process.stdout.readline()
+                if not raw:
+                    break
+                line = raw.decode("utf-8", errors="replace").strip()
+                if line:
+                    lines.append(line)
+        finally:
+            if len(lines) >= limit and process.returncode is None:
+                process.terminate()
+            await process.wait()
+
+        lines.sort()
+        return lines
+
+    return sorted(str(path.relative_to(root)) for path in root.glob(pattern))[:limit]

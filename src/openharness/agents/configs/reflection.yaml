@@ -2,6 +2,11 @@ name: reflection_example
 description: Reflection architecture — worker + critic with iterative refinement.
 architecture: reflection
 max_turns: 2
+definition:
+  subagent_type: reflection
+  description: Worker/critic workflow with iterative self-review. Use this when you want the agent to generate an answer, critique it, and retry before returning.
+  runner: yaml_workflow
+  color: yellow
 
 subagents:
   worker:

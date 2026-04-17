@@ -4,6 +4,11 @@ description: Default OpenHarness general-purpose coding agent.
 model: gemini-2.5-flash-lite
 max_turns: 15
 max_tokens: 8192
+definition:
+  subagent_type: yaml-default
+  description: Composable YAML coding agent. Use this when you want a configurable general-purpose agent implemented through the YAML workflow system instead of the prompt-native worker.
+  runner: yaml_workflow
+  color: cyan
 
 tools:
   - bash
@@ -12,6 +17,12 @@ tools:
   - edit_file
   - glob
   - grep
+  - skill
+  - web_fetch
+  - web_search
+  - agent
+  - send_message
+  - task_stop
 
 prompts:
   system: |

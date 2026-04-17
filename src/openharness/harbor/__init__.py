@@ -1,6 +1,7 @@
 """Harbor integration for OpenHarness agents."""
 
-from openharness.harbor.agent import OpenHarnessHarborAgent
+from __future__ import annotations
+
 from openharness.harbor.runner import (
     build_harbor_install_command,
     build_harbor_run_command,
@@ -21,6 +22,15 @@ from openharness.harbor.specs import (
     OpenHarnessHarborAgentSpec,
 )
 from openharness.workspace.harbor import HarborWorkspace
+
+
+def __getattr__(name: str):
+    if name == "OpenHarnessHarborAgent":
+        from openharness.harbor.agent import OpenHarnessHarborAgent
+
+        return OpenHarnessHarborAgent
+    raise AttributeError(name)
+
 
 __all__ = [
     "build_harbor_install_command",

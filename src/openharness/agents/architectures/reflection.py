@@ -18,6 +18,7 @@ from pydantic import BaseModel, Field
 
 from openharness.agents.config import AgentConfig
 from openharness.agents.contracts import Agent, AgentRunResult, TaskDefinition
+from openharness.observability import trace_agent_run
 from openharness.runtime.session import AgentRuntime
 
 log = logging.getLogger(__name__)
@@ -50,6 +51,7 @@ class ReflectionAgent:
     def config(self) -> AgentConfig:
         return self._config
 
+    @trace_agent_run
     async def run(self, task: TaskDefinition, runtime: AgentRuntime) -> AgentRunResult:
         result: AgentRunResult | None = None
 

@@ -2,14 +2,12 @@
 
 from __future__ import annotations
 
-from typing import Any
-
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 
 from openharness.agents.contracts import AgentRunResult, TaskDefinition
 from openharness.agents.factory import AgentFactory
 from openharness.api.client import SupportsStreamingMessages
-from openharness.observability import TraceObserver
+from openharness.observability import NullTraceObserver, TraceObserver
 from openharness.permissions.modes import PermissionMode
 from openharness.runtime.session import AgentLogPaths, AgentRuntime
 from openharness.workspace import Workspace
@@ -19,7 +17,6 @@ class WorkflowResult(BaseModel):
     """The result of a workflow run."""
 
     agent_result: AgentRunResult
-    evaluation: dict[str, Any] = Field(default_factory=dict)
 
 
 class Workflow:
@@ -39,7 +36,7 @@ class Workflow:
         agent_factory: AgentFactory | None = None,
     ) -> None:
         self.workspace = workspace
-        self.factory = agent_factory or AgentFactory.with_default_configs()
+        self.factory = agent_factory or AgentFactory.with_catalog_configs(workspace.cwd)
 
     async def run(
         self,
@@ -59,16 +56,14 @@ class Workflow:
             log_paths: Optional paths for JSONL event logging.
             trace_observer: Optional telemetry observer.
         """
+        observer = trace_observer or NullTraceObserver()
         agent = self.factory.create(agent_name)
-
         runtime = AgentRuntime(
             workspace=self.workspace,
             permission_mode=PermissionMode.FULL_AUTO,
             api_client=api_client,
             log_paths=log_paths,
-            trace_observer=trace_observer,
+            trace_observer=observer,
         )
-
         result = await agent.run(task=task, runtime=runtime)
-
         return WorkflowResult(agent_result=result)

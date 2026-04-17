@@ -5,6 +5,15 @@
 **Join the community**: contribute **Harness** for open agent development.
 
 <p align="center">
+  <a href="README.md"><strong>English</strong></a> ·
+  <a href="README.zh-CN.md"><strong>简体中文</strong></a>
+</p>
+
+**OpenHarness** delivers core lightweight agent infrastructure: tool-use, skills, memory, and multi-agent coordination.
+
+**Join the community**: contribute **Harness** for open agent development.
+
+<p align="center">
   <a href="#-quick-start"><img src="https://img.shields.io/badge/Quick_Start-5_min-blue?style=for-the-badge" alt="Quick Start"></a>
   <a href="#-harness-architecture"><img src="https://img.shields.io/badge/Harness-Architecture-ff69b4?style=for-the-badge" alt="Architecture"></a>
   <a href="#-features"><img src="https://img.shields.io/badge/Tools-43+-green?style=for-the-badge" alt="Tools"></a>
@@ -125,24 +134,6 @@ Supports CLI agent integration including OpenClaw, nanobot, Cursor, and more.
 
 ---
 
-## 🚀 44x Lighter Than Claude Code
-
-<table>
-<tr><th></th><th>Claude Code</th><th>OpenHarness</th></tr>
-<tr><td><strong>Lines of Code</strong></td><td>512,664</td><td><strong>11,733</strong> (44x lighter)</td></tr>
-<tr><td><strong>Files</strong></td><td>1,884</td><td><strong>163</strong></td></tr>
-<tr><td><strong>Language</strong></td><td>TypeScript</td><td>Python</td></tr>
-<tr><td><strong>Tools</strong></td><td>~44</td><td>43 (98%)</td></tr>
-<tr><td><strong>Commands</strong></td><td>~88</td><td>54 (61%)</td></tr>
-<tr><td><strong>Skills Compatible</strong></td><td>✅</td><td>✅ anthropics/skills</td></tr>
-<tr><td><strong>Plugin Compatible</strong></td><td>✅</td><td>✅ claude-code/plugins</td></tr>
-<tr><td><strong>Tests</strong></td><td>—</td><td>114 unit + 6 E2E suites</td></tr>
-</table>
-
-Leverages Python's power with pure focus on Harness architecture—stripped of enterprise overhead like telemetry, OAuth complexity, and hundreds of React components.
-
----
-
 ## 🤔 What is an Agent Harness?
 
 An **Agent Harness** is the complete infrastructure that wraps around an LLM to make it a functional agent. The model provides intelligence; the harness provides **hands, eyes, memory, and safety boundaries**.
@@ -162,6 +153,10 @@ OpenHarness is an open-source Python implementation designed for **researchers, 
 
 ## 📰 What's New
 
+- **2026-04-06** 🚀 **v0.1.2** — Unified setup flows and `ohmo` personal-agent app:
+  - `oh setup` now guides provider selection as workflows instead of exposing raw auth/provider internals
+  - Compatible API setup is now profile-scoped, so Anthropic/OpenAI-compatible endpoints can keep separate keys
+  - `ohmo` ships as a packaged app with `~/.ohmo` workspace, gateway, bootstrap prompts, and channel config flow
 - **2026-04-01** 🎨 **v0.1.0** — Initial **OpenHarness** open-source release featuring complete Harness architecture: 
 
 <p align="center">
@@ -176,6 +171,40 @@ OpenHarness is an open-source Python implementation designed for **researchers, 
 ---
 
 ## 🚀 Quick Start
+
+### One-Click Install
+
+The fastest way to get started — a single command handles OS detection, dependency checks, and installation:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/HKUDS/OpenHarness/main/scripts/install.sh | bash
+```
+
+**Options:**
+
+| Flag | Description |
+|------|-------------|
+| `--from-source` | Clone from GitHub and install in editable mode (`pip install -e .`) |
+| `--with-channels` | Also install IM channel dependencies (`slack-sdk`, `python-telegram-bot`, `discord.py`) |
+
+```bash
+# Install from source (for contributors / latest code)
+curl -fsSL https://raw.githubusercontent.com/HKUDS/OpenHarness/main/scripts/install.sh | bash -s -- --from-source
+
+# Install with IM channel support
+curl -fsSL https://raw.githubusercontent.com/HKUDS/OpenHarness/main/scripts/install.sh | bash -s -- --with-channels
+
+# Or run locally after cloning
+bash scripts/install.sh --from-source --with-channels
+```
+
+The script will:
+1. Detect your OS (Linux / macOS / WSL)
+2. Verify Python ≥ 3.10 and Node.js ≥ 18
+3. Install OpenHarness via `pip`
+4. Set up the React TUI (`npm install`) if Node.js is available
+5. Create `~/.openharness/` config directory
+6. Confirm with `oh --version`
 
 ### Prerequisites
 
@@ -207,6 +236,52 @@ oh                    # if venv is activated
 uv run oh             # without activating venv
 ```
 
+### Configure A Workflow
+
+Use the unified setup flow instead of manually thinking about `auth -> provider -> model`:
+
+```bash
+uv run oh setup
+```
+
+`oh setup` walks through:
+
+1. Choose a workflow:
+   - `Anthropic-Compatible API`
+   - `Claude Subscription`
+   - `OpenAI-Compatible API`
+   - `Codex Subscription`
+   - `GitHub Copilot`
+2. For compatible API families, choose a concrete backend preset
+3. If needed, authenticate the selected workflow
+4. Pick or confirm the model
+5. Save and activate the profile
+
+Compatible API families currently guide you through presets such as:
+
+- `Anthropic-Compatible API`:
+  - Claude official
+  - Moonshot / Kimi
+  - Zhipu / GLM
+  - MiniMax
+- `OpenAI-Compatible API`:
+  - OpenAI official
+  - OpenRouter
+
+Arbitrary compatible endpoints are still supported through advanced profile commands:
+
+```bash
+oh provider add my-endpoint \
+  --label "My Endpoint" \
+  --provider anthropic \
+  --api-format anthropic \
+  --auth-source anthropic_api_key \
+  --model my-model \
+  --base-url https://example.com/anthropic
+```
+
+OpenHarness stores API-key-backed compatible profiles with profile-scoped credentials when appropriate, so different compatible endpoints do not have to share one global key.
+
 <p align="center">
   <img src="assets/landing.png" alt="OpenHarness Landing Screen" width="700">
 </p>
@@ -226,17 +301,102 @@ oh -p "Fix the bug" --output-format stream-json
 
 ## 🔌 Provider Compatibility
 
-OpenHarness currently detects and adapts to a small set of provider profiles in code. The table below is intentionally conservative and reflects the profiles implemented in `src/openharness/api/provider.py`.
+OpenHarness treats providers as **workflows** backed by named profiles. In day-to-day use, prefer:
 
-| Provider profile | Detection signal | Auth kind | Voice mode | Notes |
-|------------------|------------------|-----------|------------|-------|
-| **Anthropic** | Default when no custom `ANTHROPIC_BASE_URL` is set | API key | Not wired in current build | Default Claude-oriented setup |
-| **Moonshot / Kimi** | `ANTHROPIC_BASE_URL` contains `moonshot` or model starts with `kimi` | API key | Not wired in current build | Works through an Anthropic-compatible endpoint |
-| **Vertex-compatible** | Base URL contains `vertex` or `aiplatform` | GCP | Not wired in current build | Good fit for Anthropic-style gateways on Vertex |
-| **Bedrock-compatible** | Base URL contains `bedrock` | AWS | Not wired in current build | Intended for Bedrock-style deployments |
-| **Generic Anthropic-compatible** | Any other explicit `ANTHROPIC_BASE_URL` | API key | Not wired in current build | Useful for proxies and internal gateways |
+```bash
+oh setup
+oh provider list
+oh provider use <profile>
+```
 
-If you are evaluating cross-provider workflows or want a concrete demo path, start with Anthropic or the Kimi example above, then compare behavior against your own compatible endpoint.
+### Built-in Workflows
+
+| Workflow | What it is | Typical backends |
+|----------|------------|------------------|
+| **Anthropic-Compatible API** | Anthropic-style request format | Claude official, Kimi, GLM, MiniMax, internal Anthropic-compatible gateways |
+| **Claude Subscription** | Claude CLI subscription bridge | Local `~/.claude/.credentials.json` |
+| **OpenAI-Compatible API** | OpenAI-style request format | OpenAI official, OpenRouter, DashScope, DeepSeek, SiliconFlow, Groq, Ollama, GitHub Models |
+| **Codex Subscription** | Codex CLI subscription bridge | Local `~/.codex/auth.json` |
+| **GitHub Copilot** | Copilot OAuth workflow | GitHub Copilot device-flow login |
+
+### Compatible API Families
+
+#### Anthropic-Compatible API
+
+Typical examples:
+
+| Backend | Base URL | Example models |
+|---------|----------|----------------|
+| **Claude official** | `https://api.anthropic.com` | `claude-sonnet-4-6`, `claude-opus-4-6` |
+| **Moonshot / Kimi** | `https://api.moonshot.cn/anthropic` | `kimi-k2.5` |
+| **Zhipu / GLM** | custom Anthropic-compatible endpoint | `glm-4.5` |
+| **MiniMax** | custom Anthropic-compatible endpoint | `minimax-m1` |
+
+#### OpenAI-Compatible API
+
+Any provider implementing the OpenAI `/v1/chat/completions` style API works:
+
+| Backend | Base URL | Example models |
+|---------|----------|----------------|
+| **OpenAI** | `https://api.openai.com/v1` | `gpt-5.4`, `gpt-4.1` |
+| **OpenRouter** | `https://openrouter.ai/api/v1` | provider-specific |
+| **Alibaba DashScope** | `https://dashscope.aliyuncs.com/compatible-mode/v1` | `qwen3.5-flash`, `qwen3-max`, `deepseek-r1` |
+| **DeepSeek** | `https://api.deepseek.com` | `deepseek-chat`, `deepseek-reasoner` |
+| **GitHub Models** | `https://models.inference.ai.azure.com` | `gpt-4o`, `Meta-Llama-3.1-405B-Instruct` |
+| **SiliconFlow** | `https://api.siliconflow.cn/v1` | `deepseek-ai/DeepSeek-V3` |
+| **Groq** | `https://api.groq.com/openai/v1` | `llama-3.3-70b-versatile` |
+| **Ollama (local)** | `http://localhost:11434/v1` | any local model |
+
+### Advanced Profile Management
+
+```bash
+# List saved workflows
+oh provider list
+
+# Switch the active workflow
+oh provider use codex
+
+# Add your own compatible endpoint
+oh provider add my-endpoint \
+  --label "My Endpoint" \
+  --provider openai \
+  --api-format openai \
+  --auth-source openai_api_key \
+  --model my-model \
+  --base-url https://example.com/v1
+```
+
+For custom compatible endpoints, OpenHarness can bind credentials per profile instead of forcing every Anthropic-compatible or OpenAI-compatible backend to share the same API key.
+
+### GitHub Copilot Format (`--api-format copilot`)
+
+Use your existing GitHub Copilot subscription as the LLM backend. Authentication uses GitHub's OAuth device flow — no API keys needed.
+
+```bash
+# One-time login (opens browser for GitHub authorization)
+oh auth copilot-login
+
+# Then launch with Copilot as the provider
+uv run oh --api-format copilot
+
+# Or via environment variable
+export OPENHARNESS_API_FORMAT=copilot
+uv run oh
+
+# Check auth status
+oh auth status
+
+# Remove stored credentials
+oh auth copilot-logout
+```
+
+| Feature | Details |
+|---------|---------|
+| **Auth method** | GitHub OAuth device flow (no API key needed) |
+| **Token management** | Automatic refresh of short-lived session tokens |
+| **Enterprise** | Supports GitHub Enterprise via `--github-domain` flag |
+| **Models** | Uses Copilot's default model selection |
+| **API** | OpenAI-compatible chat completions under the hood |
 
 ---
 
@@ -414,8 +574,64 @@ Permissions: --permission-mode, --dangerously-skip-permissions
 Context:     -s/--system-prompt, --append-system-prompt, --settings
 Advanced:    -d/--debug, --mcp-config, --bare
 
-Subcommands: oh mcp | oh plugin | oh auth
+Subcommands: oh setup | oh provider | oh auth | oh mcp | oh plugin
 ```
+
+### 🧑‍💼 ohmo Personal Agent
+
+`ohmo` is a personal-agent app built on top of OpenHarness. It is packaged alongside `oh`, with its own workspace and gateway:
+
+```bash
+# Initialize personal workspace
+ohmo init
+
+# Configure gateway channels and pick a provider profile
+ohmo config
+
+# Run the personal agent
+ohmo
+
+# Run the gateway in foreground
+ohmo gateway run
+
+# Check or restart the gateway
+ohmo gateway status
+ohmo gateway restart
+```
+
+Key concepts:
+
+- `~/.ohmo/`
+  - personal workspace root
+- `soul.md`
+  - long-term agent personality and behavior
+- `identity.md`
+  - who `ohmo` is
+- `user.md`
+  - user profile and preferences
+- `BOOTSTRAP.md`
+  - first-run landing ritual
+- `memory/`
+  - personal memory
+- `gateway.json`
+  - selected provider profile and channel configuration
+
+`ohmo config` uses the same workflow language as `oh setup`, so you can point the personal-agent gateway at:
+
+- `Anthropic-Compatible API`
+- `Claude Subscription`
+- `OpenAI-Compatible API`
+- `Codex Subscription`
+- `GitHub Copilot`
+
+`ohmo init` creates the home workspace once. After that, use `ohmo config` to update provider and channel settings; if the gateway is already running, the config flow can restart it for you.
+
+Currently `ohmo init` / `ohmo config` can guide channel setup for:
+
+- Telegram
+- Slack
+- Discord
+- Feishu
 
 ---
 

@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING, Awaitable, Callable, Literal, get_args
 
 import pyperclip
 
+from openharness.auth.manager import AuthManager
 from openharness.config.paths import (
     get_config_dir,
     get_data_dir,
@@ -25,7 +26,7 @@ from openharness.bridge import get_bridge_manager
 from openharness.bridge.types import WorkSecret
 from openharness.bridge.work_secret import build_sdk_url, decode_work_secret, encode_work_secret
 from openharness.api.provider import auth_status, detect_provider
-from openharness.config.settings import Settings, load_settings, save_settings
+from openharness.config.settings import Settings, display_model_setting, load_settings, save_settings
 from openharness.engine.messages import ConversationMessage
 from openharness.engine.query_engine import QueryEngine
 from openharness.memory import (
@@ -40,14 +41,8 @@ from openharness.permissions import PermissionChecker, PermissionMode
 from openharness.plugins import load_plugins
 from openharness.prompts import build_runtime_system_prompt
 from openharness.plugins.installer import install_plugin_from_path, uninstall_plugin
-from openharness.services import (
-    compact_messages,
-    estimate_conversation_tokens,
-    export_session_markdown,
-    save_session_snapshot,
-    summarize_messages,
-)
-from openharness.services.session_storage import get_project_session_dir, load_session_snapshot
+from openharness.services import compact_messages, estimate_conversation_tokens, summarize_messages
+from openharness.services.session_backend import DEFAULT_SESSION_BACKEND, SessionBackend
 from openharness.skills import load_skill_registry
 from openharness.tasks import get_task_manager
 
@@ -64,6 +59,9 @@ class CommandResult:
     should_exit: bool = False
     clear_screen: bool = False
     replay_messages: list | None = None  # ConversationMessage list to replay in TUI
+    continue_pending: bool = False
+    continue_turns: int | None = None
+    refresh_runtime: bool = False
 
 
 @dataclass
@@ -77,6 +75,7 @@ class CommandContext:
     cwd: str = "."
     tool_registry: ToolRegistry | None = None
     app_state: AppStateStore | None = None
+    session_backend: SessionBackend = DEFAULT_SESSION_BACKEND
 
 
 CommandHandler = Callable[[str, CommandContext], Awaitable[CommandResult]]
@@ -218,10 +217,12 @@ def create_default_command_registry() -> CommandRegistry:
     async def _status_handler(_: str, context: CommandContext) -> CommandResult:
         usage = context.engine.total_usage
         state = context.app_state.get() if context.app_state is not None else None
+        manager = AuthManager()
         return CommandResult(
             message=(
                 f"Messages: {len(context.engine.messages)}\n"
                 f"Usage: input={usage.input_tokens} output={usage.output_tokens}\n"
+                f"Profile: {manager.get_active_profile()}\n"
                 f"Effort: {state.effort if state is not None else load_settings().effort}\n"
                 f"Passes: {state.passes if state is not None else load_settings().passes}"
             )
@@ -232,7 +233,7 @@ def create_default_command_registry() -> CommandRegistry:
         try:
             version = importlib.metadata.version("openharness")
         except importlib.metadata.PackageNotFoundError:
-            version = "0.1.0"
+            version = "0.1.2"
         return CommandResult(message=f"OpenHarness {version}")
 
     async def _context_handler(_: str, context: CommandContext) -> CommandResult:
@@ -358,14 +359,12 @@ def create_default_command_registry() -> CommandRegistry:
         return CommandResult(message=context.hooks_summary or "No hooks configured.")
 
     async def _resume_handler(args: str, context: CommandContext) -> CommandResult:
-        from openharness.services.session_storage import list_session_snapshots, load_session_by_id
-
         tokens = args.strip().split()
 
         # /resume <session_id> — load a specific session
         if tokens:
             sid = tokens[0]
-            snapshot = load_session_by_id(context.cwd, sid)
+            snapshot = context.session_backend.load_by_id(context.cwd, sid)
             if snapshot is None:
                 return CommandResult(message=f"Session not found: {sid}")
             messages = [
@@ -381,10 +380,10 @@ def create_default_command_registry() -> CommandRegistry:
             )
 
         # /resume — list sessions (for the TUI to show a picker)
-        sessions = list_session_snapshots(context.cwd, limit=10)
+        sessions = context.session_backend.list_snapshots(context.cwd, limit=10)
         if not sessions:
             # Fall back to latest.json
-            snapshot = load_session_snapshot(context.cwd)
+            snapshot = context.session_backend.load_latest(context.cwd)
             if snapshot is None:
                 return CommandResult(message="No saved sessions found for this project.")
             messages = [
@@ -409,11 +408,11 @@ def create_default_command_registry() -> CommandRegistry:
         return CommandResult(message="\n".join(lines))
 
     async def _export_handler(_: str, context: CommandContext) -> CommandResult:
-        path = export_session_markdown(cwd=context.cwd, messages=context.engine.messages)
+        path = context.session_backend.export_markdown(cwd=context.cwd, messages=context.engine.messages)
         return CommandResult(message=f"Exported transcript to {path}")
 
     async def _share_handler(_: str, context: CommandContext) -> CommandResult:
-        path = export_session_markdown(cwd=context.cwd, messages=context.engine.messages)
+        path = context.session_backend.export_markdown(cwd=context.cwd, messages=context.engine.messages)
         return CommandResult(message=f"Created shareable transcript snapshot at {path}")
 
     async def _copy_handler(args: str, context: CommandContext) -> CommandResult:
@@ -426,7 +425,7 @@ def create_default_command_registry() -> CommandRegistry:
         return CommandResult(message=f"Clipboard unavailable. Saved copied text to {target}")
 
     async def _session_handler(args: str, context: CommandContext) -> CommandResult:
-        session_dir = get_project_session_dir(context.cwd)
+        session_dir = context.session_backend.get_session_dir(context.cwd)
         tokens = args.split()
         if not tokens or tokens[0] == "show":
             latest = session_dir / "latest.json"
@@ -447,14 +446,14 @@ def create_default_command_registry() -> CommandRegistry:
             safe_name = "".join(character for character in tokens[1] if character.isalnum() or character in {"-", "_"})
             if not safe_name:
                 return CommandResult(message="Usage: /session tag NAME")
-            snapshot_path = save_session_snapshot(
+            snapshot_path = context.session_backend.save_snapshot(
                 cwd=context.cwd,
                 model=context.app_state.get().model if context.app_state is not None else load_settings().model,
                 system_prompt=build_runtime_system_prompt(load_settings(), cwd=context.cwd),
                 messages=context.engine.messages,
                 usage=context.engine.total_usage,
             )
-            export_path = export_session_markdown(cwd=context.cwd, messages=context.engine.messages)
+            export_path = context.session_backend.export_markdown(cwd=context.cwd, messages=context.engine.messages)
             tagged_json = session_dir / f"{safe_name}.json"
             tagged_md = session_dir / f"{safe_name}.md"
             shutil.copy2(snapshot_path, tagged_json)
@@ -691,6 +690,8 @@ def create_default_command_registry() -> CommandRegistry:
     async def _login_handler(args: str, context: CommandContext) -> CommandResult:
         del context
         settings = load_settings()
+        manager = AuthManager(settings)
+        profile_name, profile = settings.resolve_profile()
         provider = detect_provider(settings)
         api_key = args.strip()
         if not api_key:
@@ -702,7 +703,9 @@ def create_default_command_registry() -> CommandRegistry:
             return CommandResult(
                 message=(
                     f"Auth status:\n"
+                    f"- profile: {profile_name}\n"
                     f"- provider: {provider.name}\n"
+                    f"- auth_source: {profile.auth_source}\n"
                     f"- auth_status: {auth_status(settings)}\n"
                     f"- base_url: {settings.base_url or '(default)'}\n"
                     f"- model: {settings.model}\n"
@@ -710,15 +713,14 @@ def create_default_command_registry() -> CommandRegistry:
                     "Usage: /login API_KEY"
                 )
             )
-        settings.api_key = api_key
-        save_settings(settings)
+        manager.store_profile_credential(profile_name, "api_key", api_key)
         return CommandResult(message="Stored API key in ~/.openharness/settings.json")
 
     async def _logout_handler(_: str, context: CommandContext) -> CommandResult:
         del context
         settings = load_settings()
-        settings.api_key = ""
-        save_settings(settings)
+        profile_name = settings.resolve_profile()[0]
+        AuthManager(settings).clear_profile_credential(profile_name)
         return CommandResult(message="Cleared stored API key.")
 
     async def _feedback_handler(args: str, context: CommandContext) -> CommandResult:
@@ -794,6 +796,64 @@ def create_default_command_registry() -> CommandRegistry:
         if context.app_state is not None:
             context.app_state.set(passes=passes)
         return CommandResult(message=f"Pass count set to {passes}.")
+
+    async def _turns_handler(args: str, context: CommandContext) -> CommandResult:
+        settings = load_settings()
+        engine_turns = "unlimited" if context.engine.max_turns is None else str(context.engine.max_turns)
+        tokens = args.split()
+        if not tokens or tokens[0] == "show":
+            return CommandResult(
+                message=(
+                    f"Max turns (engine): {engine_turns}\n"
+                    f"Max turns (config): {settings.max_turns}\n"
+                    "Usage: /turns [show|unlimited|COUNT]"
+                )
+            )
+        if tokens[0] == "set" and len(tokens) == 2:
+            raw = tokens[1]
+        elif len(tokens) == 1:
+            raw = tokens[0]
+        else:
+            return CommandResult(message="Usage: /turns [show|unlimited|COUNT]")
+        if raw.lower() == "unlimited":
+            context.engine.set_max_turns(None)
+            return CommandResult(
+                message=(
+                    "Max turns set to unlimited for this session. "
+                    f"Saved config remains {settings.max_turns}."
+                )
+            )
+        try:
+            turns = int(raw)
+        except ValueError:
+            return CommandResult(message="Usage: /turns [show|unlimited|COUNT]")
+        turns = max(1, min(turns, 512))
+        settings.max_turns = turns
+        save_settings(settings)
+        context.engine.set_max_turns(turns)
+        return CommandResult(message=f"Max turns set to {turns}.")
+
+    async def _continue_handler(args: str, context: CommandContext) -> CommandResult:
+        raw = args.strip()
+        if not context.engine.has_pending_continuation():
+            return CommandResult(message="Nothing to continue (no pending tool results).")
+
+        turns: int | None = None
+        if raw:
+            tokens = raw.split()
+            if tokens[0] == "set" and len(tokens) == 2:
+                raw = tokens[1]
+            try:
+                turns = int(raw)
+            except ValueError:
+                return CommandResult(message="Usage: /continue [COUNT]")
+            turns = max(1, min(turns, 512))
+
+        return CommandResult(
+            message="Continuing pending tool loop...",
+            continue_pending=True,
+            continue_turns=turns,
+        )
 
     async def _issue_handler(args: str, context: CommandContext) -> CommandResult:
         path = get_project_issue_file(context.cwd)
@@ -936,15 +996,20 @@ def create_default_command_registry() -> CommandRegistry:
                     f"Denied tools: {permission.denied_tools}"
                 )
             )
+        target_mode: str | None = None
         if tokens[0] == "set" and len(tokens) == 2:
-            settings.permission.mode = PermissionMode(tokens[1])
+            target_mode = tokens[1]
+        elif len(tokens) == 1 and tokens[0] in _MODE_LABELS:
+            target_mode = tokens[0]
+        if target_mode is not None:
+            settings.permission.mode = PermissionMode(target_mode)
             save_settings(settings)
             context.engine.set_permission_checker(PermissionChecker(settings.permission))
             if context.app_state is not None:
                 context.app_state.set(permission_mode=settings.permission.mode.value)
-            label = _MODE_LABELS.get(tokens[1], tokens[1])
-            return CommandResult(message=f"Permission mode set to {label}")
-        return CommandResult(message="Usage: /permissions [show|set MODE]")
+            label = _MODE_LABELS.get(target_mode, target_mode)
+            return CommandResult(message=f"Permission mode set to {label}", refresh_runtime=True)
+        return CommandResult(message="Usage: /permissions [show|MODE]")
 
     async def _plan_handler(args: str, context: CommandContext) -> CommandResult:
         settings = load_settings()
@@ -955,42 +1020,174 @@ def create_default_command_registry() -> CommandRegistry:
             context.engine.set_permission_checker(PermissionChecker(settings.permission))
             if context.app_state is not None:
                 context.app_state.set(permission_mode=settings.permission.mode.value)
-            return CommandResult(message="Plan mode enabled.")
+            return CommandResult(message="Plan mode enabled.", refresh_runtime=True)
         if mode in {"off", "exit"}:
             settings.permission.mode = PermissionMode.DEFAULT
             save_settings(settings)
             context.engine.set_permission_checker(PermissionChecker(settings.permission))
             if context.app_state is not None:
                 context.app_state.set(permission_mode=settings.permission.mode.value)
-            return CommandResult(message="Plan mode disabled.")
+            return CommandResult(message="Plan mode disabled.", refresh_runtime=True)
         return CommandResult(message="Usage: /plan [on|off]")
 
     async def _model_handler(args: str, context: CommandContext) -> CommandResult:
         settings = load_settings()
+        manager = AuthManager(settings)
+        active_profile = manager.get_active_profile()
+        _, profile = settings.resolve_profile(active_profile)
         tokens = args.split(maxsplit=1)
         if not tokens or tokens[0] == "show":
-            return CommandResult(message=f"Model: {settings.model}")
+            return CommandResult(message=f"Model: {display_model_setting(profile)}\nProfile: {active_profile}")
         if tokens[0] == "set" and len(tokens) == 2:
-            settings.model = tokens[1]
-            save_settings(settings)
-            context.engine.set_model(tokens[1])
+            model_name = tokens[1].strip()
+        elif args.strip():
+            model_name = args.strip()
+        else:
+            model_name = None
+        if model_name:
+            if profile.allowed_models and model_name.lower() != "default" and model_name not in profile.allowed_models:
+                allowed = ", ".join(profile.allowed_models)
+                return CommandResult(message=f"Model '{model_name}' is not allowed for profile '{active_profile}'. Allowed models: {allowed}")
+            if model_name.lower() == "default":
+                manager.update_profile(active_profile, last_model="")
+                message = "Model reset to default."
+            else:
+                manager.update_profile(active_profile, last_model=model_name)
+                message = f"Model set to {model_name}."
+            updated = load_settings()
+            context.engine.set_model(updated.model)
             if context.app_state is not None:
-                context.app_state.set(model=tokens[1])
-            return CommandResult(message=f"Model set to {tokens[1]}. Restart session to use it.")
-        return CommandResult(message="Usage: /model [show|set MODEL]")
+                updated_profile = updated.resolve_profile()[1]
+                context.app_state.set(model=display_model_setting(updated_profile))
+            return CommandResult(message=message, refresh_runtime=True)
+        return CommandResult(message="Usage: /model [show|MODEL]")
+
+    async def _provider_handler(args: str, context: CommandContext) -> CommandResult:
+        manager = AuthManager()
+        profiles = manager.get_profile_statuses()
+        tokens = args.split()
+        if not tokens or tokens[0] == "show":
+            active_name = manager.get_active_profile()
+            active = profiles[active_name]
+            lines = [
+                f"Active profile: {active_name}",
+                f"Label: {active['label']}",
+                f"Provider: {active['provider']}",
+                f"Auth source: {active['auth_source']}",
+                f"Configured: {'yes' if active['configured'] else 'no'}",
+                f"Base URL: {active['base_url'] or '(default)'}",
+                f"Model: {active['model']}",
+            ]
+            return CommandResult(message="\n".join(lines))
+        if tokens[0] == "list":
+            lines = ["Provider profiles:"]
+            for name, info in profiles.items():
+                marker = "*" if info["active"] else " "
+                configured = "configured" if info["configured"] else "missing auth"
+                lines.append(f"{marker} {name} [{configured}] {info['label']} -> {info['model']}")
+            return CommandResult(message="\n".join(lines))
+        target = tokens[1] if tokens[0] == "use" and len(tokens) == 2 else (tokens[0] if len(tokens) == 1 else None)
+        if target is None:
+            return CommandResult(message="Usage: /provider [show|list|PROFILE]")
+        manager.use_profile(target)
+        updated = load_settings()
+        profile = updated.resolve_profile()[1]
+        context.engine.set_model(updated.model)
+        if context.app_state is not None:
+            context.app_state.set(
+                model=display_model_setting(profile),
+                provider=detect_provider(updated).name,
+                auth_status=auth_status(updated),
+                base_url=updated.base_url or "",
+            )
+        return CommandResult(
+            message=f"Switched provider profile to {target} ({profile.label}).",
+            refresh_runtime=True,
+        )
 
     async def _theme_handler(args: str, context: CommandContext) -> CommandResult:
+        from openharness.themes import list_themes, load_theme
+
         settings = load_settings()
         tokens = args.split(maxsplit=1)
+        current = (
+            context.app_state.get().theme
+            if context.app_state is not None and hasattr(context.app_state.get(), "theme")
+            else settings.theme
+        )
+
         if not tokens or tokens[0] == "show":
-            return CommandResult(message=f"Theme: {settings.theme}")
+            try:
+                theme = load_theme(current)
+                lines = [
+                    f"Theme: {theme.name}",
+                    f"  Colors:  primary={theme.colors.primary}  secondary={theme.colors.secondary}"
+                    f"  accent={theme.colors.accent}  error={theme.colors.error}"
+                    f"  muted={theme.colors.muted}",
+                    f"           background={theme.colors.background}  foreground={theme.colors.foreground}",
+                    f"  Borders: style={theme.borders.style}",
+                    f"  Icons:   spinner={theme.icons.spinner}  tool={theme.icons.tool}"
+                    f"  error={theme.icons.error}  success={theme.icons.success}"
+                    f"  agent={theme.icons.agent}",
+                    f"  Layout:  compact={theme.layout.compact}"
+                    f"  show_tokens={theme.layout.show_tokens}"
+                    f"  show_time={theme.layout.show_time}",
+                ]
+                return CommandResult(message="\n".join(lines))
+            except KeyError:
+                return CommandResult(message=f"Theme: {current} (not found)")
+
+        if tokens[0] == "list":
+            available = list_themes()
+            lines = [f"{'*' if name == current else ' '} {name}" for name in available]
+            return CommandResult(message="\n".join(lines))
+
         if tokens[0] == "set" and len(tokens) == 2:
-            settings.theme = tokens[1]
+            name = tokens[1]
+        elif len(tokens) == 1 and tokens[0] not in {"list", "preview"}:
+            name = tokens[0]
+        else:
+            name = None
+        if name is not None:
+            try:
+                load_theme(name)
+            except KeyError:
+                available = list_themes()
+                return CommandResult(
+                    message=f"Unknown theme: {name!r}. Available: {', '.join(available)}"
+                )
+            settings.theme = name
             save_settings(settings)
             if context.app_state is not None:
-                context.app_state.set(theme=tokens[1])
-            return CommandResult(message=f"Theme set to {tokens[1]}")
-        return CommandResult(message="Usage: /theme [show|set THEME]")
+                context.app_state.set(theme=name)
+            return CommandResult(message=f"Theme set to {name}")
+
+        if tokens[0] == "preview" and len(tokens) == 2:
+            name = tokens[1]
+            try:
+                theme = load_theme(name)
+            except KeyError:
+                available = list_themes()
+                return CommandResult(
+                    message=f"Unknown theme: {name!r}. Available: {', '.join(available)}"
+                )
+            lines = [
+                f"Preview: {theme.name}",
+                f"  primary    {theme.colors.primary}",
+                f"  secondary  {theme.colors.secondary}",
+                f"  accent     {theme.colors.accent}",
+                f"  error      {theme.colors.error}",
+                f"  muted      {theme.colors.muted}",
+                f"  background {theme.colors.background}",
+                f"  foreground {theme.colors.foreground}",
+                f"  borders    {theme.borders.style}",
+                f"  icons      spinner={theme.icons.spinner} tool={theme.icons.tool}"
+                f" success={theme.icons.success} error={theme.icons.error}"
+                f" agent={theme.icons.agent}",
+            ]
+            return CommandResult(message="\n".join(lines))
+
+        return CommandResult(message="Usage: /theme [list|show|NAME|preview NAME]")
 
     async def _output_style_handler(args: str, context: CommandContext) -> CommandResult:
         settings = load_settings()
@@ -1009,14 +1206,20 @@ def create_default_command_registry() -> CommandRegistry:
                 message="\n".join(f"{style.name} [{style.source}]" for style in styles)
             )
         if tokens[0] == "set" and len(tokens) == 2:
-            if tokens[1] not in available:
-                return CommandResult(message=f"Unknown output style: {tokens[1]}")
-            settings.output_style = tokens[1]
+            style_name = tokens[1]
+        elif len(tokens) == 1 and tokens[0] not in {"list"}:
+            style_name = tokens[0]
+        else:
+            style_name = None
+        if style_name is not None:
+            if style_name not in available:
+                return CommandResult(message=f"Unknown output style: {style_name}")
+            settings.output_style = style_name
             save_settings(settings)
             if context.app_state is not None:
-                context.app_state.set(output_style=tokens[1])
-            return CommandResult(message=f"Output style set to {tokens[1]}")
-        return CommandResult(message="Usage: /output-style [show|list|set NAME]")
+                context.app_state.set(output_style=style_name)
+            return CommandResult(message=f"Output style set to {style_name}")
+        return CommandResult(message="Usage: /output-style [show|list|NAME]")
 
     async def _keybindings_handler(_: str, context: CommandContext) -> CommandResult:
         from openharness.keybindings import get_keybindings_path, load_keybindings
@@ -1087,12 +1290,17 @@ def create_default_command_registry() -> CommandRegistry:
 
     async def _doctor_handler(_: str, context: CommandContext) -> CommandResult:
         settings = load_settings()
+        manager = AuthManager(settings)
+        active_profile_name, active_profile = settings.resolve_profile()
         memory_dir = get_project_memory_dir(context.cwd)
         state = context.app_state.get() if context.app_state is not None else None
         lines = [
             "Doctor summary:",
             f"- cwd: {context.cwd}",
+            f"- active_profile: {active_profile_name}",
             f"- model: {settings.model}",
+            f"- provider_workflow: {active_profile.label}",
+            f"- auth_source: {active_profile.auth_source}",
             f"- permission_mode: {state.permission_mode if state is not None else settings.permission.mode}",
             f"- theme: {state.theme if state is not None else settings.theme}",
             f"- output_style: {state.output_style if state is not None else settings.output_style}",
@@ -1103,12 +1311,13 @@ def create_default_command_registry() -> CommandRegistry:
             f"- memory_dir: {memory_dir}",
             f"- plugin_count: {max(len(context.plugin_summary.splitlines()) - 1, 0) if context.plugin_summary else 0}",
             f"- mcp_configured: {'yes' if context.mcp_summary and 'No MCP' not in context.mcp_summary else 'no'}",
+            f"- auth_configured: {'yes' if manager.get_profile_statuses()[active_profile_name]['configured'] else 'no'}",
         ]
         return CommandResult(message="\n".join(lines))
 
     async def _privacy_settings_handler(_: str, context: CommandContext) -> CommandResult:
         settings = load_settings()
-        session_dir = get_project_session_dir(context.cwd)
+        session_dir = context.session_backend.get_session_dir(context.cwd)
         lines = [
             "Privacy settings:",
             f"- user_config_dir: {get_config_dir()}",
@@ -1152,7 +1361,7 @@ def create_default_command_registry() -> CommandRegistry:
         try:
             version = importlib.metadata.version("openharness")
         except importlib.metadata.PackageNotFoundError:
-            version = "0.1.0"
+            version = "0.1.2"
         return CommandResult(
             message=(
                 f"Current version: {version}\n"
@@ -1299,8 +1508,11 @@ def create_default_command_registry() -> CommandRegistry:
     registry.register(SlashCommand("fast", "Show or update fast mode", _fast_handler))
     registry.register(SlashCommand("effort", "Show or update reasoning effort", _effort_handler))
     registry.register(SlashCommand("passes", "Show or update reasoning pass count", _passes_handler))
+    registry.register(SlashCommand("turns", "Show or update maximum agentic turn count", _turns_handler))
+    registry.register(SlashCommand("continue", "Continue the previous tool loop if it was interrupted", _continue_handler))
+    registry.register(SlashCommand("provider", "Show or switch provider profiles", _provider_handler))
     registry.register(SlashCommand("model", "Show or update the default model", _model_handler))
-    registry.register(SlashCommand("theme", "Show or update the theme", _theme_handler))
+    registry.register(SlashCommand("theme", "List, set, show or preview TUI themes", _theme_handler))
     registry.register(SlashCommand("output-style", "Show or update output style", _output_style_handler))
     registry.register(SlashCommand("keybindings", "Show resolved keybindings", _keybindings_handler))
     registry.register(SlashCommand("vim", "Show or update Vim mode", _vim_handler))

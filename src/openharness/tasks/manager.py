@@ -6,12 +6,14 @@ import asyncio
 import os
 import shlex
 import time
+from contextlib import suppress
 from dataclasses import replace
 from pathlib import Path
 from uuid import uuid4
 
 from openharness.config.paths import get_tasks_dir
 from openharness.tasks.types import TaskRecord, TaskStatus, TaskType
+from openharness.utils.shell import create_shell_subprocess
 
 
 class BackgroundTaskManager:
@@ -175,6 +177,12 @@ class BackgroundTaskManager:
         reader = asyncio.create_task(self._copy_output(task_id, process))
         return_code = await process.wait()
         await reader
+        if process.stdin is not None:
+            process.stdin.close()
+        with suppress(Exception):
+            transport = getattr(process, "_transport", None)
+            if transport is not None:
+                transport.close()
 
         current_generation = self._generations.get(task_id)
         if current_generation != generation:
@@ -212,9 +220,7 @@ class BackgroundTaskManager:
 
         generation = self._generations.get(task_id, 0) + 1
         self._generations[task_id] = generation
-        process = await asyncio.create_subprocess_exec(
-            "/bin/bash",
-            "-lc",
+        process = await create_shell_subprocess(
             task.command,
             cwd=task.cwd,
             stdin=asyncio.subprocess.PIPE,
