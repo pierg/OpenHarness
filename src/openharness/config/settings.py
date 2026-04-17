@@ -14,7 +14,7 @@ import os
 import re
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
@@ -475,6 +475,16 @@ class Settings(BaseModel):
     effort: str = "medium"
     passes: int = 1
     verbose: bool = False
+
+    # Execution mode. ``"interactive"`` (default) renders the full
+    # CLI-oriented system prompt (mentions of "the user", permission
+    # prompts, delegation guidance, host CLAUDE.md / memory / skills).
+    # ``"autonomous"`` renders a slimmed prompt for unattended trial /
+    # batch execution (e.g. Harbor, experiments) where there is no
+    # human to interact with — drops user-facing language and the
+    # host-machine personalization sections that would otherwise leak
+    # into the trial container's prompt.
+    session_mode: Literal["interactive", "autonomous"] = "interactive"
 
     def merged_profiles(self) -> dict[str, ProviderProfile]:
         """Return the saved profiles merged over the built-in catalog."""

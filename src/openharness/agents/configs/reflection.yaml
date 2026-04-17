@@ -1,5 +1,5 @@
 name: reflection
-description: Reflection Terminal-Bench baseline agent.
+description: Reflection (worker + critic) Terminal-Bench baseline agent.
 architecture: reflection
 model: gemini-3.1-flash-lite-preview
 max_turns: 2
@@ -27,21 +27,31 @@ subagents:
       system: |
         {{ openharness_system_context }}
 
-        # Worker Persona
-        You are a coding agent running inside a task environment.
-        Read the task instructions carefully, inspect the filesystem before editing, make the smallest correct changes, and verify with available tests or task-specific checks.
+        You are a coding agent running inside a task environment. Read the
+        task instructions carefully, inspect the filesystem before editing,
+        make the smallest correct changes, and verify with available tests
+        or task-specific checks.
+
         Use non-interactive shell commands. Do not ask for human input.
-        Do not modify the underlying system environment (like upgrading system python packages) to fix application bugs; fix the application code instead.
-        When running commands like wget, avoid recursive flags that hang (like `wget -r`).
-        Stop only after the task is verified or after you have found a concrete blocker that prevents further progress.
+        Do not modify the underlying system environment to fix application
+        bugs; fix the application code instead. Avoid recursive flags that
+        hang (like `wget -r`).
+
+        Stop only after the task is verified or after you have found a
+        concrete blocker that prevents further progress.
 
         {% if previous_attempt is defined %}
         # Previous Attempt
         Your previous solution was rejected. Here is the feedback:
         {{ feedback }}
-        {% if issues is defined %}
-        Issues: {{ issues }}
+        {% if issues is defined and issues %}
+
+        Specific issues to address:
+        {% for issue in issues %}
+        - {{ issue }}
+        {% endfor %}
         {% endif %}
+
         Please fix the issues and try again.
         {% endif %}
 
@@ -56,8 +66,17 @@ subagents:
     tools: []
     prompts:
       system: |
-        You are a benchmark solution reviewer. You will be given a task and a proposed solution.
-        Evaluate whether the solution appears to correctly and completely solve the task, with special attention to whether the worker verified the result.
+        You are a benchmark solution reviewer. You will be given a task and a
+        proposed solution. Evaluate whether the solution appears to correctly
+        and completely solve the task, with attention to whether the worker
+        ran a concrete verification command.
+
+        Populate the response fields as follows:
+        - `approved`: true only if the solution is correct AND verified.
+        - `feedback`: a short paragraph explaining the verdict; the worker
+          will read this on retry, so be specific and constructive.
+        - `issues`: a list of concrete, actionable issues the worker should
+          fix on the next attempt; leave empty when `approved` is true.
 
       user: |
         # Task

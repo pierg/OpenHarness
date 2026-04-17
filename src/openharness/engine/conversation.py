@@ -21,6 +21,7 @@ from openharness.engine.messages import ConversationMessage
 from openharness.engine.query import QueryContext, TurnResult, run_single_turn
 from openharness.engine.stream_events import (
     AssistantTurnComplete,
+    ModelRequest,
     StatusEvent,
     ToolExecutionCompleted,
     ToolExecutionStarted,
@@ -37,12 +38,14 @@ class Conversation:
         query_ctx: QueryContext,
         messages: list[ConversationMessage],
         *,
+        agent_name: str | None = None,
         _track_usage: Callable[[Any], None] | None = None,
         _log_event: Callable[[Any], None] | None = None,
         _log_messages: Callable[[list[ConversationMessage]], None] | None = None,
     ) -> None:
         self._query_ctx = query_ctx
         self._messages = messages
+        self._agent_name = agent_name
         self._track_usage = _track_usage or (lambda u: None)
         self._log_event = _log_event or (lambda e: None)
         self._log_messages = _log_messages or (lambda m: None)
@@ -50,6 +53,7 @@ class Conversation:
         self._final_text = ""
         self._is_complete = False
         self._logged_up_to = 0
+        self._turns_taken = 0
 
     # ------------------------------------------------------------------
     # Read-only state
@@ -86,7 +90,29 @@ class Conversation:
         Returns a ``TurnResult`` describing what happened.  The caller
         can inspect it, ``inject()`` messages, or let the loop continue.
         """
+        # Emit a request-side audit event before each model call so
+        # downstream tooling can see exactly what crossed to the
+        # provider for this turn (system prompt, tool surface, request
+        # parameters). Pairs with the AssistantTurnComplete event that
+        # follows. See engine.stream_events.ModelRequest.
+        self._log_event(
+            ModelRequest(
+                model=self._query_ctx.model,
+                system_prompt=self._query_ctx.system_prompt,
+                tools=tuple(
+                    schema.get("name", "")
+                    for schema in self._query_ctx.tool_registry.to_api_schema()
+                ),
+                max_tokens=self._query_ctx.max_tokens,
+                max_turns=self._query_ctx.max_turns,
+                turn_index=self._turns_taken + 1,
+                message_count=len(self._messages),
+                agent=self._agent_name,
+            )
+        )
+
         result = await run_single_turn(self._query_ctx, self._messages)
+        self._turns_taken += 1
 
         self._track_usage(result.usage)
         self._log_event(AssistantTurnComplete(message=result.message, usage=result.usage))
@@ -130,12 +156,34 @@ class Conversation:
                 steering user message to nudge the model back on track.
 
         Can be called again after ``inject()`` to continue the conversation.
+
+        When the underlying ``QueryContext`` has a ``max_turns`` budget
+        and that budget is reached without the model finishing, the
+        loop stops and returns whatever ``final_text`` was produced on
+        the last completed turn (a ``StatusEvent`` records the budget
+        exhaustion so the failure mode is visible).  This mirrors the
+        graceful behaviour callers usually want from a runaway agent —
+        the verifier can still score on-disk artefacts and a planner
+        can still hand its best-effort plan to an executor.
         """
         self._final_text = ""
         self._is_complete = False
+        max_turns = self._query_ctx.max_turns
 
         try:
             while not self._is_complete:
+                if max_turns is not None and self._turns_taken >= max_turns:
+                    self._log_event(
+                        StatusEvent(
+                            message=(
+                                f"max_turns budget exhausted "
+                                f"({self._turns_taken}/{max_turns}); "
+                                "returning best-effort final_text"
+                            )
+                        )
+                    )
+                    self._is_complete = True
+                    break
                 result = await self.step()
                 if on_turn_complete is not None:
                     await on_turn_complete(result, self)

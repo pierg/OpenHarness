@@ -346,4 +346,5 @@ def test_backoff_delay_grows_with_attempt():
 
 
 def test_backoff_delay_capped():
-    assert _backoff_delay(100) <= 30.0 * 1.25
+    # Cap is _MAX_DELAY (90s) plus up to +25% jitter.
+    assert _backoff_delay(100) <= 90.0 * 1.25

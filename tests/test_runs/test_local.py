@@ -42,7 +42,7 @@ async def test_run_local_agent_writes_run_artifacts(
             cwd=workspace,
             run_cwd=tmp_path,
             task=InlineTaskSpec(instruction="Say hi"),
-            agent=AgentSpec(name="default"),
+            agent=AgentSpec(name="basic"),
             run_id="run-local123456",
             api_client=_StaticApiClient("done"),
         )

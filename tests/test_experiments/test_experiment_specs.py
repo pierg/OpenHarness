@@ -25,7 +25,7 @@ include_tasks:
   - git-*
 n_tasks: 5
 agents:
-  - default
+  - basic
   - planner_executor
 """,
         encoding="utf-8",
@@ -35,7 +35,7 @@ agents:
 
     assert config.id == "tb2-baseline"
     assert config.dataset == "terminal-bench@2.0"
-    assert [a.id for a in config.agents] == ["default", "planner_executor"]
+    assert [a.id for a in config.agents] == ["basic", "planner_executor"]
     assert config.task_filter.include_tasks == ("build-*", "git-*")
     assert config.task_filter.n_tasks == 5
     assert config.defaults.model == "gemini-2.5-flash"
@@ -46,10 +46,10 @@ def test_agent_alias_objects_are_parsed():
         {
             "id": "tb2-baseline",
             "dataset": "terminal-bench@2.0",
-            "agents": [{"id": "default", "alias": "baseline"}],
+            "agents": [{"id": "basic", "alias": "baseline"}],
         }
     )
-    assert config.agents[0].id == "default"
+    assert config.agents[0].id == "basic"
     assert config.agents[0].alias == "baseline"
 
 
@@ -60,7 +60,7 @@ def test_duplicate_aliases_rejected():
                 "id": "tb2-baseline",
                 "dataset": "terminal-bench@2.0",
                 "agents": [
-                    {"id": "default", "alias": "baseline"},
+                    {"id": "basic", "alias": "baseline"},
                     {"id": "planner_executor", "alias": "baseline"},
                 ],
             }
@@ -74,8 +74,8 @@ def test_duplicate_ids_without_alias_rejected():
                 "id": "tb2-baseline",
                 "dataset": "terminal-bench@2.0",
                 "agents": [
-                    "default",
-                    "default",
+                    "basic",
+                    "basic",
                 ],
             }
         )
@@ -92,7 +92,7 @@ dataset: terminal-bench@2.0
 model: gemini-2.5-flash
 n_tasks: 50
 agents:
-  - default
+  - basic
   - planner_executor
 profiles:
   demo:
@@ -122,7 +122,7 @@ def test_unknown_profile_rejected(tmp_path):
 id: tb2-baseline
 dataset: terminal-bench@2.0
 agents:
-  - default
+  - basic
 """,
         encoding="utf-8",
     )

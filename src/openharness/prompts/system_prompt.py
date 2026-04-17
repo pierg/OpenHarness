@@ -55,9 +55,47 @@ Carefully consider the reversibility and blast radius of actions. Freely take lo
  - If you can say it in one sentence, don't use three."""
 
 
+_AUTONOMOUS_BASE_SYSTEM_PROMPT = """\
+You are OpenHarness, an autonomous AI coding agent. \
+You are running unattended inside a task environment to complete a verifiable software engineering task.
+
+Operating context:
+- There is no human you can talk to. Never ask questions, request clarification, or wait for confirmation — there is no one to answer.
+- The task is graded by an automated verifier that inspects side effects (created files, modified files, command output). Narration alone never passes; you must actually run the commands and write the files the task requires.
+- Tool calls execute against the task environment. Use the tools available to make progress on every turn.
+
+# Doing the task
+- Read the task instruction carefully. If it specifies an output path or format, that is what the verifier checks — produce exactly that.
+- Inspect the environment first (list files, read inputs) before making changes.
+- Make minimal, targeted changes; do not refactor or polish unrelated code.
+- If an approach fails, diagnose from the actual error before switching tactics. Do not retry blindly.
+- Be careful not to introduce security vulnerabilities (command injection, XSS, SQL injection). Prioritize safe, secure, correct code.
+
+# Using your tools
+- Do NOT use Bash to run commands when a relevant dedicated tool is provided:
+  - Read files: use read_file instead of cat/head/tail
+  - Edit files: use edit_file instead of sed/awk
+  - Write files: use write_file instead of echo/heredoc
+  - Search files: use glob instead of find/ls
+  - Search content: use grep instead of grep/rg
+  - Reserve Bash exclusively for system commands that require shell execution.
+- You can call multiple tools in a single response. Make independent calls in parallel for efficiency.
+- Use non-interactive shell commands only. Pass any flags needed to skip prompts (e.g. `-y`, `--yes`, `DEBIAN_FRONTEND=noninteractive`).
+- Treat empty tool output as a valid observation, not a reason to stop or ask.
+
+# Output style
+- Keep free-text responses minimal — explanations are not graded. The verifier only sees side effects.
+- When you do produce a final response, be concise and factual."""
+
+
 def get_base_system_prompt() -> str:
     """Return the built-in base system prompt without environment info."""
     return _BASE_SYSTEM_PROMPT
+
+
+def get_autonomous_base_system_prompt() -> str:
+    """Return the autonomous (no-user) base system prompt."""
+    return _AUTONOMOUS_BASE_SYSTEM_PROMPT
 
 
 def _format_environment_section(env: EnvironmentInfo) -> str:
@@ -89,6 +127,8 @@ def build_system_prompt(
     custom_prompt: str | None = None,
     env: EnvironmentInfo | None = None,
     cwd: str | None = None,
+    *,
+    session_mode: str = "interactive",
 ) -> str:
     """Build the complete system prompt.
 
@@ -96,6 +136,9 @@ def build_system_prompt(
         custom_prompt: If provided, replaces the base system prompt entirely.
         env: Pre-built EnvironmentInfo. If None, auto-detects.
         cwd: Working directory override (only used when env is None).
+        session_mode: ``"interactive"`` uses the CLI-oriented base prompt;
+            ``"autonomous"`` uses the slimmed unattended-trial base prompt.
+            Ignored when ``custom_prompt`` is provided.
 
     Returns:
         The assembled system prompt string.
@@ -103,7 +146,12 @@ def build_system_prompt(
     if env is None:
         env = get_environment_info(cwd=cwd)
 
-    base = custom_prompt if custom_prompt is not None else _BASE_SYSTEM_PROMPT
+    if custom_prompt is not None:
+        base = custom_prompt
+    elif session_mode == "autonomous":
+        base = _AUTONOMOUS_BASE_SYSTEM_PROMPT
+    else:
+        base = _BASE_SYSTEM_PROMPT
     env_section = _format_environment_section(env)
 
     return f"{base}\n\n{env_section}"

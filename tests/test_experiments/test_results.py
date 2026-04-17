@@ -54,16 +54,16 @@ def _build_manifest() -> ExperimentManifest:
     )
 
     leg = LegRecord(
-        leg_id="default",
-        agent_id="default",
+        leg_id="basic",
+        agent_id="basic",
         status=LegStatus.SUCCEEDED,
         result_status=LegResultStatus.PARTIAL,
         started_at=now,
         finished_at=now,
         duration_sec=1.0,
-        harbor_dir=Path("legs/default/harbor"),
-        harbor_result_path=Path("legs/default/harbor/job/result.json"),
-        agent_config_path=Path("legs/default/agent.resolved.yaml"),
+        harbor_dir=Path("legs/basic/harbor"),
+        harbor_result_path=Path("legs/basic/harbor/job/result.json"),
+        agent_config_path=Path("legs/basic/agent.resolved.yaml"),
         trials=trials,
         aggregate=LegAggregate(
             n_trials=2,
@@ -112,7 +112,7 @@ def test_summary_and_write_results(tmp_path: Path) -> None:
     rows = collect_results(manifest, experiment_root=tmp_path)
     summary = summarize_results(rows)
 
-    stats = summary.by_leg["default"]
+    stats = summary.by_leg["basic"]
     assert stats.n_trials == 2
     assert stats.n_passed == 1
     assert stats.n_errored == 1
@@ -123,4 +123,4 @@ def test_summary_and_write_results(tmp_path: Path) -> None:
     write_results(rows, summary, experiment_root=tmp_path)
     md = (tmp_path / "results" / "summary.md").read_text(encoding="utf-8")
     assert "env_setup=1" in md
-    assert "default" in md
+    assert "basic" in md

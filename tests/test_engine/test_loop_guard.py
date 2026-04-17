@@ -46,8 +46,15 @@ def _bash_call(command: str) -> ToolUseBlock:
     return ToolUseBlock(name="bash", input={"command": command})
 
 
-def test_first_empty_turn_triggers_nudge_by_default():
+def test_disabled_by_default_no_nudge():
+    # The loop guard is OFF by default; nothing fires unless explicitly enabled.
     state = LoopGuardState()
+    assert inspect_turn(state, _make_turn()) is None
+    assert state.recoveries_used == 0
+
+
+def test_first_empty_turn_triggers_nudge_when_enabled():
+    state = LoopGuardState(config=LoopGuardConfig(enabled=True))
     nudge = inspect_turn(state, _make_turn())
     assert nudge is not None
     assert nudge.role == "user"
@@ -57,7 +64,7 @@ def test_first_empty_turn_triggers_nudge_by_default():
 
 
 def test_empty_turns_tolerated_when_configured():
-    state = LoopGuardState(config=LoopGuardConfig(max_empty_turns=1))
+    state = LoopGuardState(config=LoopGuardConfig(enabled=True, max_empty_turns=1))
     assert inspect_turn(state, _make_turn()) is None
     assert state.empty_turn_streak == 1
     nudge = inspect_turn(state, _make_turn())
@@ -66,7 +73,7 @@ def test_empty_turns_tolerated_when_configured():
 
 
 def test_empty_streak_resets_on_text_turn():
-    state = LoopGuardState(config=LoopGuardConfig(max_empty_turns=1))
+    state = LoopGuardState(config=LoopGuardConfig(enabled=True, max_empty_turns=1))
     inspect_turn(state, _make_turn())
     inspect_turn(state, _make_turn(text="progress"))
     assert state.empty_turn_streak == 0
@@ -75,7 +82,7 @@ def test_empty_streak_resets_on_text_turn():
 
 
 def test_identical_tool_call_triggers_nudge_after_threshold():
-    state = LoopGuardState(config=LoopGuardConfig(max_identical_tool_calls=3))
+    state = LoopGuardState(config=LoopGuardConfig(enabled=True, max_identical_tool_calls=3))
     call = _bash_call("ls /nope")
     inspect_turn(state, _make_turn(tool_calls=(call,)))
     inspect_turn(state, _make_turn(tool_calls=(call,)))
@@ -87,7 +94,7 @@ def test_identical_tool_call_triggers_nudge_after_threshold():
 
 
 def test_tool_call_streak_resets_on_different_args():
-    state = LoopGuardState(config=LoopGuardConfig(max_identical_tool_calls=3))
+    state = LoopGuardState(config=LoopGuardConfig(enabled=True, max_identical_tool_calls=3))
     inspect_turn(state, _make_turn(tool_calls=(_bash_call("ls /a"),)))
     inspect_turn(state, _make_turn(tool_calls=(_bash_call("ls /a"),)))
     # Different args -> streak resets
@@ -101,7 +108,7 @@ def test_tool_call_streak_resets_on_different_args():
 
 
 def test_parallel_tool_calls_do_not_count_as_repeat():
-    state = LoopGuardState(config=LoopGuardConfig(max_identical_tool_calls=3))
+    state = LoopGuardState(config=LoopGuardConfig(enabled=True, max_identical_tool_calls=3))
     # Two-tool-call turn should reset last_call_key (can't identify a single repeating key)
     multi = (_bash_call("ls /a"), _bash_call("ls /b"))
     inspect_turn(state, _make_turn(tool_calls=multi))
@@ -111,7 +118,7 @@ def test_parallel_tool_calls_do_not_count_as_repeat():
 
 
 def test_recovery_budget_exhaustion():
-    state = LoopGuardState(config=LoopGuardConfig(max_recoveries=2))
+    state = LoopGuardState(config=LoopGuardConfig(enabled=True, max_recoveries=2))
     for _ in range(5):
         inspect_turn(state, _make_turn())
     assert state.recoveries_used >= 2
@@ -182,7 +189,7 @@ async def test_conversation_loop_guard_recovers_from_empty_turns():
     messages = [ConversationMessage.from_user_text("go")]
     conv = Conversation(ctx, messages)
 
-    guard = LoopGuardState()
+    guard = LoopGuardState(config=LoopGuardConfig(enabled=True))
     result = await conv.run_to_completion(loop_guard=guard)
 
     assert result == "recovered"
@@ -215,7 +222,7 @@ async def test_conversation_loop_guard_gives_up_after_budget():
     messages = [ConversationMessage.from_user_text("go")]
     conv = Conversation(ctx, messages)
 
-    guard = LoopGuardState(config=LoopGuardConfig(max_recoveries=2))
+    guard = LoopGuardState(config=LoopGuardConfig(enabled=True, max_recoveries=2))
     text = await conv.run_to_completion(loop_guard=guard)
     assert text == ""
     assert guard.exhausted is True

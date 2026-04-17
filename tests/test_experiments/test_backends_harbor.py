@@ -45,7 +45,7 @@ def test_classify_phase_env_setup() -> None:
 
 def test_harbor_backend_writes_portable_result(tmp_path: Path) -> None:
     experiment_root = tmp_path / "experiment"
-    trial_dir = experiment_root / "legs" / "default" / "harbor" / "job-1" / "task__trial-1"
+    trial_dir = experiment_root / "legs" / "basic" / "harbor" / "job-1" / "task__trial-1"
     trial_dir.mkdir(parents=True)
 
     harbor_result = {
@@ -68,11 +68,11 @@ def test_harbor_backend_writes_portable_result(tmp_path: Path) -> None:
     assert portable_path.exists()
     portable = json.loads(portable_path.read_text(encoding="utf-8"))
     assert portable["anchor"] == "experiment_root"
-    assert portable["trial_dir"] == "legs/default/harbor/job-1/task__trial-1"
+    assert portable["trial_dir"] == "legs/basic/harbor/job-1/task__trial-1"
 
     res = portable["result"]
-    assert res["config"]["trial_dir"] == "legs/default/harbor/job-1/task__trial-1"
-    assert res["metadata"]["absolute"] == "legs/default/harbor/job-1/task__trial-1/nested"
+    assert res["config"]["trial_dir"] == "legs/basic/harbor/job-1/task__trial-1"
+    assert res["metadata"]["absolute"] == "legs/basic/harbor/job-1/task__trial-1/nested"
     assert res["metadata"]["other"] == 123
 
 

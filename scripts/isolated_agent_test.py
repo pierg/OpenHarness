@@ -77,7 +77,7 @@ async def _run_one(agent_name: str, *, model: str, cwd: Path, run_root: Path) ->
 
 
 async def _main() -> int:
-    agents = sys.argv[1:] or ["default", "planner_executor"]
+    agents = sys.argv[1:] or ["basic", "planner_executor"]
     model = "gemini-2.0-flash"
 
     tmp_root = Path("/tmp/oh-iso-test")
@@ -93,11 +93,10 @@ async def _main() -> int:
         run_root.mkdir(parents=True, exist_ok=True)
         print(f"\n=== running {agent_name} on {agent_cwd} ===")
         try:
-            report = await _run_one(
-                agent_name, model=model, cwd=agent_cwd, run_root=run_root
-            )
+            report = await _run_one(agent_name, model=model, cwd=agent_cwd, run_root=run_root)
         except Exception as exc:
             import traceback as _tb
+
             report = {
                 "agent": agent_name,
                 "error": f"{type(exc).__name__}: {exc}",

@@ -42,7 +42,7 @@ class LoopGuardConfig:
     allowed (retrying a flaky network call is sometimes sensible).
     """
 
-    enabled: bool = True
+    enabled: bool = False
     max_empty_turns: int = 0
     """Allow N consecutive empty turns before nudging (N=0 means the first empty turn triggers)."""
     max_identical_tool_calls: int = 3

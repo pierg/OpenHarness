@@ -8,7 +8,7 @@ from openharness.runs.context import RunContext
 
 
 def test_as_manifest_paths_are_relative_to_run_dir(tmp_path: Path) -> None:
-    run_dir = tmp_path / "legs" / "default" / "harbor" / "job" / "trial-1"
+    run_dir = tmp_path / "legs" / "basic" / "harbor" / "job" / "trial-1"
     run_dir.mkdir(parents=True)
     (run_dir / "agent").mkdir()
 

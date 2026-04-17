@@ -59,7 +59,7 @@ class OpenHarnessHarborAgent(BaseAgent):
         skills_dir: str | None = None,
         memory_dir: str | None = None,
         *,
-        agent_name: str = "default",
+        agent_name: str = "basic",
         api_client: SupportsStreamingMessages | None = None,
         extra_env: dict[str, str] | None = None,
         remote_cwd: str = "/app",
@@ -135,6 +135,12 @@ class OpenHarnessHarborAgent(BaseAgent):
         with _temporary_environ(self._extra_env):
             settings = load_settings()
             resolved_settings = settings.merge_cli_overrides(model=self.model_name)
+            # Harbor trials run unattended in an isolated container with no
+            # human in the loop. Force the autonomous system prompt and
+            # drop the host-developer personalization sections (CLAUDE.md,
+            # local rules, memory) so they don't leak from the host into
+            # the trial's prompt.
+            resolved_settings = resolved_settings.model_copy(update={"session_mode": "autonomous"})
             resolved_model = self.model_name or resolved_settings.model
             trial_dir = self.logs_dir.parent
             job_run_id = self._run_id or os.environ.get("OPENHARNESS_RUN_ID")
@@ -214,8 +220,21 @@ class OpenHarnessHarborAgent(BaseAgent):
                     input_tokens=result.input_tokens,
                     output_tokens=result.output_tokens,
                 )
-            except Exception as exc:
-                error_message = str(exc)
+            except BaseException as exc:
+                error_message = str(exc) or type(exc).__name__
+                # Preserve partial usage tracked turn-by-turn before the
+                # cancellation/error so per-trial telemetry isn't lost on
+                # timeouts. ``total_usage`` is updated on every completed
+                # API turn inside the conversation loop.
+                try:
+                    partial = runtime.total_usage
+                    summary = HarborRunSummary(
+                        final_text=summary.final_text,
+                        input_tokens=partial.input_tokens,
+                        output_tokens=partial.output_tokens,
+                    )
+                except Exception:
+                    _log.debug("Failed to capture partial usage on agent error", exc_info=True)
                 raise
             finally:
                 from openharness.observability.cost import estimate_cost

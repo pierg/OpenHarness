@@ -10,6 +10,34 @@ from openharness.engine.messages import ConversationMessage
 
 
 @dataclass(frozen=True)
+class ModelRequest:
+    """Snapshot of the request that crosses to the LLM provider for one turn.
+
+    Complements ``AssistantTurnComplete`` (the response side) and the
+    ``ToolExecution*`` events (tool I/O). Captures inputs that are not
+    otherwise on the audit trail — most importantly the system prompt
+    and the tool surface — so a trial run can be reasoned about and
+    replayed without re-running the agent. Aligned with the OpenTelemetry
+    GenAI / Langfuse "generation" pattern: one request event per model
+    invocation, recorded next to the response on a single event stream.
+
+    The conversation history itself is intentionally not duplicated here
+    on every turn; it is reconstructable from the user/assistant rows in
+    ``messages.jsonl`` (cross-referenced via ``message_count`` /
+    ``turn_index`` on this event).
+    """
+
+    model: str
+    system_prompt: str
+    tools: tuple[str, ...]
+    max_tokens: int
+    max_turns: int | None = None
+    turn_index: int = 0
+    message_count: int = 0
+    agent: str | None = None
+
+
+@dataclass(frozen=True)
 class AssistantTextDelta:
     """Incremental assistant text."""
 
@@ -79,7 +107,8 @@ class CompactProgressEvent:
 
 
 StreamEvent = (
-    AssistantTextDelta
+    ModelRequest
+    | AssistantTextDelta
     | AssistantTurnComplete
     | ToolExecutionStarted
     | ToolExecutionCompleted

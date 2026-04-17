@@ -39,9 +39,11 @@ from openharness.engine.messages import (
 log = logging.getLogger(__name__)
 
 # Backoff constants (shared shape with AnthropicApiClient, but Gemini has no
-# Retry-After header so we always use pure exponential backoff).
+# Retry-After header so we always use pure exponential backoff). The 90 s
+# ceiling pairs with MAX_RETRIES=5 to span the typical Google preview-tier
+# TPM cooldown (~1–2 min) without exhausting retries on long runs.
 _BASE_DELAY = 1.0
-_MAX_DELAY = 30.0
+_MAX_DELAY = 90.0
 _RETRYABLE_STATUS_FRAGMENTS = frozenset({"429", "quota", "503", "500", "timeout", "unavailable"})
 
 

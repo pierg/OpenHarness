@@ -5,10 +5,11 @@ from pathlib import Path
 import sys
 
 from openharness.experiments.cli import (
+    plan as cli_plan,
+    rerun as cli_rerun,
+    results_command as cli_results,
     run as cli_run,
     status as cli_status,
-    results_command as cli_results,
-    plan as cli_plan,
 )
 
 
@@ -172,3 +173,53 @@ def plan_cmd(
 ):
     spec_path = resolve_spec_path(name)
     cli_plan(spec=spec_path, profile=profile)
+
+
+def rerun_app():
+    typer.run(rerun_cmd)
+
+
+def rerun_cmd(
+    name: str = typer.Argument(
+        ...,
+        help=(
+            "Experiment instance id (e.g. tb2-baseline-smoke-20260416-151537), "
+            "experiment id prefix (e.g. tb2-baseline — picks the latest run), "
+            "or path to a run root."
+        ),
+    ),
+    leg: list[str] = typer.Option(
+        None,
+        "--leg",
+        "-l",
+        help="Leg id to re-run (repeatable). When set, --status is ignored.",
+    ),
+    status_filter: list[str] = typer.Option(
+        None,
+        "--status",
+        "-s",
+        help="Trial-level result statuses to re-run (repeatable).",
+    ),
+    dry_run: bool = typer.Option(
+        False,
+        "--dry-run",
+        help="Show which legs would be wiped and re-run without doing anything.",
+    ),
+    langfuse: bool = typer.Option(
+        True, "--langfuse/--no-langfuse", help="Pass Langfuse credentials to agents"
+    ),
+    fail_fast: bool = typer.Option(False, "--fail-fast", help="Stop on first leg failure"),
+    emit_results: bool = typer.Option(
+        True, "--results/--no-results", help="Emit summary results after run"
+    ),
+):
+    root = resolve_run_root(name)
+    cli_rerun(
+        root=root,
+        leg=leg or [],
+        status_filter=status_filter or [],
+        dry_run=dry_run,
+        langfuse=langfuse,
+        fail_fast=fail_fast,
+        emit_results=emit_results,
+    )

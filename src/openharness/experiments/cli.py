@@ -2,13 +2,19 @@
 
 import asyncio
 import logging
+import shutil
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Literal
+from typing import Iterable, Literal
 
 import typer
 
-from openharness.experiments.manifest import LegStatus
+from openharness.experiments.manifest import (
+    ExperimentManifest,
+    LegRecord,
+    LegResultStatus,
+    LegStatus,
+)
 from openharness.experiments.plan import plan_experiment
 from openharness.experiments.results import (
     ResultsSummary,
@@ -176,6 +182,190 @@ def plan(
     plan_obj = plan_experiment(experiment_spec, instance_id="plan-dry-run")
 
     typer.echo(plan_obj.model_dump_json(indent=2))
+
+
+# Default leg-result statuses considered "failed-ish" and worth re-running.
+DEFAULT_RERUN_STATUSES: frozenset[str] = frozenset(
+    {
+        LegResultStatus.ALL_FAILED.value,
+        LegResultStatus.ALL_ERRORED.value,
+        LegResultStatus.PARTIAL.value,
+        LegResultStatus.NO_TRIALS.value,
+    }
+)
+
+
+def select_legs_to_rerun(
+    manifest: ExperimentManifest,
+    *,
+    only_legs: Iterable[str] | None = None,
+    statuses: Iterable[str] | None = None,
+) -> list[LegRecord]:
+    """Return the subset of ``manifest.legs`` to re-run.
+
+    Selection rules:
+    - ``only_legs`` (if provided) takes precedence and selects exactly
+      those leg ids — no status filter is applied.
+    - Otherwise, a leg is selected when it failed at the leg level
+      (``status in {FAILED, INTERRUPTED, PENDING, RUNNING}``) **or** when
+      its trial-level ``result_status`` is in ``statuses`` (defaulting
+      to ``DEFAULT_RERUN_STATUSES``).
+    - Legs that succeeded with ``ALL_PASSED`` are never re-run.
+    """
+    only_set = set(only_legs) if only_legs else None
+    if only_set is not None:
+        return [leg for leg in manifest.legs if leg.leg_id in only_set]
+
+    status_set = set(statuses) if statuses is not None else set(DEFAULT_RERUN_STATUSES)
+    failed_leg_statuses = {
+        LegStatus.FAILED,
+        LegStatus.INTERRUPTED,
+        LegStatus.PENDING,
+        LegStatus.RUNNING,
+    }
+
+    selected: list[LegRecord] = []
+    for leg in manifest.legs:
+        if leg.status in failed_leg_statuses:
+            selected.append(leg)
+            continue
+        if leg.result_status is not None and leg.result_status.value in status_set:
+            selected.append(leg)
+    return selected
+
+
+@app.command()
+def rerun(
+    root: Path = typer.Argument(
+        ...,
+        exists=True,
+        file_okay=False,
+        help="Path to experiment root (use the `rerun` shorthand to pass a bare instance id).",
+    ),
+    leg: list[str] = typer.Option(
+        None,
+        "--leg",
+        "-l",
+        help="Leg id to re-run (repeatable). When set, --status is ignored.",
+    ),
+    status_filter: list[str] = typer.Option(
+        None,
+        "--status",
+        "-s",
+        help=(
+            "Trial-level result statuses to re-run. Repeatable. "
+            f"Defaults to {sorted(DEFAULT_RERUN_STATUSES)}."
+        ),
+    ),
+    dry_run: bool = typer.Option(
+        False,
+        "--dry-run",
+        help="Show which legs would be wiped and re-run without doing anything.",
+    ),
+    langfuse: bool = typer.Option(
+        True, "--langfuse/--no-langfuse", help="Pass Langfuse credentials to agents"
+    ),
+    fail_fast: bool = typer.Option(False, "--fail-fast", help="Stop on first leg failure"),
+    emit_results: bool = typer.Option(
+        True, "--results/--no-results", help="Emit summary results after run"
+    ),
+):
+    """Re-run failed legs from a previous experiment in-place.
+
+    Reads the resolved spec from ``<root>/config.resolved.yaml`` and the
+    manifest from ``<root>/experiment.json``, picks the legs to re-run
+    (failed / errored / partial / interrupted by default — overridable
+    via --leg or --status), wipes their leg directories, and resumes
+    against the same instance id so passed legs stay cached.
+    """
+    manifest_path = root / "experiment.json"
+    if not manifest_path.exists():
+        typer.echo(f"No experiment.json found in {root}", err=True)
+        raise typer.Exit(1)
+
+    resolved_spec_path = root / "config.resolved.yaml"
+    if not resolved_spec_path.exists():
+        typer.echo(f"No config.resolved.yaml found in {root}", err=True)
+        raise typer.Exit(1)
+
+    manifest = ExperimentManifest.model_validate_json(manifest_path.read_text(encoding="utf-8"))
+
+    if leg:
+        unknown = sorted(set(leg) - {leg_record.leg_id for leg_record in manifest.legs})
+        if unknown:
+            typer.echo(
+                f"Unknown leg id(s): {', '.join(unknown)}. "
+                f"Available: {', '.join(sorted({lr.leg_id for lr in manifest.legs}))}",
+                err=True,
+            )
+            raise typer.Exit(1)
+
+    to_rerun = select_legs_to_rerun(
+        manifest,
+        only_legs=leg or None,
+        statuses=status_filter or None,
+    )
+
+    if not to_rerun:
+        typer.echo("No legs match the rerun criteria — nothing to do.")
+        raise typer.Exit(0)
+
+    typer.echo(f"Experiment: {manifest.experiment_id} (instance: {manifest.instance_id})")
+    typer.echo(f"Root: {root}")
+    typer.echo(f"Legs to re-run ({len(to_rerun)}):")
+    for leg_record in to_rerun:
+        result_str = (
+            leg_record.result_status.value if leg_record.result_status is not None else "n/a"
+        )
+        typer.echo(
+            f"  - {leg_record.leg_id}  [status={leg_record.status.value} result={result_str}]"
+        )
+
+    if dry_run:
+        typer.echo("\n--dry-run: not wiping or re-running anything.")
+        return
+
+    for leg_record in to_rerun:
+        leg_dir = root / "legs" / leg_record.leg_id
+        if leg_dir.exists():
+            shutil.rmtree(leg_dir)
+
+    loaded = load_experiment_spec_full(resolved_spec_path)
+    experiment_spec = loaded.spec
+    if fail_fast and not experiment_spec.fail_fast:
+        experiment_spec = experiment_spec.model_copy(update={"fail_fast": True})
+
+    setup_experiment_logging(root / "logs" / "runner.log")
+
+    env = langfuse_agent_env_for_docker() if langfuse else {}
+
+    log.info(
+        "Re-running experiment %s instance=%s legs=[%s]",
+        experiment_spec.id,
+        manifest.instance_id,
+        ", ".join(lr.leg_id for lr in to_rerun),
+    )
+
+    new_manifest = asyncio.run(
+        run_experiment(
+            experiment_spec,
+            experiment_root=root,
+            instance_id=manifest.instance_id,
+            env=env,
+            dry_run=False,
+            resume=True,
+            emit_results=emit_results,
+            loaded_spec=loaded,
+        )
+    )
+
+    if emit_results:
+        rows = collect_results(new_manifest, experiment_root=root)
+        summary = summarize_results(rows)
+        _print_summary(experiment_spec.id, manifest.instance_id, root, summary, new_manifest)
+
+    if any(leg_record.status == LegStatus.FAILED for leg_record in new_manifest.legs):
+        raise typer.Exit(code=1)
 
 
 def _print_summary(

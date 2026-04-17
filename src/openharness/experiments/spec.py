@@ -21,7 +21,7 @@ class AgentOverrides(BaseModel):
 
 
 class AgentLegSpec(BaseModel):
-    id: str  # catalog agent id ("default", "react", ...)
+    id: str  # catalog agent id ("basic", "react", ...)
     alias: str | None = None  # leg directory name; defaults to id
     overrides: AgentOverrides = Field(default_factory=AgentOverrides)
 

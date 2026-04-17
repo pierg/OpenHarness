@@ -40,76 +40,10 @@ Statuses: `wired` • `validated` • `adopted` • `retired`.
 
 ## Active
 
-### grounded-planner-tools
-
-**Status:** wired
-**Scope:** `src/openharness/agents/configs/planner_executor.yaml`,
-`src/openharness/agents/configs/planner_executor_critic.yaml`
-**Applies to:** `planner_executor`, `planner_executor_critic`
-**Hypothesis:** A planner with read-only tools (read_file, glob,
-grep) produces executable plans instead of hallucinated
-pseudo-tool-calls.
-**Wired in:** [experiments.md#2026-04-16-tb2-baseline-phase4-smoke](experiments.md#2026-04-16--tb2-baseline-phase4-smoke)
-**Impact:** _(qualitatively: no `tool_code` hallucinations in
-smoke run; no quantitative ablation yet)_
-
-### loop-guard
-
-**Status:** wired
-**Scope:** `src/openharness/engine/loop_guard.py`,
-`src/openharness/engine/conversation.py`,
-`src/openharness/runtime/session.py`
-**Applies to:** all agents (runtime)
-**Hypothesis:** Runtime detection of empty turns and identical
-tool-call loops, with a short steering nudge, recovers trajectories
-that would otherwise waste the turn budget.
-**Wired in:** [experiments.md#2026-04-16-tb2-baseline-phase4-smoke](experiments.md#2026-04-16--tb2-baseline-phase4-smoke)
-**Impact:** _(pending paired ablation)_
-
-### web-tools
-
-**Status:** wired
-**Scope:** `src/openharness/agents/configs/default.yaml`,
-`planner_executor.yaml`, `planner_executor_critic.yaml`
-**Applies to:** `default`, `planner_executor`, `planner_executor_critic`
-**Hypothesis:** Access to `web_fetch` + `web_search` unblocks tasks
-that need external documentation or source tarballs.
-**Wired in:** [experiments.md#2026-04-16-tb2-baseline-phase4-smoke](experiments.md#2026-04-16--tb2-baseline-phase4-smoke)
-**Impact:** _(pending slice that specifically requires web)_
-
-### planner-executor-critic
-
-**Status:** wired
-**Scope:** `src/openharness/agents/configs/planner_executor_critic.yaml`,
-`src/openharness/agents/architectures/reflection.py`
-**Applies to:** `planner_executor_critic` (opt-in agent)
-**Hypothesis:** A reflection loop with a critic catches premature
-completions and lifts pass rate on tasks where verification is
-cheap.
-**Wired in:** [experiments.md#2026-04-16-tb2-baseline-phase4-smoke](experiments.md#2026-04-16--tb2-baseline-phase4-smoke)
-**Impact:** _(pending paired run vs `planner_executor`)_
-
-### critic-strict-verification
-
-**Status:** wired
-**Scope:** `src/openharness/agents/configs/planner_executor_critic.yaml`
-**Applies to:** `planner_executor_critic`
-**Hypothesis:** A critic that fails reports lacking concrete
-verification evidence outperforms a lenient critic.
-**Wired in:** [experiments.md#2026-04-16-tb2-baseline-phase4-smoke](experiments.md#2026-04-16--tb2-baseline-phase4-smoke)
-**Impact:** _(pending ablation vs lenient critic)_
-
-### extended-budget
-
-**Status:** wired
-**Scope:** `src/openharness/agents/configs/*.yaml`,
-`experiments/tb2-baseline.yaml`
-**Applies to:** all baseline agents
-**Hypothesis:** Raising defaults from 30 turns / 8192 tokens to
-60 / 16384 converts near-misses into passes without hurting
-efficiency enough to matter.
-**Wired in:** [experiments.md#2026-04-16-tb2-baseline-phase4-smoke](experiments.md#2026-04-16--tb2-baseline-phase4-smoke)
-**Impact:** _(pending distribution-of-final-turn analysis)_
+_(empty — no components have been validated yet. The baseline
+ships with no opt-in components; everything candidate lives in
+[`ideas.md`](ideas.md) until an experiment proves it earns its
+place here.)_
 
 ## Retired
 

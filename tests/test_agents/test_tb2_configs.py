@@ -4,9 +4,8 @@ from openharness.agents.factory import AgentFactory
 
 
 _BUILTIN_AGENT_IDS = (
-    "default",
+    "basic",
     "planner_executor",
-    "planner_executor_critic",
     "reflection",
     "react",
 )

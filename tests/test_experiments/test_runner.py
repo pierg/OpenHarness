@@ -31,7 +31,7 @@ id: stub-experiment
 dataset: stub-dataset
 model: gpt-stub
 agents:
-  - default
+  - basic
 """
 
 
@@ -65,7 +65,7 @@ async def test_run_experiment_persists_portable_manifest(tmp_path: Path) -> None
     experiment_root = tmp_path / "runs"
     experiment_root.mkdir()
 
-    trial_dir = experiment_root / "legs" / "default" / "harbor" / "job" / "task__trial-1"
+    trial_dir = experiment_root / "legs" / "basic" / "harbor" / "job" / "task__trial-1"
     trial_dir.mkdir(parents=True)
 
     trials = (
@@ -79,7 +79,7 @@ async def test_run_experiment_persists_portable_manifest(tmp_path: Path) -> None
         TrialRecord(
             trial_id="trial-2",
             task_name="task",
-            trial_dir=Path("legs/default/harbor/job/task__trial-2"),
+            trial_dir=Path("legs/basic/harbor/job/task__trial-2"),
             score=0.0,
             passed=False,
             error=TrialError(
@@ -91,12 +91,12 @@ async def test_run_experiment_persists_portable_manifest(tmp_path: Path) -> None
         TrialRecord(
             trial_id="trial-3",
             task_name="task",
-            trial_dir=Path("legs/default/harbor/job/task__trial-3"),
+            trial_dir=Path("legs/basic/harbor/job/task__trial-3"),
             score=0.0,
             passed=False,
         ),
     )
-    backend = _StubBackend({"default": _outcome_with_trials(experiment_root, trials)})
+    backend = _StubBackend({"basic": _outcome_with_trials(experiment_root, trials)})
 
     manifest = await run_experiment(
         loaded.spec,
@@ -134,7 +134,7 @@ async def test_run_experiment_persists_portable_manifest(tmp_path: Path) -> None
     assert resolved_yaml["defaults"]["model"] == "gpt-stub"
 
     summary = (experiment_root / "results" / "summary.md").read_text(encoding="utf-8")
-    assert "default" in summary
+    assert "basic" in summary
     rows = json.loads((experiment_root / "results" / "rows.json").read_text(encoding="utf-8"))
     assert {row["status"] for row in rows} == {"passed", "failed", "errored"}
 
@@ -198,7 +198,7 @@ async def test_no_empty_runs_or_openharness_dirs(tmp_path: Path) -> None:
     loaded = load_experiment_spec_full(spec_path)
 
     experiment_root = tmp_path / "runs"
-    trial_dir = experiment_root / "legs" / "default" / "t"
+    trial_dir = experiment_root / "legs" / "basic" / "t"
     trial_dir.mkdir(parents=True)
     outcome = LegOutcome(
         status=LegStatus.SUCCEEDED,
@@ -206,7 +206,7 @@ async def test_no_empty_runs_or_openharness_dirs(tmp_path: Path) -> None:
         started_at=datetime.now(timezone.utc),
         finished_at=datetime.now(timezone.utc),
     )
-    backend = _StubBackend({"default": outcome})
+    backend = _StubBackend({"basic": outcome})
 
     await run_experiment(
         loaded.spec,

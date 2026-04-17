@@ -42,7 +42,7 @@ class AgentConfig(BaseModel):
     Can recursively contain definitions for subagents.
     """
 
-    name: str = "default"
+    name: str = "basic"
     architecture: str = "simple"
     description: str = ""
     model: str = "claude-sonnet-4-20250514"
@@ -56,6 +56,15 @@ class AgentConfig(BaseModel):
     # so trial artifacts can be grouped after the fact. The source of
     # truth for what each tag means lives in lab/components.md.
     components: tuple[str, ...] = ()
+
+    # Optional explicit allow-list of `openharness_system_context`
+    # sections to include when rendering this agent's system prompt.
+    # ``None`` (default) lets the runtime decide based on session_mode
+    # and the agent's registered tools. Use this for surgical control,
+    # e.g. a planner subagent that wants only ``"base"``.
+    # See ``openharness.prompts.context.SYSTEM_CONTEXT_SECTIONS`` for
+    # the recognized names.
+    system_context_sections: tuple[str, ...] | None = None
 
     definition: AgentDefinitionMetadata | None = None
     prompts: dict[str, str] = Field(default_factory=dict)
