@@ -351,3 +351,83 @@ def test_returns_null_when_explicitly_disabled(monkeypatch):
     monkeypatch.setenv("OPENHARNESS_LANGFUSE_REQUIRED", "1")
     observer = create_trace_observer(session_id="s", interface="i", cwd="/", model="m")
     assert isinstance(observer, NullTraceObserver)
+
+
+# ---------------------------------------------------------------------------
+# Public-host trace URL rewrite
+# ---------------------------------------------------------------------------
+
+
+def test_rewrite_trace_url_replaces_host():
+    from openharness.observability.langfuse import rewrite_trace_url_for_public
+
+    rewritten = rewrite_trace_url_for_public(
+        "http://10.0.0.4:3010/project/demo/traces/abc",
+        "http://localhost:3010",
+    )
+    assert rewritten == "http://localhost:3010/project/demo/traces/abc"
+
+
+def test_rewrite_trace_url_no_op_when_no_host():
+    from openharness.observability.langfuse import rewrite_trace_url_for_public
+
+    url = "http://10.0.0.4:3010/project/demo/traces/abc"
+    assert rewrite_trace_url_for_public(url, None) == url
+
+
+def test_rewrite_trace_url_uses_env(monkeypatch):
+    from openharness.observability.langfuse import rewrite_trace_url_for_public
+
+    monkeypatch.setenv("LANGFUSE_PUBLIC_HOST", "http://localhost:3010")
+    rewritten = rewrite_trace_url_for_public(
+        "http://10.0.0.4:3010/project/demo/traces/abc"
+    )
+    assert rewritten.startswith("http://localhost:3010/")
+
+
+# ---------------------------------------------------------------------------
+# Native usage_details / cost_details passthrough
+# ---------------------------------------------------------------------------
+
+
+def test_observation_handle_passes_usage_and_cost_details_through():
+    client = _FakeClient()
+    observer = _make_observer(client=client)
+    handle = observer.start_model_call(model="claude-test", input="hi")
+    handle.update(
+        output="done",
+        usage_details={"input": 10, "output": 5, "total": 15},
+        cost_details={"total": 0.0042},
+        metadata={"turn_index": 0},
+    )
+    update = client.started[-1]["obs"].updates[0]
+    assert update["usage_details"] == {"input": 10, "output": 5, "total": 15}
+    assert update["cost_details"] == {"total": 0.0042}
+    assert update["output"] == "done"
+
+
+# ---------------------------------------------------------------------------
+# Session metadata + tags
+# ---------------------------------------------------------------------------
+
+
+def test_start_session_includes_extra_tags_and_input():
+    client = _FakeClient()
+    propagate = _PropagateRecorder()
+    observer = _make_observer(
+        client=client,
+        propagate_fn=propagate,
+        run_id="trial-xyz",
+        trace_name="fix-bug · basic",
+        extra_tags=["experiment:tb2", "task:fix-bug", "model:gemini-flash"],
+    )
+    observer.start_session(metadata={"input": {"task": "fix-bug"}, "task_name": "fix-bug"})
+
+    assert observer.trace_name == "fix-bug · basic"
+    tags = propagate.calls[0]["tags"]
+    assert "experiment:tb2" in tags
+    assert "task:fix-bug" in tags
+    assert "model:gemini-flash" in tags
+    session_kwargs = client.started[0]["kwargs"]
+    assert session_kwargs["input"] == {"task": "fix-bug"}
+    assert session_kwargs["metadata"]["task_name"] == "fix-bug"
