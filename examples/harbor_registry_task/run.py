@@ -16,7 +16,7 @@ from openharness.experiments.observability import setup_local_langfuse  # noqa: 
 
 AGENT_CONFIG = EXAMPLES_ROOT / "_shared" / "agent_configs" / "harbor_registry_agent.yaml"
 TASK = "cookbook/hello-world"
-MODEL = "gemini-2.5-flash"
+MODEL = "gemini-3.1-flash-lite-preview"
 MAX_TURNS = 10
 
 

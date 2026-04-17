@@ -23,7 +23,7 @@ class HarborExperiment:
     agent_config: str | Path
     task: str | Path | None = None
     dataset: str | None = None
-    model: str = "gemini-2.5-flash"
+    model: str = "gemini-3.1-flash-lite-preview"
     max_turns: int = 10
     n_concurrent: int = 1
     n_tasks: int | None = None
