@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from openharness.engine.messages import ConversationMessage, ImageBlock, TextBlock
 from openharness.api.client import AnthropicApiClient, OAUTH_BETA_HEADER
 
 
@@ -67,6 +68,31 @@ def test_anthropic_client_adds_claude_oauth_identity_headers(monkeypatch):
     assert headers["X-Claude-Code-Session-Id"] == "session-123"
     assert "oauth-2025-04-20" in headers["anthropic-beta"]
     assert "claude-code-20250219" in headers["anthropic-beta"]
+
+
+def test_conversation_message_serializes_image_block_for_anthropic():
+    message = ConversationMessage(
+        role="user",
+        content=[
+            TextBlock(text="Describe this."),
+            ImageBlock(media_type="image/png", data="YWJj", source_path="/tmp/example.png"),
+        ],
+    )
+
+    assert message.to_api_param() == {
+        "role": "user",
+        "content": [
+            {"type": "text", "text": "Describe this."},
+            {
+                "type": "image",
+                "source": {
+                    "type": "base64",
+                    "media_type": "image/png",
+                    "data": "YWJj",
+                },
+            },
+        ],
+    }
 
 
 def test_anthropic_client_refreshes_claude_token_on_request(monkeypatch):
