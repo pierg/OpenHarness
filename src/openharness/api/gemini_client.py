@@ -39,9 +39,11 @@ from openharness.engine.messages import (
 log = logging.getLogger(__name__)
 
 # Backoff constants (shared shape with AnthropicApiClient, but Gemini has no
-# Retry-After header so we always use pure exponential backoff).
+# Retry-After header so we always use pure exponential backoff). The 90 s
+# ceiling pairs with MAX_RETRIES=5 to span the typical Google preview-tier
+# TPM cooldown (~1–2 min) without exhausting retries on long runs.
 _BASE_DELAY = 1.0
-_MAX_DELAY = 30.0
+_MAX_DELAY = 90.0
 _RETRYABLE_STATUS_FRAGMENTS = frozenset({"429", "quota", "503", "500", "timeout", "unavailable"})
 
 
@@ -121,6 +123,10 @@ class GeminiApiClient:
             config_kwargs["tools"] = tools
         config = types.GenerateContentConfig(**config_kwargs)
 
+        log.debug("Sending Gemini request: model=%s contents_len=%d", request.model, len(contents))
+        for i, c in enumerate(contents):
+            log.debug("Content %d: role=%s parts_len=%d", i, c.role, len(c.parts))
+
         response_stream = await self._client.aio.models.generate_content_stream(
             model=request.model,
             contents=contents,
@@ -128,11 +134,18 @@ class GeminiApiClient:
         )
 
         full_text = ""
+        full_text_signature: bytes | None = None
         tool_calls: list[dict[str, Any]] = []
+        # Gemini may emit a standalone "thought" part (thought=True, no text,
+        # no function_call) carrying only a ``thought_signature``. That signature
+        # must be echoed back on the following function_call/text part, otherwise
+        # the API will return a 400 ("Function call is missing a thought_signature").
+        pending_signature: bytes | None = None
         input_tokens = 0
         output_tokens = 0
 
         async for chunk in response_stream:
+            log.debug("Received Gemini chunk: %s", chunk)
             if chunk.usage_metadata:
                 input_tokens = int(chunk.usage_metadata.prompt_token_count or 0)
                 output_tokens = int(chunk.usage_metadata.candidates_token_count or 0)
@@ -144,24 +157,55 @@ class GeminiApiClient:
                 continue
 
             for part in candidate.content.parts:
+                # ``thought_signature`` is a field on ``Part`` itself, NOT on
+                # ``part.function_call``. Capture it before routing by part kind.
+                part_sig = getattr(part, "thought_signature", None)
                 if part.text:
                     full_text += part.text
+                    if part_sig:
+                        full_text_signature = part_sig
+                        log.debug("Captured Gemini thought signature for text: %s", part_sig)
+                    elif pending_signature is not None:
+                        full_text_signature = pending_signature
+                        pending_signature = None
                     yield ApiTextDeltaEvent(text=part.text)
                 elif part.function_call:
                     args = dict(part.function_call.args) if part.function_call.args else {}
-                    tool_calls.append({"name": part.function_call.name, "args": args})
+                    fc_sig = part_sig if part_sig is not None else pending_signature
+                    pending_signature = None
+                    log.debug(
+                        "Captured Gemini thought signature for FC %s: %s",
+                        part.function_call.name,
+                        bool(fc_sig),
+                    )
+                    tool_calls.append(
+                        {"name": part.function_call.name, "args": args, "thought_signature": fc_sig}
+                    )
+                elif part_sig is not None:
+                    # Thought-only part with no text / function_call; hold signature
+                    # for the next emitted block so we can echo it back later.
+                    log.debug("Captured Gemini thought-only signature (len=%d)", len(part_sig))
+                    pending_signature = part_sig
 
         final_content: list[TextBlock | ToolUseBlock] = []
         if full_text:
-            final_content.append(TextBlock(text=full_text))
+            final_content.append(TextBlock(text=full_text, thought_signature=full_text_signature))
         for tc in tool_calls:
             final_content.append(
                 ToolUseBlock(
                     id=f"call_{uuid.uuid4().hex[:8]}",
                     name=tc["name"],
                     input=tc["args"],
+                    thought_signature=tc["thought_signature"],
                 )
             )
+
+        # Attach any remaining pending signature to the first content block so
+        # it isn't lost on the roundtrip.
+        if pending_signature is not None and final_content:
+            head = final_content[0]
+            if head.thought_signature is None:
+                final_content[0] = head.model_copy(update={"thought_signature": pending_signature})
 
         yield ApiMessageCompleteEvent(
             message=ConversationMessage(role="assistant", content=final_content),
@@ -211,17 +255,50 @@ def _build_gemini_contents(messages: list[ConversationMessage], types: Any) -> l
     contents = []
     for msg in messages:
         parts = []
+        log.debug("Building Gemini message: role=%s", msg.role)
         for block in msg.content:
             if isinstance(block, TextBlock):
-                parts.append(types.Part.from_text(text=block.text))
+                if block.thought_signature:
+                    log.debug(
+                        "Sending Gemini thought signature for text: %s", block.thought_signature
+                    )
+                    parts.append(
+                        types.Part(text=block.text, thought_signature=block.thought_signature)
+                    )
+                else:
+                    parts.append(types.Part.from_text(text=block.text))
             elif isinstance(block, ToolUseBlock):
-                parts.append(types.Part.from_function_call(name=block.name, args=block.input))
+                if block.thought_signature:
+                    log.debug(
+                        "Sending Gemini thought signature for FC %s (len=%d)",
+                        block.name,
+                        len(block.thought_signature),
+                    )
+                    # ``thought_signature`` is a field on ``Part`` itself; it is
+                    # NOT a valid field on ``FunctionCall`` (pydantic rejects it).
+                    parts.append(
+                        types.Part(
+                            function_call=types.FunctionCall(
+                                name=block.name,
+                                args=block.input,
+                            ),
+                            thought_signature=block.thought_signature,
+                        )
+                    )
+                else:
+                    parts.append(types.Part.from_function_call(name=block.name, args=block.input))
             elif isinstance(block, ToolResultBlock):
+                log.debug("Adding ToolResultBlock: tool_use_id=%s", block.tool_use_id)
                 func_name = tool_name_by_id.get(block.tool_use_id, block.tool_use_id)
+
+                # Format the response in a dictionary.
+                response_dict = {"result": block.content}
+
                 parts.append(
-                    types.Part.from_function_response(
-                        name=func_name,
-                        response={"result": block.content},
+                    types.Part(
+                        function_response=types.FunctionResponse(
+                            name=func_name, response=response_dict
+                        )
                     )
                 )
         role = "user" if msg.role == "user" else "model"
