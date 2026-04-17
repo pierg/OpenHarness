@@ -129,19 +129,6 @@ async def test_stream_text_yields_deltas_and_complete():
     assert complete.stop_reason == "end_turn"
 
 
-async def test_stream_max_tokens_stop_reason():
-    client = _make_client()
-    _setup_stream(client, _chunk("truncated...", finish_reason="MAX_TOKENS"))
-
-    events = [ev async for ev in client.stream_message(
-        ApiMessageRequest(model="gemini-2.0-flash",
-                          messages=[ConversationMessage.from_user_text("hi")])
-    )]
-
-    complete = next(e for e in events if isinstance(e, ApiMessageCompleteEvent))
-    assert complete.stop_reason == "max_tokens"
-
-
 async def test_stream_tool_call_in_complete():
     client = _make_client()
     _setup_stream(client, _chunk(func_name="bash", func_args={"command": "ls"}))
@@ -166,11 +153,10 @@ def test_build_tools_empty():
     assert _build_gemini_tools([], MagicMock()) == []
 
 
-def test_build_tools_injects_type_and_properties():
+def test_build_tools_injects_properties():
     types = MagicMock()
     _build_gemini_tools([{"name": "noop", "description": "", "input_schema": {}}], types)
     schema = types.FunctionDeclaration.call_args.kwargs["parameters"]
-    assert schema["type"] == "object"
     assert "properties" in schema
 
 

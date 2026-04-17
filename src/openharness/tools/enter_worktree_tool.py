@@ -2,13 +2,12 @@
 
 from __future__ import annotations
 
-import subprocess
-from pathlib import Path
 import re
 
 from pydantic import BaseModel, Field
 
 from openharness.tools.base import BaseTool, ToolExecutionContext, ToolResult
+from openharness.workspace import LocalWorkspace, Workspace
 
 
 class EnterWorktreeToolInput(BaseModel):
@@ -27,54 +26,47 @@ class EnterWorktreeTool(BaseTool):
     description = "Create a git worktree and return its path."
     input_model = EnterWorktreeToolInput
 
+    def __init__(self, workspace: Workspace | None = None) -> None:
+        self._workspace = workspace
+
     async def execute(
         self,
         arguments: EnterWorktreeToolInput,
         context: ToolExecutionContext,
     ) -> ToolResult:
-        top_level = _git_output(context.cwd, "rev-parse", "--show-toplevel")
-        if top_level is None:
+        workspace = self._workspace or LocalWorkspace(context.cwd)
+
+        top = await workspace.run_shell("git rev-parse --show-toplevel")
+        if top.return_code != 0:
             return ToolResult(output="enter_worktree requires a git repository", is_error=True)
 
-        repo_root = Path(top_level)
-        worktree_path = _resolve_worktree_path(repo_root, arguments.branch, arguments.path)
-        worktree_path.parent.mkdir(parents=True, exist_ok=True)
-        cmd = ["git", "worktree", "add"]
+        repo_root = top.stdout.strip()
+        wt_path = _worktree_path(repo_root, arguments.branch, arguments.path)
+
         if arguments.create_branch:
-            cmd.extend(["-b", arguments.branch, str(worktree_path), arguments.base_ref])
+            cmd = f"git worktree add -b {_sq(arguments.branch)} {_sq(wt_path)} {_sq(arguments.base_ref)}"
         else:
-            cmd.extend([str(worktree_path), arguments.branch])
-        result = subprocess.run(
-            cmd,
-            cwd=repo_root,
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-        output = (result.stdout or result.stderr).strip() or f"Created worktree {worktree_path}"
-        if result.returncode != 0:
+            cmd = f"git worktree add {_sq(wt_path)} {_sq(arguments.branch)}"
+
+        result = await workspace.run_shell(cmd, cwd=repo_root)
+        output = (result.stdout or result.stderr).strip() or f"Created worktree {wt_path}"
+        if result.return_code != 0:
             return ToolResult(output=output, is_error=True)
-        return ToolResult(output=f"{output}\nPath: {worktree_path}")
+        return ToolResult(output=f"{output}\nPath: {wt_path}")
 
 
-def _git_output(cwd: Path, *args: str) -> str | None:
-    result = subprocess.run(
-        ["git", *args],
-        cwd=cwd,
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-    if result.returncode != 0:
-        return None
-    return (result.stdout or "").strip()
-
-
-def _resolve_worktree_path(repo_root: Path, branch: str, path: str | None) -> Path:
+def _worktree_path(repo_root: str, branch: str, path: str | None) -> str:
     if path:
-        resolved = Path(path).expanduser()
-        if not resolved.is_absolute():
-            resolved = repo_root / resolved
-        return resolved.resolve()
+        from pathlib import Path as P
+
+        p = P(path).expanduser()
+        if not p.is_absolute():
+            p = P(repo_root) / p
+        return str(p.resolve())
     slug = re.sub(r"[^A-Za-z0-9._-]+", "-", branch).strip("-") or "worktree"
-    return (repo_root / ".openharness" / "worktrees" / slug).resolve()
+    return f"{repo_root}/.openharness/worktrees/{slug}"
+
+
+def _sq(s: str) -> str:
+    """Shell-quote a string."""
+    return "'" + s.replace("'", "'\\''") + "'"
