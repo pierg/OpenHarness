@@ -11,7 +11,7 @@ definition:
 subagents:
   thinker:
     name: thinker
-    model: gemini-3.1-flash-lite-preview
+    model: gemini-2.5-flash-lite
     max_turns: 1
     max_tokens: 1024
     tools: []
@@ -66,7 +66,7 @@ subagents:
 
   actor:
     name: actor
-    model: gemini-3.1-flash-lite-preview
+    model: gemini-2.5-flash-lite
     max_turns: 5
     max_tokens: 4096
     tools:

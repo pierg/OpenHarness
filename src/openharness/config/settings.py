@@ -229,7 +229,7 @@ def default_provider_profiles() -> dict[str, ProviderProfile]:
             provider="gemini",
             api_format="google",
             auth_source="gemini_api_key",
-            default_model="gemini-3.1-flash-lite-preview",
+            default_model="gemini-2.5-flash",
         ),
     }
 
@@ -287,7 +287,7 @@ def resolve_model_setting(
         if is_claude_family_provider(provider):
             return _CLAUDE_ALIAS_TARGETS["sonnet"]
         if provider == "gemini":
-            return "gemini-3.1-flash-lite-preview"
+            return "gemini-2.5-flash"
         return "gpt-5.4"
 
     if is_claude_family_provider(provider):

@@ -755,7 +755,7 @@ class ReactBackendHost:
             families.extend(
                 [
                     ("gemini-2.5-pro", "Gemini Pro"),
-                    ("gemini-3.1-flash-lite-preview", "Gemini Flash"),
+                    ("gemini-2.5-flash", "Gemini Flash"),
                 ]
             )
 

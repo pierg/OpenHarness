@@ -19,7 +19,7 @@ class LocalExperiment:
     agent_config: str | Path
     task: str
     workspace: Path
-    model: str = "gemini-3.1-flash-lite-preview"
+    model: str = "gemini-2.5-flash"
     max_turns: int = 10
     env: dict[str, str] = field(default_factory=dict)
 

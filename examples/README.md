@@ -27,7 +27,7 @@ passes a Harbor task directory. `harbor_registry_task` uses
 `examples/_shared/agent_configs/harbor_registry_agent.yaml` to run an existing
 task from the Harbor registry.
 
-All example YAML configs pin `gemini-3.1-flash-lite-preview` directly.
+All example YAML configs pin `gemini-2.5-flash` directly.
 
 ## What Each Example Shows
 

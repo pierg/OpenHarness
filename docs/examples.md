@@ -42,7 +42,7 @@ examples/_shared/agent_configs/workflow_worker.yaml
 All example configs pin:
 
 ```text
-gemini-3.1-flash-lite-preview
+gemini-2.5-flash
 ```
 
 ## 1. Local Bug Fix

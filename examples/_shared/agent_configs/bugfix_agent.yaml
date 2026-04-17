@@ -1,7 +1,7 @@
 name: bugfix_agent
 description: YAML-configured bug-fix agent shared by the local and Harbor examples.
 architecture: simple
-model: gemini-3.1-flash-lite-preview
+model: gemini-2.5-flash
 max_turns: 8
 max_tokens: 8192
 

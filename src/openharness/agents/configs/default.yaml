@@ -1,7 +1,7 @@
 name: default
 description: Default OpenHarness general-purpose coding agent.
 
-model: gemini-3.1-flash-lite-preview
+model: gemini-2.5-flash-lite
 max_turns: 15
 max_tokens: 8192
 definition:

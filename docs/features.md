@@ -11,7 +11,7 @@ Example:
 ```yaml
 name: bugfix_agent
 architecture: simple
-model: gemini-3.1-flash-lite-preview
+model: gemini-2.5-flash
 max_turns: 8
 max_tokens: 8192
 
@@ -86,7 +86,7 @@ Why it matters:
 
 - the engine can run Gemini models without provider-specific query-loop code
 - Google AI Studio and Vertex AI both use the same OpenHarness client surface
-- examples can pin `gemini-3.1-flash-lite-preview` without relying on hidden defaults
+- examples can pin `gemini-2.5-flash` without relying on hidden defaults
 
 Key files:
 

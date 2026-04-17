@@ -18,7 +18,7 @@ AGENT_CONFIG = EXAMPLES_ROOT / "_shared" / "agent_configs" / "harbor_registry_ag
 
 # 1. Define the dataset (e.g. from registry.harborframework.com)
 DATASET = "terminal-bench@2.0"
-MODEL = "gemini-3.1-flash-lite-preview"
+MODEL = "gemini-2.5-flash"
 MAX_TURNS = 10
 
 

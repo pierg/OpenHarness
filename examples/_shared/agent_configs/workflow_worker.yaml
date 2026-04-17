@@ -1,7 +1,7 @@
 name: workflow_worker
 description: Persistent worker agent for the workflow team example.
 architecture: simple
-model: gemini-3.1-flash-lite-preview
+model: gemini-2.5-flash
 max_turns: 10
 max_tokens: 8192
 

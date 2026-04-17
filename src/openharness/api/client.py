@@ -28,13 +28,8 @@ from openharness.engine.messages import ConversationMessage, assistant_message_f
 
 log = logging.getLogger(__name__)
 
-# Retry configuration.
-# MAX_RETRIES governs how many times we retry transient API failures
-# (5xx, 429s, network blips). Set to 5 so that long unattended runs can
-# weather TPM brownouts that last the typical 1–2 minute Google quota
-# cooldown without erroring a trial. With exponential backoff capped by
-# MAX_DELAY this gives ~3 min of total retry headroom per request.
-MAX_RETRIES = 5
+# Retry configuration
+MAX_RETRIES = 3
 BASE_DELAY = 1.0  # seconds
 MAX_DELAY = 30.0
 RETRYABLE_STATUS_CODES = {429, 500, 502, 503, 529}

@@ -52,7 +52,7 @@ async def main() -> None:
 
     setup_logging()
     setup_local_langfuse()
-    settings = load_settings().merge_cli_overrides(model="gemini-3.1-flash-lite-preview")
+    settings = load_settings().merge_cli_overrides(model="gemini-2.5-flash")
     api_client = create_api_client(settings)
     workspace_dir = prepare_bugfix_workspace()
 
