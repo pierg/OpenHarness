@@ -5,9 +5,11 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, Protocol
 
 from pydantic import BaseModel
+
+from openharness.workspace import Workspace
 
 
 @dataclass
@@ -73,3 +75,10 @@ class ToolRegistry:
     def to_api_schema(self) -> list[dict[str, Any]]:
         """Return all tool schemas in API format."""
         return [tool.to_api_schema() for tool in self._tools.values()]
+
+
+class ToolRegistryFactory(Protocol):
+    """Factory that creates a tool registry bound to a concrete workspace."""
+
+    def build(self, workspace: Workspace) -> ToolRegistry:
+        """Return a tool registry bound to *workspace*."""

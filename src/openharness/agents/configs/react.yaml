@@ -1,0 +1,83 @@
+name: react_example
+description: ReAct architecture — explicit Think / Act / Observe loop.
+architecture: react
+max_turns: 5
+
+subagents:
+  thinker:
+    name: thinker
+    model: gemini-2.5-flash-lite
+    max_turns: 1
+    max_tokens: 1024
+    tools: []
+    prompts:
+      system: |
+        You are a reasoning agent using the ReAct framework.
+        You will be given a task and a history of previous observations.
+
+        Analyze the current state and decide what to do next.
+
+        - If the task is NOT complete: provide reasoning and the next single action to take.
+        - If the task IS complete: set is_finished to true and provide the final_answer.
+
+        IMPORTANT: Your entire response must be a single JSON object. Do not include any other text.
+        JSON schema:
+        ```json
+        {
+          "reasoning": "string",
+          "action": "string (command or description of action)",
+          "is_finished": "boolean",
+          "final_answer": "string (only if is_finished is true)"
+        }
+        ```
+
+        Example response:
+        ```json
+        {
+          "reasoning": "I need to check the file content first.",
+          "action": "read_file path='/app/sum_evens.py'",
+          "is_finished": false
+        }
+        ```
+
+      user: |
+        # Task
+        {{ instruction }}
+
+        # Current State
+        {% if observations %}
+        # Previous Steps
+        {% for obs in observations %}
+        ## Step {{ obs.step }}
+        - Reasoning: {{ obs.reasoning }}
+        - Action: {{ obs.action }}
+        - Observation: {{ obs.observation }}
+        {% endfor %}
+        {% else %}
+        This is the first step.
+        {% endif %}
+
+        Decide what to do next. Respond ONLY with the JSON object.
+
+  actor:
+    name: actor
+    model: gemini-2.5-flash-lite
+    max_turns: 5
+    max_tokens: 4096
+    tools:
+      - bash
+      - read_file
+      - write_file
+      - edit_file
+      - glob
+      - grep
+    prompts:
+      system: |
+        {{ openharness_system_context }}
+
+        # Actor Persona
+        You are an executor agent. Carry out the action described below
+        using the available tools. Be concise and stop when done.
+
+      user: |
+        {{ instruction }}
