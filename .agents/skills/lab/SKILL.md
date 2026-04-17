@@ -243,6 +243,11 @@ the relevant skill instead.
   matching directory there).
 - [`experiments/tb2-baseline.yaml`](../../../experiments/tb2-baseline.yaml)
   — the canonical experiment spec used by `uv run exec`.
-- [`scripts/exp/README.md`](../../../scripts/exp/README.md) — the
-  `tmux`-backed background job manager. Use for any experiment
-  longer than a smoke run.
+- [`scripts/exp/README.md`](../../../scripts/exp/README.md) — a
+  `tmux`-backed background job manager. One of two equally-valid
+  ways to background an experiment, alongside the agent's own
+  `Shell` background mode. `lab-run-experiment` documents when to
+  pick which (short-form: tmux when the human wants
+  attach/list/stop or when the run should outlive the agent loop;
+  `Shell` background otherwise). Either way, never block on `uv run
+  exec` in the foreground.

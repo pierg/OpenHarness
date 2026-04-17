@@ -5,10 +5,7 @@ defaults:
   model: gemini-3.1-flash-lite-preview
   max_turns: 30
   max_tokens: 8192
-  # No n_concurrent override: let harbor decide trial-level parallelism
-  # from its own default. If we hit 429s on the model side or saturate
-  # docker locally, revisit by reading events.jsonl and pinning a value
-  # here (or in a profile) rather than re-introducing a blanket cap.
+  n_concurrent: 4
   n_attempts: 1
 
 task_filter:

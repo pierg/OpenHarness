@@ -8,4 +8,22 @@
 > The first real entry will be the full TB2 sweep queued in
 > [`roadmap.md`](roadmap.md).
 
-_(no entries yet)_
+## 2026-04-17 — tb2-baseline-full-sweep
+
+-   **Hypothesis:** the post-reset baseline runs cleanly across all of `terminal-bench@2.0` and produces a real per-agent pass-rate distribution to anchor every future ablation.
+-   **Variant:** Current post-reset state (3.1-flash-lite-preview)
+-   **Run:** [`runs/experiments/tb2-baseline-20260417-221011/`](../runs/experiments/tb2-baseline-20260417-221011/)
+
+### Results
+
+| Leg | Trials | Passed | Errored | Pass rate | Total tokens | Cost (USD) |
+|-----|-------:|-------:|--------:|----------:|-------------:|-----------:|
+|     |        |        |         |           |              |            |
+
+### Notes
+
+-   _(filled after the run completes)_
+
+### Decision
+
+_(filled after the run completes)_

@@ -6,11 +6,12 @@ description: >
   tb2-baseline", "compare A vs B", "run the next thing on the
   roadmap", or asks for a paired ablation. Wires up a worktree (for
   risky work), edits lab/ideas.md and lab/experiments.md, hands off
-  to lab-plan-next to move the roadmap entry to Done, invokes
-  `uv run exec` (via `scripts/exp/start.sh` for long jobs), and
-  fills in the results table from the run artifacts. Companion
-  skills: lab, lab-propose-idea, lab-plan-next,
-  lab-graduate-component.
+  to lab-plan-next to move the roadmap entry to Done, launches the
+  run in the background (either via the Shell tool's background mode
+  or the tmux-backed `scripts/exp/start.sh`, picked per situation),
+  polls until `results/summary.md` lands, then fills in the results
+  table from the run artifacts. Companion skills: lab,
+  lab-propose-idea, lab-plan-next, lab-graduate-component.
 ---
 
 # Lab — Run Experiment
@@ -195,52 +196,132 @@ Apply only the changes the experiment requires. Examples:
 Keep the diff tight. Do not also fix unrelated bugs in this
 worktree.
 
-### 7. Run the experiment
+### 7. Run the experiment in the background
 
-Use `uv run exec` against the chosen experiment YAML. **Always
-prefer `scripts/exp/start.sh`** for anything beyond a smoke run —
-it backs the run with `tmux` so it survives SSH disconnects.
+**Never block on `uv run exec` in the foreground.** Even smoke runs
+take minutes, and any synchronous call ties up the agent loop for
+the whole run, can hit the agent's wall-clock, and loses the run
+if the calling shell dies.
 
-For a smoke pass on the canonical baseline:
+There are two equally valid ways to background a run. Pick whichever
+fits the situation — both end at the same "done" signal
+(`runs/experiments/<instance-id>/results/summary.md` exists).
+
+#### 7a. Pick the path
+
+| Situation | Path |
+|-----------|------|
+| Agent is driving the whole run end-to-end and will stay around to poll. | **A — `Shell` background.** |
+| Run is short (smoke, single ablation leg, < ~20 min). | **A — `Shell` background.** |
+| Long sweep where the human may want to attach and watch Harbor's TUI live. | **B — `scripts/exp/start.sh`.** |
+| The agent might die / the user may want to take over later. | **B — `scripts/exp/start.sh`.** |
+| Multiple concurrent runs the human wants to manage from a normal shell. | **B — `scripts/exp/start.sh`.** |
+
+Both paths use the same `uv run exec` underneath. The differences
+are who manages the process (agent's `Shell` tool vs `tmux`) and how
+the human can interact with it.
+
+#### 7b. Path A — `Shell` background mode (default for agent-driven runs)
+
+Kick off with the agent's `Shell` tool using `block_until_ms: 0` so
+it returns immediately and the run streams to a terminal file the
+agent can re-read. Examples:
 
 ```bash
-uv run exec tb2-baseline --profile smoke 2>&1 | tee /tmp/lab-<slug>.log
+uv run exec tb2-baseline                                  # full sweep
+uv run exec tb2-baseline --profile smoke                  # smoke
+uv run exec experiments/<your-spec>.yaml                  # custom spec
+uv run rerun <instance-id>                                # resume
 ```
 
-For the full sweep or any long-running spec, use the background
-job manager:
+Capture the returned `task_id`. Poll completion using `Await` (see
+7d) and check the run directory for `results/summary.md`.
+
+#### 7c. Path B — `scripts/exp/start.sh` (tmux-backed, hand-off friendly)
+
+Use this when the run should outlive the agent loop or when the
+human wants `attach`/`list`/`stop` ergonomics. See
+[`scripts/exp/README.md`](../../../scripts/exp/README.md) for the
+full surface.
 
 ```bash
-scripts/exp/start.sh exec tb2-baseline
-scripts/exp/list.sh         # see active jobs
-scripts/exp/attach.sh       # watch live progress (Ctrl-b d to detach)
-scripts/exp/status.sh       # per-leg summary from disk artifacts
+scripts/exp/start.sh exec tb2-baseline                    # full sweep
+scripts/exp/start.sh exec tb2-baseline --profile smoke    # smoke
+scripts/exp/start.sh exec experiments/<your-spec>.yaml    # custom
+scripts/exp/start.sh rerun <instance-id>                  # resume
 ```
 
-For a custom spec:
+The script prints a session name (e.g. `tb2-baseline-20260418-091230`)
+and a log path (`/tmp/<session>.log`). Capture both and surface them
+to the user — the session name is what `attach.sh` / `stop.sh` need.
+
+The human can then:
 
 ```bash
-scripts/exp/start.sh exec experiments/<your-spec>.yaml
+scripts/exp/list.sh                # see active sessions
+scripts/exp/attach.sh <session>    # attach (Ctrl-b d to detach)
+scripts/exp/stop.sh <session>      # abort
 ```
 
-For runs you call directly from the agent loop (no `tmux`), launch
-with `block_until_ms: 0` and poll with `Await` — anything larger
-than `--profile smoke` will exceed normal blocking timeouts.
+The agent itself, even on path B, polls via `status.sh` rather than
+attaching — `status.sh` is non-interactive and parses cleanly into
+the chat reply.
 
-### 8. Locate the run directory
+#### 7d. Find the run directory and poll for completion
 
-After the run completes:
+The `runs/experiments/<instance-id>/` directory is created within a
+few seconds of kicking off the run, on either path. Locate it:
 
 ```bash
 ls -dt runs/experiments/* | head -1
 ```
 
-That's `runs/experiments/<instance-id>/`. Inside you'll find:
+The run is complete when
+`runs/experiments/<instance-id>/results/summary.md` exists. That's
+the unambiguous "done" signal regardless of path.
+
+For path B, `scripts/exp/status.sh <instance-id>` is the most
+informative single command — it prints the manifest-level status,
+per-leg progress (with `LATEST_ACTIVITY` timestamp), recent retry /
+429 / 503 signals from `events.jsonl`, and the summary itself once
+the run completes. It also works on path A (status.sh only reads the
+run directory; it doesn't care who started the process), so feel
+free to use it either way.
+
+**Polling cadence guidance** (use the `Await` tool between polls):
+
+| Run type | First check after | Then poll every | Expected total |
+|----------|-------------------|-----------------|----------------|
+| Smoke (1–3 cached tasks) | 60 s | 60–120 s | 2–10 min |
+| Demo (small profile) | 2 min | 2 min | 5–20 min |
+| Full sweep (~89 tasks, 3 legs) | 10 min | 10 min | 1–3 h |
+| Stronger-model small slice | 2 min | 5 min | 10–30 min |
+
+If the per-leg `LATEST_ACTIVITY` timestamp isn't advancing for 2× the
+expected per-trial wall-clock (or you see a spike of 429s/503s with
+no recovery), investigate before continuing to wait. Path A: read
+the terminal file directly. Path B: `scripts/exp/attach.sh <session>`
+or grep `events.jsonl`.
+
+#### 7e. Stopping a run
+
+- Path A: kill the backgrounded `Shell` task by its `task_id` (or
+  let it run if it's safe — partial results stay on disk).
+- Path B: `scripts/exp/stop.sh <session>`.
+
+Either way, on-disk artifacts (`events.jsonl`, already-completed
+trials) survive and can be inspected or resumed via
+`uv run rerun <instance-id>` (path A) or
+`scripts/exp/start.sh rerun <instance-id>` (path B).
+
+### 8. Confirm the run directory and artifacts
+
+Once `results/summary.md` exists, you have the canonical run
+directory: `runs/experiments/<instance-id>/`. Inside:
 
 - `experiment.json` — schema-versioned summary of legs and trials.
-- `results/summary.md` — per-leg pass/fail/tokens table (only
-  generated once the run actually completes — incomplete runs
-  only leave `legs/`).
+- `results/summary.md` — per-leg pass/fail/tokens table.
+- `results/rows.csv`, `results/rows.json` — flat per-trial rows.
 - `legs/<agent>/agent.resolved.yaml` — exact agent config used,
   including the `components:` list.
 - `legs/<agent>/harbor/<instance>-<agent>/<task>/` — per-trial
@@ -302,29 +383,36 @@ Always finish with:
 
 ## Examples
 
-### Example: kick off the next roadmap item
+### Example: kick off the next roadmap item (long sweep — path B)
 
 Input: "Run the next thing on the roadmap."
 
 Output:
 
 1. Read `lab/roadmap.md`. Top of `## Up next` is
-   `tb2-baseline-full-sweep`. State the plan back: `uv run exec
-   tb2-baseline` (no profile), 3 legs × ~89 tasks, expected
-   ~$15-25 over a few hours, launched via
-   `scripts/exp/start.sh` so it survives disconnects.
-2. Confirm with user, including the `--dry-run` recommendation.
+   `tb2-baseline-full-sweep`. State the plan back: 3 legs ×
+   ~89 tasks, expected ~$15-25 over 1–3 hours. Pick **path B**
+   (tmux) so the user can attach to Harbor's TUI and so the run
+   survives if the agent loop is interrupted.
+2. Confirm with user, recommending a `uv run plan tb2-baseline`
+   sanity check first.
 3. No worktree (pure baseline run, no agent edits).
 4. No idea move (it's a `baseline snapshot`).
 5. Insert the stub at the top of `lab/experiments.md`.
-6. `scripts/exp/start.sh exec tb2-baseline`. Tell the user how to
-   attach (`scripts/exp/attach.sh`) and how to check status
-   (`scripts/exp/status.sh`).
-7. Once complete, fill in the entry from `results/summary.md`.
-8. Hand off to `lab-plan-next` to move `tb2-baseline-full-sweep`
-   to `## Done`.
+6. Kick off: `scripts/exp/start.sh exec tb2-baseline`. Capture
+   the printed session name and log path. Surface them to the
+   user along with `scripts/exp/attach.sh <session>` so they can
+   peek anytime.
+7. Find the run dir: `ls -dt runs/experiments/* | head -1`.
+8. Poll loop: every 10 minutes, run
+   `scripts/exp/status.sh <instance-id>` until
+   `runs/experiments/<instance-id>/results/summary.md` exists.
+   Use `Await` between polls.
+9. Fill in the experiment entry from `results/summary.md`.
+10. Hand off to `lab-plan-next` to move
+    `tb2-baseline-full-sweep` to `## Done`.
 
-### Example: paired ablation of an existing component
+### Example: paired ablation on smoke (short — path A)
 
 Input: "Run a loop-guard ablation on tb2 smoke with planner_executor."
 
@@ -334,20 +422,27 @@ Output:
    `planner_executor` with `LoopGuardConfig.enabled=False`
    (current default), leg B = same agent with `enabled=True` plus
    `loop-guard` listed in `components:`. Variant line: "leg B has
-   loop-guard enabled, leg A has it disabled". Confirm with user.
+   loop-guard enabled, leg A has it disabled". Smoke run, agent
+   manages it end-to-end → **path A**. Confirm with user.
 2. Create worktree `lab/loop-guard-tb2-paired`.
 3. Add a new leg in a copy of `experiments/tb2-baseline.yaml` for
    the experimental variant.
 4. (If not already there) move `loop-guard` from
    `## Proposed > Runtime` to `## Trying` in `lab/ideas.md`.
 5. Insert the stub at the top of `lab/experiments.md`.
-6. `uv run exec <copied-spec> --profile smoke`.
-7. Read `runs/experiments/<instance>/results/summary.md`, fill
-   the entry, write decision.
-8. Hand off to `lab-plan-next` to move `loop-guard-tb2-paired` to
+6. Kick off via the agent's `Shell` tool with `block_until_ms: 0`:
+   `uv run exec <copied-spec> --profile smoke`. Capture the
+   `task_id`.
+7. Find the run dir, then poll with `Await` every 60–120 s until
+   `results/summary.md` exists (smoke is fast — usually 2–10 min).
+   `scripts/exp/status.sh <instance-id>` works fine here too if a
+   richer status snapshot is wanted.
+8. Read `runs/experiments/<instance>/results/summary.md`, fill the
+   entry, write decision.
+9. Hand off to `lab-plan-next` to move `loop-guard-tb2-paired` to
    `## Done`.
 
-### Example: trying a brand-new idea
+### Example: trying a brand-new idea (path A, may switch to B)
 
 Input: "Let's try `tool-result-summariser`."
 
@@ -360,8 +455,14 @@ Output:
    directly — both are fine for one-off explorations.
 3. Slug `tool-result-summariser-smoke`. Confirm a minimal smoke
    plan with the user (e.g. smoke profile, `planner_executor`,
-   summariser injected at threshold K=2000 tokens).
+   summariser injected at threshold K=2000 tokens). Smoke → start
+   on **path A**; if the user asks to graduate this to a full
+   sweep next, switch to path B for that run.
 4. Create worktree.
 5. Move the idea to `## Trying`.
 6. Implement the summariser behind a toggle.
-7. Stub the experiment entry, run, fill results, decide.
+7. Stub the experiment entry.
+8. Kick off via `Shell` background mode:
+   `uv run exec ... --profile smoke`. Poll with `Await` until
+   `results/summary.md` exists.
+9. Fill in results, write decision.
