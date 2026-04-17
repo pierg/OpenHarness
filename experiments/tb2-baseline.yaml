@@ -5,34 +5,30 @@ defaults:
   model: gemini-3.1-flash-lite-preview
   max_turns: 30
   max_tokens: 8192
-  # Harbor's native trial-level concurrency: spin up 4 Docker containers
-  # and 4 agent loops in parallel within a single Harbor job. Harbor owns
-  # container lifecycle / failure isolation / progress reporting, which is
-  # cleaner than spawning multiple Harbor processes via leg_concurrency.
-  # 4 trials × ~3 RPM steady-state per trial = ~12 RPM peak, well under
-  # gemini-3.1-flash-lite-preview's ~30 RPM standard-tier preview cap.
-  # Bump higher only after measuring local Docker resource use and the
-  # 429 frequency in events.jsonl.
-  n_concurrent: 4
+  # No n_concurrent override: let harbor decide trial-level parallelism
+  # from its own default. If we hit 429s on the model side or saturate
+  # docker locally, revisit by reading events.jsonl and pinning a value
+  # here (or in a profile) rather than re-introducing a blanket cap.
   n_attempts: 1
 
 task_filter:
   include_tasks: []
   exclude_tasks: []
 
-# `reflection` excluded pending a fix for context blow-up: smoke run
-# tb2-baseline-smoke-20260416-205703 saw both reflection trials hit the
-# 900 s harbor wall-clock at ~6.4 M input tokens / $0.67 each because
-# tool outputs accumulated in the worker conversation faster than the
-# 30-turn worker budget could exit. Tracked in lab/experiments.md.
+# `reflection` excluded pending a fix for context blow-up: a prior
+# smoke run saw both reflection trials hit the 900 s harbor wall-clock
+# at ~6.4 M input tokens / $0.67 each because tool outputs accumulate
+# in the worker conversation faster than the 30-turn worker budget can
+# exit. The fix is tracked as the `reflection-context-compaction` idea
+# in lab/ideas.md and queued in lab/roadmap.md.
 agents:
   - basic
   - planner_executor
   - react
 
-# Run legs sequentially: Harbor's n_concurrent already saturates docker
-# in-flight. Stacking parallel Harbor processes on top would multiply
-# the docker / API load without speeding up the bottleneck (slowest leg).
+# Run legs sequentially: each Harbor leg already parallelizes its own
+# trials (see defaults above). Stacking parallel Harbor processes on top
+# would multiply docker / API load without speeding up the slowest leg.
 leg_concurrency: 1
 
 profiles:
