@@ -99,24 +99,31 @@ def get_cron_registry_path() -> Path:
     return get_data_dir() / "cron_jobs.json"
 
 
-def get_project_config_dir(cwd: str | Path) -> Path:
-    """Return the per-project .openharness directory."""
+def get_project_config_dir(cwd: str | Path, *, create: bool = True) -> Path:
+    """Return the per-project .openharness directory.
+
+    When *create* is False, the directory is not created on disk (useful for
+    read-only catalog lookups that should not pollute the caller's cwd).
+    """
     project_dir = Path(cwd).resolve() / ".openharness"
-    try:
-        project_dir.mkdir(parents=True, exist_ok=True)
-    except OSError:
-        pass
+    if create:
+        try:
+            project_dir.mkdir(parents=True, exist_ok=True)
+        except OSError:
+            pass
     return project_dir
 
 
-def get_project_runs_dir(cwd: str | Path) -> Path:
+def get_project_runs_dir(cwd: str | Path, *, create: bool = True) -> Path:
     """Return the per-project run-artifact directory.
 
     Each automated agent run stores its manifest, logs, and workspace
-    under a unique subdirectory of this directory.
+    under a unique subdirectory of this directory. Set *create* to False to
+    skip the filesystem side-effect.
     """
     runs_dir = Path(cwd).resolve() / "runs"
-    runs_dir.mkdir(parents=True, exist_ok=True)
+    if create:
+        runs_dir.mkdir(parents=True, exist_ok=True)
     return runs_dir
 
 

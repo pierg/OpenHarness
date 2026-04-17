@@ -44,9 +44,9 @@ def test_build_harbor_run_command_maps_agent_task_and_environment_specs() -> Non
             jobs_dir=Path("/tmp/jobs"),
             tool=HarborToolSpec(version="0.3.0"),
             agent=OpenHarnessHarborAgentSpec(
-                agent_name="react_example",
+                agent_name="react",
                 model="gemini-3.1-flash-lite-preview",
-                agent_config_yaml="name: react_example\narchitecture: simple\nmodel: gemini-3.1-flash-lite-preview\n",
+                agent_config_yaml="name: react\narchitecture: simple\nmodel: gemini-3.1-flash-lite-preview\n",
             ),
             task=HarborTaskSpec(path=Path("/tmp/task")),
             environment=HarborEnvironmentSpec(type="docker", override_cpus=2),
@@ -62,11 +62,13 @@ def test_build_harbor_run_command_maps_agent_task_and_environment_specs() -> Non
     assert "--env" in command and "docker" in command
     assert "--override-cpus" in command
     assert "--agent-kwarg" in command
-    assert 'agent_name="react_example"' in command
+    assert 'agent_name="react"' in command
     assert 'remote_cwd="/app"' in command
     assert any(item.startswith("agent_config_yaml=") for item in command)
     assert 'run_id="job-1"' in command
-    assert any("run_root=" in arg and "job-1" in arg for arg in command)
+    # `run_root` is no longer injected: the agent derives its harbor job dir
+    # from Harbor's trial_dir at runtime instead.
+    assert not any("run_root=" in arg for arg in command)
     assert "--agent-env" not in command
 
 

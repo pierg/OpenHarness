@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, TypeVar
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ValidationError
 
 from openharness.agents.config import AgentConfig
 from openharness.agents.contracts import AgentRunResult, TaskDefinition
@@ -18,11 +18,13 @@ from openharness.api.provider import detect_provider
 from openharness.config import load_settings
 from openharness.config.settings import Settings
 from openharness.engine.cost_tracker import CostTracker
+from openharness.engine.loop_guard import LoopGuardConfig, LoopGuardState
 from openharness.engine.messages import ConversationMessage
 from openharness.engine.query import QueryContext
 from openharness.engine.stream_events import (
     AssistantTextDelta,
     AssistantTurnComplete,
+    ModelRequest,
     StreamEvent,
     ToolExecutionCompleted,
     ToolExecutionStarted,
@@ -124,6 +126,16 @@ class AgentRuntime:
         """Return the active trace observer."""
         return self._trace_observer
 
+    @property
+    def total_usage(self) -> Any:
+        """Return the cumulative usage snapshot for this runtime so far.
+
+        Useful for callers (e.g. the harbor adapter) that need to record
+        partial token usage when the agent run is cancelled or errors
+        out before producing a final ``AgentRunResult``.
+        """
+        return self._tracker.total
+
     # ------------------------------------------------------------------
     # High-level agent execution helpers
     # ------------------------------------------------------------------
@@ -141,6 +153,7 @@ class AgentRuntime:
         return Conversation(
             query_ctx,
             messages,
+            agent_name=config.name,
             _track_usage=self.track_usage,
             _log_event=self.log_event,
             _log_messages=self.log_messages,
@@ -186,7 +199,8 @@ class AgentRuntime:
                 )
 
             conv = self.create_conversation(config, task, extra or None)
-            text = await conv.run_to_completion()
+            loop_guard = LoopGuardState(config=LoopGuardConfig())
+            text = await conv.run_to_completion(loop_guard=loop_guard)
 
             if output_type is not None:
                 parsed = _parse_structured_output(text, output_type)
@@ -290,30 +304,60 @@ class AgentRuntime:
         task: TaskDefinition,
         extra_template_vars: dict[str, Any] | None = None,
     ) -> tuple[QueryContext, list[ConversationMessage]]:
-        """Render prompts, build a QueryContext, and return initial messages."""
-        extra = extra_template_vars or {}
+        """Render prompts, build a QueryContext, and return initial messages.
+
+        Template variable contract (see ``docs/template-variables.md``):
+
+        * **System template** receives a small, deliberate set of variables
+          so that nothing leaks from the task's input ``payload`` into a
+          static instruction surface:
+
+          - ``openharness_system_context``: assembled runtime context
+            (filtered for ``session_mode``, agent's tools, and the agent's
+            ``system_context_sections``).
+          - ``output_schema_instruction``: structured-output schema block,
+            empty string when not requesting structured output. Templates
+            may interpolate it explicitly; if they don't, it is auto-
+            appended to the rendered system prompt for back-compat.
+          - Any explicit ``extra_template_vars`` (architecture-provided).
+
+        * **User template** additionally receives:
+
+          - ``instruction`` (str): the task's natural-language instruction.
+          - ``payload`` (dict): the full task payload as a dict (use this
+            for safe iteration, e.g. ``{% for k, v in payload.items() %}``).
+          - All keys of ``task.payload`` spread at the top level (legacy
+            shorthand). Avoid relying on this in new templates: payload
+            keys can shadow runtime variables. Prefer ``payload.foo``.
+        """
+        extra = dict(extra_template_vars or {})
+        schema_instruction = extra.pop("_output_schema_instruction", "")
 
         openharness_context = build_runtime_system_prompt(
             self.settings,
             cwd=self.workspace.cwd,
             latest_user_prompt=task.instruction,
+            available_tools=config.tools,
+            include_sections=config.system_context_sections,
         )
 
-        schema_instruction = extra.pop("_output_schema_instruction", "")
-
+        system_template_text = config.prompts.get("system", "")
         system_prompt = config.render_prompt(
             "system",
             openharness_system_context=openharness_context,
-            cwd=self.workspace.cwd,
-            provider=self.get_provider_name(config.model),
-            **task.payload,
+            output_schema_instruction=schema_instruction,
             **extra,
         )
-        system_prompt += schema_instruction
+        # If the system template did not explicitly interpolate the
+        # schema instruction, append it for back-compat with existing
+        # YAMLs that pre-date the named variable.
+        if schema_instruction and "output_schema_instruction" not in system_template_text:
+            system_prompt += schema_instruction
 
         user_payload = {
             "instruction": task.instruction,
             "payload": task.payload,
+            "output_schema_instruction": schema_instruction,
             **task.payload,
             **extra,
         }
@@ -342,23 +386,83 @@ class AgentRuntime:
 # ---------------------------------------------------------------------------
 
 
+_VALID_JSON_ESCAPE_CHARS = set('"\\/bfnrtu')
+
+
+def _sanitize_json_escapes(text: str) -> str:
+    """Escape stray backslashes inside JSON string values.
+
+    Models (notably Gemini) sometimes emit free-form text — regexes,
+    LaTeX, Windows paths — verbatim inside a JSON string, producing
+    invalid escape sequences such as ``\\d``, ``\\s``, or ``\\Users``
+    that fail strict JSON parsing.  This walks *text* and doubles up any
+    backslash inside a string that is not the start of a valid JSON
+    escape sequence (``\\"``, ``\\\\``, ``\\/``, ``\\b``, ``\\f``,
+    ``\\n``, ``\\r``, ``\\t``, ``\\uXXXX``).
+
+    Outside of string contexts the input is left untouched, so it's
+    safe to call on text that is already valid JSON.
+    """
+    out: list[str] = []
+    in_string = False
+    i = 0
+    n = len(text)
+    while i < n:
+        ch = text[i]
+        if not in_string:
+            out.append(ch)
+            if ch == '"':
+                in_string = True
+            i += 1
+            continue
+        if ch == "\\":
+            nxt = text[i + 1] if i + 1 < n else ""
+            if nxt in _VALID_JSON_ESCAPE_CHARS:
+                out.append(ch)
+                out.append(nxt)
+                i += 2
+            else:
+                out.append("\\\\")
+                i += 1
+            continue
+        if ch == '"':
+            in_string = False
+        out.append(ch)
+        i += 1
+    return "".join(out)
+
+
 def _parse_structured_output(text: str, output_type: type[T]) -> T:
-    """Extract and validate JSON from an LLM response."""
+    """Extract and validate JSON from an LLM response.
+
+    Tolerant of two common model quirks:
+
+    1. The JSON may be wrapped in a ``" ```json ... ``` "`` fence or
+       embedded in surrounding prose.
+    2. String values may contain stray backslashes (e.g. ``\\d`` in a
+       regex) that strict JSON would reject.  On a first parse failure
+       we sanitize the escape sequences and retry once.
+    """
     text = text.strip()
 
-    # Find the first occurrence of a JSON block or object
     if "```json" in text:
         text = text.split("```json", 1)[1].split("```", 1)[0]
     elif "```" in text:
         text = text.split("```", 1)[1].split("```", 1)[0]
     else:
-        # Try to find the first '{' and last '}'
         start = text.find("{")
         end = text.rfind("}")
         if start != -1 and end != -1:
             text = text[start : end + 1]
 
-    return output_type.model_validate_json(text.strip())
+    text = text.strip()
+    try:
+        return output_type.model_validate_json(text)
+    except ValidationError:
+        sanitized = _sanitize_json_escapes(text)
+        if sanitized != text:
+            return output_type.model_validate_json(sanitized)
+        raise
 
 
 def _append_jsonl(path: Path, payload: dict[str, Any]) -> None:
@@ -368,6 +472,20 @@ def _append_jsonl(path: Path, payload: dict[str, Any]) -> None:
 
 
 def _serialize_event(event: StreamEvent) -> dict[str, Any]:
+    if isinstance(event, ModelRequest):
+        payload: dict[str, Any] = {
+            "type": "model_request",
+            "model": event.model,
+            "system_prompt": event.system_prompt,
+            "tools": list(event.tools),
+            "max_tokens": event.max_tokens,
+            "max_turns": event.max_turns,
+            "turn_index": event.turn_index,
+            "message_count": event.message_count,
+        }
+        if event.agent is not None:
+            payload["agent"] = event.agent
+        return payload
     if isinstance(event, AssistantTextDelta):
         return {"type": "assistant_delta", "text": event.text}
     if isinstance(event, AssistantTurnComplete):

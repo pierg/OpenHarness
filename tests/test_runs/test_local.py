@@ -42,7 +42,7 @@ async def test_run_local_agent_writes_run_artifacts(
             cwd=workspace,
             run_cwd=tmp_path,
             task=InlineTaskSpec(instruction="Say hi"),
-            agent=AgentSpec(name="default"),
+            agent=AgentSpec(name="basic"),
             run_id="run-local123456",
             api_client=_StaticApiClient("done"),
         )
@@ -59,7 +59,13 @@ async def test_run_local_agent_writes_run_artifacts(
     manifest = json.loads(result.manifest_path.read_text(encoding="utf-8"))
     assert manifest["status"] == "completed"
     assert manifest["run_id"] == "run-local123456"
-    assert manifest["artifacts"]["workspace_dir"] == str(workspace.resolve())
+    assert manifest["schema_version"] == 1
+    assert manifest["paths"]["anchor"] == "run_dir"
+    assert manifest["paths"]["workspace"] == "../../workspace"
+    assert manifest["paths"]["messages"] == "messages.jsonl"
+    assert manifest["paths"]["events"] == "events.jsonl"
+    assert manifest["paths"]["results"] == "results.json"
+    assert manifest["paths"]["metrics"] == "metrics.json"
 
     results = json.loads(result.result_path.read_text(encoding="utf-8"))
     assert results["final_text"] == "done"

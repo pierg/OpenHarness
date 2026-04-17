@@ -86,17 +86,17 @@ def test_builtin_general_purpose_has_all_tools():
 
 def test_yaml_catalog_agents_are_projected():
     agents = get_all_agent_definitions()
-    yaml_default = next(agent for agent in agents if agent.name == "default")
-    assert yaml_default.runner == "yaml_workflow"
-    assert yaml_default.agent_config_name == "default"
-    assert yaml_default.agent_architecture == "simple"
-    assert yaml_default.subagent_type == "yaml-default"
+    yaml_basic = next(agent for agent in agents if agent.name == "basic")
+    assert yaml_basic.runner == "yaml_workflow"
+    assert yaml_basic.agent_config_name == "basic"
+    assert yaml_basic.agent_architecture == "simple"
+    assert yaml_basic.subagent_type == "yaml-basic"
 
 
 def test_get_agent_definition_matches_subagent_type():
     agent = get_agent_definition("planner-executor")
     assert agent is not None
-    assert agent.name == "planner_executor_example"
+    assert agent.name == "planner_executor"
 
 
 # ---------------------------------------------------------------------------

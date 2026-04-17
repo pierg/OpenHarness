@@ -15,7 +15,7 @@ from openharness.harbor.specs import HarborJobSpec
 class AgentSpec:
     """Agent selection and override knobs for a run."""
 
-    name: str = "default"
+    name: str = "basic"
     model: str | None = None
     max_turns: int | None = None
     max_tokens: int | None = None

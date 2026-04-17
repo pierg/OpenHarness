@@ -61,6 +61,99 @@ Windows support is native. In PowerShell, use `openh` instead of `oh` because `o
 .venv/bin/python examples/harbor_registry_task/run.py
 ```
 
+## Running Experiments
+
+OpenHarness includes a powerful declarative experiment runner for orchestrating evaluations across Harbor tasks. You define your agents, overrides, and dataset in a YAML file, and the CLI automatically spins up isolated parallel environments to execute them. 
+
+The experiments CLI is fail-soft (if one agent crashes, the others keep going), resumable, and guarantees all paths inside the experiment manifest are portable relative paths, meaning you can easily zip up an experiment folder and analyze it on a different machine.
+
+### Core CLI Commands
+
+We provide convenient global shorthands through `uv run` to manage your experiments:
+
+#### 1. Plan an experiment (`uv run plan`)
+
+Preview the resolved execution plan, agent configs, and merged overrides before starting:
+
+```bash
+uv run plan tb2-baseline
+```
+*(Looks for `experiments/tb2-baseline.yaml` or a direct path).*
+
+#### 2. Execute an experiment (`uv run exec`)
+
+Run the experiment. The runner handles parallel Harbor container provisioning and trial execution automatically. 
+
+```bash
+uv run exec tb2-baseline
+```
+
+**Common Flags:**
+- `--profile`: Applies overriding configurations defined under the `profiles` block in your YAML file. E.g. `--profile demo`. It automatically names the run directory `runs/experiments/<name>-<profile>`.
+- `--dry-run`: Creates the full directory structure, resolved manifests, and empty run logs without actually invoking Harbor. Perfect for validating your YAML overrides.
+- `--no-resume`: By default, the runner skips trials that already successfully completed. Pass this flag to force a complete re-run from scratch.
+- `--fail-fast`: Abort the entire experiment if a single leg fails.
+- `--no-results`: Skip generating the `.csv`, `.json`, and `.md` summaries at the end of the run.
+
+#### 3. View status (`uv run status`)
+
+Check the status of an ongoing or completed experiment:
+
+```bash
+uv run status tb2-baseline
+```
+This prints the timestamps and the state (`RUNNING`, `SUCCEEDED`, `FAILED`, etc.) of each leg in the experiment.
+
+#### 4. Export results (`uv run results`)
+
+Generate and print summary metrics across all legs.
+
+```bash
+# Print a Markdown summary table
+uv run results tb2-baseline --fmt md
+
+# Export the raw JSON result rows
+uv run results tb2-baseline --fmt json
+
+# Export as CSV
+uv run results tb2-baseline --fmt csv
+```
+
+### Experiment Directory Structure
+
+All experiment outputs are strictly contained inside `runs/experiments/<instance-id>/`. Every path that OpenHarness writes into `experiment.json`, `leg.json`, and `rows.{csv,json}` is relative to the experiment root, so you can zip the directory up, move it across machines, and reload it without any rewriting.
+
+```
+runs/experiments/tb2-baseline/
+├── experiment.json              # Authoritative typed manifest (schema_version=2)
+├── config.source.yaml           # Verbatim copy of your input YAML (bytes preserved)
+├── config.resolved.yaml         # Final config after applying profiles + overrides
+├── logs/
+│   └── runner.log               # Runner execution logs
+├── results/
+│   ├── rows.csv                 # Flat results suitable for Pandas/Excel
+│   ├── rows.json                # Raw JSON result rows (with structured errors)
+│   └── summary.md               # Markdown table summary
+└── legs/
+    └── <agent-id>/
+        ├── leg.json             # Status, trial aggregate, and result_status
+        ├── agent.resolved.yaml  # Concrete AgentConfig sent to Harbor
+        └── harbor/
+            └── <harbor_run_id>/
+                ├── result.json              # Harbor-authored (as-is)
+                └── <task>__<trial>/
+                    ├── run.json             # OpenHarness manifest, paths relative to trial dir
+                    ├── result.json          # Harbor-authored (absolute paths possible)
+                    └── result.portable.json # Portable twin, paths relative to experiment_root
+```
+
+Key portability contracts:
+
+- `experiment.json` / `leg.json`: every `*_path` and `trial_dir` field is a POSIX path **relative to the experiment root**.
+- `run.json`: top-level `paths.anchor: run_dir`; every path is **relative to the trial directory**, with absolute fallbacks only when the referenced path is outside the run dir (e.g. sidecar workspaces).
+- `result.portable.json`: re-rooted twin of Harbor's `result.json`; safe to consume from any machine.
+- `task_filter.n_tasks` caps the number of tasks per agent **after** `include_tasks` / `exclude_tasks` filtering.
+
 Each run logs the run folder and trace URL immediately:
 
 ```text
