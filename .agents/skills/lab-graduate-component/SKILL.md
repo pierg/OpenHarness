@@ -88,17 +88,18 @@ When ambiguous, ask the user explicitly.
 
 ### 3. Update lab/ideas.md
 
-Find the idea entry under `## Trying`. Move the entire entry to
-`## Graduated`. **Append** one bullet (do not rewrite the existing
-Motivation / Sketch / Trying-in bullets):
+Move the idea entry to `## Graduated` and append the cross-ref bullet
+in one CLI call:
 
-```markdown
--   **Graduated as:** [`<component-id>`](components.md#<component-id>)
+```bash
+uv run lab idea move <idea-id> graduated \
+  --cross-ref "**Graduated as:** [\`<component-id>\`](components.md#<component-id>)"
 ```
 
-If the idea is still under `## Proposed` (graduated without ever
-sitting in `## Trying`, which is unusual), apply the same move from
-`## Proposed`.
+The CLI finds the entry wherever it currently is (`## Trying` is the
+common case; `## Proposed` is the unusual fast-path) and never
+rewrites the existing Motivation / Sketch / Trying-in bullets — it
+only appends the new one.
 
 ### 4. Add or update the entry in lab/components.md
 

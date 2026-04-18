@@ -142,46 +142,31 @@ decided.
 
 If the experiment is testing a previously-proposed idea **and the
 idea isn't already in `## Trying`** (it would already be there if
-the experiment was queued via `lab-plan-next`), edit
-`lab/ideas.md`:
+the experiment was queued via `lab-plan-next`), promote it via
+the CLI:
 
-- Cut the `#### <idea-id>` entry from its theme subsection under
-  `## Proposed`.
-- Paste it under `## Trying`.
-- Append one bullet to the entry:
-  `-   **Trying in:** [<roadmap-slug>](roadmap.md#<roadmap-slug>)`.
-- Don't rewrite the existing Motivation / Sketch bullets.
+```bash
+uv run lab idea move <idea-id> trying \
+  --cross-ref "**Trying in:** [<slug>](roadmap.md#<slug>)"
+```
 
 If the experiment has no associated idea (baseline snapshot /
 infrastructure), skip this step.
 
 ### 5. Add a stub entry at the top of lab/experiments.md
 
-Insert the new section **above** all existing dated sections (newest
-on top). Use the entry shape documented above, with an empty
-Results table and placeholder Notes / Decision:
+Use the CLI — it inserts the entry **above** all existing dated
+sections (newest on top), with the empty Results table and the
+placeholder Notes / Decision blocks:
 
-```markdown
-## YYYY-MM-DD — <slug>
-
--   **Hypothesis:** <one sentence — copy from the roadmap entry's Hypothesis>
--   **Variant:** <what differs from the baseline>
--   **Run:** _(filled after the run completes)_
-
-### Results
-
-| Leg | Trials | Passed | Errored | Pass rate | Total tokens | Cost (USD) |
-|-----|-------:|-------:|--------:|----------:|-------------:|-----------:|
-|     |        |        |         |           |              |            |
-
-### Notes
-
--   _(filled after the run completes)_
-
-### Decision
-
-_(filled after the run completes)_
+```bash
+uv run lab experiments stub <slug> \
+  --hypothesis "<one sentence — copy from the roadmap entry's Hypothesis>" \
+  --variant "<what differs from the baseline>"
 ```
+
+The CLI errors if `<slug>` is already stubbed today, so retries are
+safe.
 
 ### 6. Make the experiment-specific edits
 
@@ -330,30 +315,46 @@ directory: `runs/experiments/<instance-id>/`. Inside:
 ### 9. Fill in the experiment entry
 
 Read `runs/experiments/<instance-id>/results/summary.md` and the
-relevant `legs/*/harbor/.../result.json` files. Update the entry
-in `lab/experiments.md` **without rewriting the existing bullets**:
+relevant `legs/*/harbor/.../result.json` files. Then ingest the run
+into the lab DB and fill the entry in `lab/experiments.md` via the
+CLI — both call deterministic Python helpers, so neither the markdown
+nor the DB can be left in a half-edited state:
 
-- **Run:** replace the `_(filled after the run completes)_`
-  placeholder with the path link.
-- **Results table:** copy numbers from `results/summary.md`.
-- **Notes:** 3–6 short bullets — qualitative observations from
-  trajectories (no `400` errors, planner hallucination count,
-  loop-guard nudges fired, agent timeouts, 429 rate-limit hits in
-  `events.jsonl`, etc.). For trajectory-level evidence, grep:
+```bash
+# Mirror per-trial rows into the lab DB (idempotent on trial_id).
+# This is also what the cross-experiment-critic and the dashboard
+# read from, so do it before writing the markdown table.
+uv run lab ingest runs/experiments/<instance-id>
 
-  ```bash
-  rg -l "loop_guard_nudge" runs/experiments/<instance-id>/legs
-  rg -l "thought_signature" runs/experiments/<instance-id>/legs
-  rg "\"status\":\\s*429" runs/experiments/<instance-id>/legs
-  ```
+# Fill the markdown entry. Notes are agent-judgment; pass each
+# bullet as a separate --note. The Results table is generated
+# automatically from results/summary.md.
+uv run lab experiments fill <slug> \
+  --run-path runs/experiments/<instance-id> \
+  --from-summary runs/experiments/<instance-id>/results/summary.md \
+  --note "<bullet 1>" --note "<bullet 2>" --note "<bullet 3>" \
+  --decision "<graduate <id> | iterate — see follow-up <slug> | reject>"
+```
 
-- **Decision:** one of:
-  - `graduate <id>` — invoke `lab-graduate-component` next.
-  - `iterate — see follow-up <slug>` — record the follow-up and
-    consider queueing it via `lab-plan-next`.
-  - `reject` — the idea entry will move from `## Trying` to
-    `## Rejected` in `lab/ideas.md` (append a `**Rejected:**`
-    bullet with the date and reason; link to this experiment).
+Notes content is judgment-heavy; gather the qualitative observations
+yourself before invoking the CLI. Useful greps for trajectory-level
+evidence:
+
+```bash
+rg -l "loop_guard_nudge" runs/experiments/<instance-id>/legs
+rg -l "thought_signature" runs/experiments/<instance-id>/legs
+rg "\"status\":\\s*429" runs/experiments/<instance-id>/legs
+```
+
+Decision options:
+
+- `graduate <id>` — invoke `lab-graduate-component` next.
+- `iterate — see follow-up <slug>` — record the follow-up and
+  consider queueing it via `lab-plan-next`.
+- `reject` — the idea entry will move from `## Trying` to
+  `## Rejected` in `lab/ideas.md` (append a `**Rejected:**`
+  bullet with the date and reason via
+  `uv run lab idea move <idea-id> rejected --cross-ref "..."`).
 
 ### 10. Hand off to the roadmap
 

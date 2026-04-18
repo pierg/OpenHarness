@@ -1,0 +1,9 @@
+repos:
+  - repo: local
+    hooks:
+      - id: validate-component-contracts
+        name: Validate components/<id>.yaml against schemas/component_contract.json
+        entry: uv run python scripts/validate_contracts.py
+        language: system
+        files: '^(components/.*\.ya?ml|schemas/component_contract\.json)$'
+        pass_filenames: true

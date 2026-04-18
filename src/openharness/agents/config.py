@@ -51,11 +51,20 @@ class AgentConfig(BaseModel):
     tools: tuple[str, ...] = DEFAULT_TOOL_NAMES
 
     # Free-form tags naming the components active on this agent (e.g.
-    # "loop-guard", "web-tools"). No validation: this is just metadata
-    # that travels with the resolved config into leg/agent.resolved.yaml
+    # "loop-guard", "web-tools"). When non-empty, AgentConfig.from_yaml
+    # resolves each id against components/<id>.yaml, runs conflict
+    # checks, and merges each component's `wires:` payload into this
+    # config. The list itself also travels into leg/agent.resolved.yaml
     # so trial artifacts can be grouped after the fact. The source of
-    # truth for what each tag means lives in lab/components.md.
+    # truth for what each id means lives in components/<id>.yaml; the
+    # human-readable index is lab/components.md.
     components: tuple[str, ...] = ()
+
+    # Free-form extras populated by the components loader (and any
+    # caller that needs to thread runtime configuration into an
+    # architecture without enlarging this schema). Architectures
+    # consult `extras.get("<component_id>", {})` at construction time.
+    extras: dict[str, Any] = Field(default_factory=dict)
 
     # Optional explicit allow-list of `openharness_system_context`
     # sections to include when rendering this agent's system prompt.
@@ -86,12 +95,23 @@ class AgentConfig(BaseModel):
 
     @classmethod
     def from_mapping(cls, raw: Any, *, source_name: str) -> AgentConfig:
-        """Validate a raw YAML mapping as an agent configuration."""
+        """Validate a raw YAML mapping as an agent configuration.
+
+        If ``raw`` lists ``components: [...]``, the entries are
+        resolved against the ``components/`` registry *before*
+        pydantic validation so any merged tools, prompt fragments,
+        or extras pass the same schema as a hand-written YAML.
+        """
         if not isinstance(raw, dict):
             raise ValueError(f"Expected a YAML mapping, got {type(raw).__name__}")
 
         if "name" not in raw:
             raw["name"] = source_name
+
+        if raw.get("components"):
+            from openharness.agents.components import apply_components
+
+            apply_components(raw, source_name=source_name)
 
         return cls.model_validate(raw)
 

@@ -1,0 +1,114 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://openharness.local/schemas/component_contract.json",
+  "title": "OpenHarness Component Contract",
+  "description": "Schema for components/<id>.yaml: a reusable agent building block referenced from agent YAMLs via `components: [<id>]`.",
+  "type": "object",
+  "required": ["id", "description", "status", "version"],
+  "additionalProperties": false,
+  "properties": {
+    "id": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9-]*$",
+      "description": "Stable identifier; must match the YAML filename without the .yaml suffix."
+    },
+    "description": {
+      "type": "string",
+      "minLength": 1
+    },
+    "status": {
+      "enum": ["proposed", "active", "retired"]
+    },
+    "version": {
+      "type": "string",
+      "pattern": "^\\d+\\.\\d+\\.\\d+(?:[-+].+)?$"
+    },
+    "applies_to": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "architectures": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 },
+          "uniqueItems": true
+        },
+        "agents": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 },
+          "uniqueItems": true
+        }
+      }
+    },
+    "provides": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "runtime_flags": {
+          "type": "object",
+          "description": "Free-form `flag.path: value` pairs surfaced into the resolved AgentConfig.extras['_components'][<id>]['runtime_flags']."
+        }
+      }
+    },
+    "conflicts_with": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 },
+      "uniqueItems": true,
+      "description": "Other component ids that cannot be active in the same agent. Must be symmetric."
+    },
+    "cost": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 },
+      "uniqueItems": true,
+      "description": "Free-form cost tags, e.g. 'no_runtime_overhead', 'extra_prompt_tokens_negligible', 'extra_tool_call_per_turn'."
+    },
+    "evidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "ideas": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 },
+          "uniqueItems": true
+        },
+        "experiments": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 },
+          "uniqueItems": true
+        }
+      }
+    },
+    "wires": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "tools_add": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 },
+          "uniqueItems": true
+        },
+        "prompts_append": {
+          "type": "object",
+          "additionalProperties": { "type": "string" }
+        },
+        "extras": { "type": "object" }
+      }
+    }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "status": { "const": "active" } }, "required": ["status"] },
+      "then": {
+        "required": ["evidence"],
+        "properties": {
+          "evidence": {
+            "required": ["experiments"],
+            "properties": {
+              "experiments": { "minItems": 1 }
+            }
+          }
+        },
+        "description": "Active components must cite at least one supporting experiment."
+      }
+    }
+  ]
+}

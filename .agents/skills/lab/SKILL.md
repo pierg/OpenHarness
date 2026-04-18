@@ -7,9 +7,10 @@ description: >
   experiments / components / roadmap are tracked, or you encounter
   the lab/ directory and need to know how to interact with it. Owns
   the structural conventions for the four lab files; all entry shapes
-  and edit rules are documented here. Points at four action skills:
+  and edit rules are documented here. Points at five action skills:
   lab-propose-idea, lab-plan-next, lab-run-experiment,
-  lab-graduate-component.
+  lab-graduate-component, lab-operator (drives the autonomous
+  daemon: start/stop/status/restart/monitor).
 ---
 
 # Lab — Agent Iteration Framework
@@ -47,6 +48,10 @@ Use this skill (and pick the right action skill below) when the user:
   **`lab-run-experiment`**
 - says "promote X" / "graduate X" / "X worked, let's adopt it" →
   use **`lab-graduate-component`**
+- says "check the lab" / "is the daemon running" / "what's the
+  orchestrator doing" / "start the lab" / "stop the daemon" /
+  "restart the lab" / "attach to the lab" / "how's the current
+  experiment going" → use **`lab-operator`**
 - asks "how is X tracked?" or "is X already wired up?" → answer by
   reading the lab files; no action skill needed.
 - asks "what's our experimentation framework?" → explain the
@@ -233,6 +238,52 @@ These rules exist so the lab markdowns stay clean for human review:
 
 If you're tempted to add explanatory prose to a markdown, add it to
 the relevant skill instead.
+
+## Deterministic mutations go through `uv run lab`
+
+All file mutations on `lab/*.md` (and on the lab DuckDB) flow through
+the `uv run lab` Typer CLI defined in
+[`src/openharness/lab/cli.py`](../../../src/openharness/lab/cli.py).
+The five `lab*` skills do the *judgment* (which idea, which decision,
+how to phrase results); the CLI does the *editing* (validating section
+membership, preserving entry shape, never silently corrupting). This
+means humans, Cursor, codex, and the Phase 2 orchestrator daemon all
+mutate the lab via the same code path.
+
+Quick reference (each `lab*` skill below covers its own subset):
+
+```bash
+# ideas.md
+uv run lab idea append <id> --theme Runtime --motivation "..." --sketch "..."
+uv run lab idea move <id> trying --cross-ref "**Trying in:** [<slug>](roadmap.md#<slug>)"
+uv run lab append-followup-idea <id> --motivation "..." --sketch "..." --source "cross-experiment-critic@<date>"
+
+# roadmap.md
+uv run lab roadmap add <slug> --idea <id> --hypothesis "..." --plan "..." [--depends-on <slug>] [--cost "..."]
+uv run lab roadmap done <slug> --ran "[<exp-slug>](experiments.md#<date>--<slug>)" --outcome "..."
+
+# experiments.md
+uv run lab experiments stub <slug> --hypothesis "..." --variant "..."
+uv run lab experiments fill <slug> --run-path runs/experiments/<id> \
+                                   --from-summary runs/experiments/<id>/results/summary.md \
+                                   --note "..." --note "..." --decision "..."
+
+# DB I/O (called by critic skills + the orchestrator)
+uv run lab init                       # create DB + apply migrations
+uv run lab ingest runs/experiments/<id>
+uv run lab info
+uv run lab query "SELECT ..."         # read-only ad-hoc SQL
+uv run lab query-trials --instance <id> --leg <leg> [--needs-critique]
+uv run lab insert-critique <trial_id> --json -
+uv run lab insert-comparison <instance> <task> --json -
+uv run lab insert-task-features <task_checksum> --json -
+uv run lab upsert-component-perf <component> <task_cluster> --json -
+uv run lab dashboard                  # Streamlit, opens DB read-only
+```
+
+The CLI refuses unsafe edits (unknown idea id, duplicate slug,
+malformed kebab-case, missing experiment entry) — surface the error
+to the user instead of trying to "fix" the file by hand.
 
 ## Other Useful Reads
 

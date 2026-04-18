@@ -16,6 +16,11 @@ default building block".
 Tier-1 changes (bug fixes, small prompt tweaks we'd never revert) go
 into [`../CHANGELOG.md`](../CHANGELOG.md), not here.
 
+The four files above describe the **human-curated** view. Once an
+idea is on `roadmap.md`, the rest of the loop runs autonomously —
+see [`AUTONOMOUS.md`](AUTONOMOUS.md) for the daemon, the four
+critic skills, the DuckDB schema, and the operating commands.
+
 ## Workflow
 
 ```
