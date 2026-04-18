@@ -214,6 +214,7 @@ async def run_experiment(
     _persist_manifest(manifest, experiment_root)
 
     semaphore = asyncio.Semaphore(spec.leg_concurrency)
+    manifest_lock = asyncio.Lock()
 
     async def run_one(leg: Leg) -> LegRecord:
         async with semaphore:
@@ -273,9 +274,10 @@ async def run_experiment(
                 ),
                 agent_config_path=make_rel(experiment_root, ctx.leg_dir / "agent.resolved.yaml"),
             )
-            nonlocal manifest
-            manifest = _upsert_leg(manifest, running_record, experiment_root)
-            _persist_manifest(manifest, experiment_root)
+            async with manifest_lock:
+                nonlocal manifest
+                manifest = _upsert_leg(manifest, running_record, experiment_root)
+                _persist_manifest(manifest, experiment_root)
 
             try:
                 outcome = await backend.run_leg(leg, ctx)
@@ -285,7 +287,7 @@ async def run_experiment(
 
             except asyncio.CancelledError:
                 now = _now_utc()
-                return LegRecord(
+                final_record = LegRecord(
                     leg_id=leg.leg_id,
                     agent_id=leg.agent_id,
                     status=LegStatus.INTERRUPTED,
@@ -299,9 +301,13 @@ async def run_experiment(
                     harbor_result_path=running_record.harbor_result_path,
                     agent_config_path=running_record.agent_config_path,
                 )
+                async with manifest_lock:
+                    manifest = _upsert_leg(manifest, final_record, experiment_root)
+                    _persist_manifest(manifest, experiment_root)
+                return final_record
             except Exception as exc:
                 now = _now_utc()
-                return LegRecord(
+                final_record = LegRecord(
                     leg_id=leg.leg_id,
                     agent_id=leg.agent_id,
                     status=LegStatus.FAILED,
@@ -317,8 +323,12 @@ async def run_experiment(
                     error=str(exc),
                     traceback=traceback.format_exc(),
                 )
+                async with manifest_lock:
+                    manifest = _upsert_leg(manifest, final_record, experiment_root)
+                    _persist_manifest(manifest, experiment_root)
+                return final_record
 
-            return LegRecord(
+            final_record = LegRecord(
                 leg_id=leg.leg_id,
                 agent_id=leg.agent_id,
                 status=outcome.status,
@@ -333,6 +343,10 @@ async def run_experiment(
                 error=outcome.error,
                 traceback=outcome.traceback,
             )
+            async with manifest_lock:
+                manifest = _upsert_leg(manifest, final_record, experiment_root)
+                _persist_manifest(manifest, experiment_root)
+            return final_record
 
     tasks: list[asyncio.Task[LegRecord]] = []
     try:
