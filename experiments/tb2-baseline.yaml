@@ -5,7 +5,7 @@ defaults:
   model: gemini-3.1-flash-lite-preview
   max_turns: 30
   max_tokens: 8192
-  n_concurrent: 4
+  n_concurrent: 30
   n_attempts: 1
 
 task_filter:

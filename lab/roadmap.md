@@ -2,13 +2,6 @@
 
 ## Up next
 
-### tb2-baseline-full-sweep
-
--   **Idea:** baseline snapshot
--   **Hypothesis:** the post-reset baseline runs cleanly across all of `terminal-bench@2.0` and produces a real per-agent pass-rate distribution to anchor every future ablation.
--   **Plan:** `uv run exec tb2-baseline` (no `--profile`); 3 legs × ~89 tasks. Launch via `scripts/exp/start.sh exec tb2-baseline` so it survives an SSH disconnect. Watch `events.jsonl` for 429s on the ~30 RPM Gemini cap and adjust `n_concurrent` if needed.
--   **Cost:** ~$15-25, a few hours wall-clock.
-
 ### loop-guard-tb2-paired
 
 -   **Idea:** [`loop-guard`](ideas.md#loop-guard)
@@ -43,4 +36,9 @@
 
 ## Done
 
-_(none)_
+### tb2-baseline-full-sweep
+
+-   **Idea:** baseline snapshot
+-   **Hypothesis:** the post-reset baseline runs cleanly across all of `terminal-bench@2.0` and produces a real per-agent pass-rate distribution to anchor every future ablation.
+-   **Plan:** `uv run exec tb2-baseline` (no `--profile`); 3 legs × ~89 tasks. Launch via `scripts/exp/start.sh exec tb2-baseline` so it survives an SSH disconnect. Watch `events.jsonl` for 429s on the ~30 RPM Gemini cap and adjust `n_concurrent` if needed.
+-   **Cost:** ~$15-25, a few hours wall-clock.
