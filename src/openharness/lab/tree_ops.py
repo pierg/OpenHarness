@@ -358,7 +358,6 @@ def _classify_pair(
 
     # AddBranch: trunk wins overall but mutation wins on a coherent subset.
     if len(positive_clusters) >= ADD_BRANCH_MIN_CLUSTERS:
-        cluster_names = [c["cluster"] for c in positive_clusters]
         use_when = {
             "any_of": [
                 {"task_features.category": c["cluster"]}
@@ -505,6 +504,7 @@ def evaluate(instance_id: str, *, db_conn: Any | None = None) -> TreeDiff:
                 use_when=use_when,
                 confidence=conf,
                 cluster_rows=cluster_rows,
+                db_conn=conn,
             )
 
         # Multiple mutations (broad-sweep): pick the most decisive one.
@@ -539,6 +539,7 @@ def evaluate(instance_id: str, *, db_conn: Any | None = None) -> TreeDiff:
             use_when=use_when,
             confidence=conf,
             cluster_rows=cluster_rows,
+            db_conn=conn,
         )
     finally:
         if own_conn:
@@ -555,6 +556,7 @@ def _build_diff(
     use_when: dict[str, Any] | None,
     confidence: float,
     cluster_rows: list[dict[str, Any]],
+    db_conn: Any | None = None,
 ) -> TreeDiff:
     delta_pp = (mutation.pass_rate - trunk.pass_rate) * 100.0
     cost_delta_pct = _cost_per_pass_delta_pct(trunk, mutation)
@@ -569,7 +571,7 @@ def _build_diff(
     else:  # no_op
         target = mutation.agent_id
 
-    evidence_paths = list(_evidence_paths_for_instance(instance_id))
+    evidence_paths = list(_evidence_paths_for_instance(instance_id, db_conn=db_conn))
 
     return TreeDiff(
         kind=kind,
@@ -589,13 +591,15 @@ def _build_diff(
     )
 
 
-def _evidence_paths_for_instance(instance_id: str) -> Iterable[Path]:
+def _evidence_paths_for_instance(
+    instance_id: str, *, db_conn: Any | None = None
+) -> Iterable[Path]:
     """Yield the on-disk evidence files most relevant to a verdict.
 
     Used by the journal entry's ``Tree effect`` block so a human
     can click straight to the supporting data.
     """
-    run_dir = critic_io.run_dir_from_instance(instance_id)
+    run_dir = critic_io.run_dir_from_instance(instance_id, db_conn=db_conn)
     if run_dir is None:
         return
     exp_critic = critic_io.experiment_critic_path(run_dir)

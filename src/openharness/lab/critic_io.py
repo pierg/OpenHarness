@@ -465,15 +465,23 @@ def trial_dir_from_id(trial_id: str) -> Path | None:
     return p
 
 
-def run_dir_from_instance(instance_id: str) -> Path | None:
+def run_dir_from_instance(
+    instance_id: str, *, db_conn: Any | None = None
+) -> Path | None:
     """Look up a run dir from the DB (back-compat for insert-comparison)."""
     from openharness.lab import db as labdb
 
-    with labdb.reader() as conn:
-        row = conn.execute(
+    if db_conn is not None:
+        row = db_conn.execute(
             "SELECT run_dir FROM experiments WHERE instance_id = ?",
             [instance_id],
         ).fetchone()
+    else:
+        with labdb.reader() as conn:
+            row = conn.execute(
+                "SELECT run_dir FROM experiments WHERE instance_id = ?",
+                [instance_id],
+            ).fetchone()
     if not row:
         return None
     return Path(row[0])

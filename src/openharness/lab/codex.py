@@ -69,7 +69,6 @@ from pathlib import Path
 from typing import Iterable, Iterator, Mapping, Sequence
 
 from openharness.lab import critic_io
-from openharness.lab import db as labdb
 from openharness.lab.paths import (
     LAB_LOGS_DIR,
     ORCHESTRATOR_LOCK_PATH,
