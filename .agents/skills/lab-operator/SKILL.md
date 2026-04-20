@@ -12,7 +12,7 @@ description: >
   CLI commands. Routes to `lab-run-experiment` /
   `lab-plan-next` / etc. only when the user is asking for one of
   those specific actions; otherwise this skill is the single entry
-  point. Companion reference: `lab/AUTONOMOUS.md`.
+  point. Companion reference: `lab/OPERATIONS.md`.
 ---
 
 # Operating the autonomous lab
@@ -24,7 +24,7 @@ order you'd actually run them, with the expected output and what
 to do when it isn't what you expected.
 
 For the architecture, the inner loop, the DB schema, and "what is
-this thing" questions, read [`lab/AUTONOMOUS.md`](../../../lab/AUTONOMOUS.md).
+this thing" questions, read [`lab/OPERATIONS.md`](../../../lab/OPERATIONS.md).
 This skill is task-only.
 
 ## Quick orientation (always run first)

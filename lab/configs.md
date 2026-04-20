@@ -8,7 +8,6 @@
 
 ## Branches
 
-
 | ID | Mutation vs trunk | Use-when predicate | Last verified |
 |----|-------------------|--------------------|---------------|
 | `planner_executor` | adds explicit planner subagent on top of trunk | `task_features.category ∈ {security_certificates, system_administration, python_data}` | tb2-baseline-full-sweep |
@@ -16,13 +15,11 @@
 
 ## Rejected
 
-
 | ID | Reason | Evidence |
 |----|--------|----------|
 | `reflection` | context blow-up: ≥ 500k input tokens / trial on the smoke slice. Re-add only with [`reflection-context-compaction`](ideas.md#reflection-context-compaction). | [`reflection-context-compaction-smoke`](roadmap.md#reflection-context-compaction-smoke) (queued) |
 
 ## Proposed
-
 
 | ID | Sketch | Linked idea |
 |----|--------|-------------|

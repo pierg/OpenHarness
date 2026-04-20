@@ -28,7 +28,7 @@ Two human-curated planning surfaces feed the loop:
 > **Audit-only files.** The five files above contain *only*
 > high-signal content. They do not document themselves. The
 > mental model lives here ([`README.md`](README.md)); the
-> autonomy contract lives in [`AUTONOMOUS.md`](AUTONOMOUS.md);
+> operations runbook lives in [`OPERATIONS.md`](OPERATIONS.md);
 > per-skill instructions live under
 > [`.agents/skills/`](../.agents/skills/).
 
@@ -89,7 +89,30 @@ Key invariants:
     mutation leg). Multi-leg broad-sweeps are opt-in and used for
     re-baselining.
 
-See [`AUTONOMOUS.md`](AUTONOMOUS.md) for the daemon's tick, the
+See [`OPERATIONS.md`](OPERATIONS.md) for the daemon's tick, the
 file-ownership matrix, the codex auth rules, the per-skill model
 profiles, and the operating commands. Per-skill instructions live
 in [`.agents/skills/`](../.agents/skills/).
+
+
+## How the skills compose into one closed loop
+
+human → lab-propose-idea           (capture)
+      ↘ 
+        lab-plan-next               (queue / promote / Done)
+          ↘
+            lab-run-experiment      ← daemon picks top of `## Up next`
+              ↘ scripts/exp/start.sh exec → runs/experiments/<id>/
+                ↘ ingest
+                  ↘ task-features × N           (parallel, cached)
+                  ↘ trial-critic   × M          (one per trial)
+                    ↘ experiment-critic          (multi-agent fan-out across tasks)
+                      ↘ ingest-critiques
+                        ↘ lab experiments synthesize    (narrative subsections)
+                        ↘ lab tree apply                (### Tree effect, auto-apply or stage)
+                          ↘ lab-reflect-and-plan        (### Suggested + ## Auto-proposed)
+                          ↘ lab-plan-next               (move entry to ## Done)
+                          ↘ every Mth: cross-experiment-critic  (components_perf + apex snapshot)
+                          ↘ if Graduate → STAGED for human → lab-graduate-component
+
+ agents only ever write JSON files and call uv run lab CLI commands. They never touch the markdown directly, never touch the DB directly. 

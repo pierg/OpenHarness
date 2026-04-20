@@ -79,8 +79,6 @@ _(none)_
 
 ## Auto-proposed
 
-_Suggested by `cross-experiment-critic`. Promote to `## Proposed` manually if you want them to be runnable._
-
 #### loop-guard-on-planner-executor
 
 -   **Motivation:** Once loop-guard lands as a runtime atom on trunk, the same mechanism is more likely to help on planner_executor (which adds a planning hop that can also stall) than on basic alone. Composition test, not yet runnable.

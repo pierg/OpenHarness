@@ -1,76 +1,21 @@
-# Autonomous lab loop
+# Operations
 
-The lab files in [`lab/`](.) are the **human-curated audit
-surface**. Once an idea is promoted to [`roadmap.md`](roadmap.md),
-the rest of the loop — implementing the variant, running the
-experiment, criticising every trial, mutating the configuration
-tree ([`configs.md`](configs.md)), bumping component statuses in
-the catalog ([`components.md`](components.md)), and appending the
-journal entry ([`experiments.md`](experiments.md)) — runs
-autonomously through one daemon and a handful of skills.
-
-This document is the operational guide: the mental model, what the
-daemon does each tick, the file-ownership matrix, how to
-start/stop/monitor it, what the tables and skills mean, and how to
-interpret the outputs. The high-level mental model lives in
+Operating guide for the autonomous lab loop. Conceptual model
+(three artifacts, invariants, mutation diagram) lives in
 [`README.md`](README.md); per-skill instructions live in
-[`.agents/skills/`](../.agents/skills/).
+[`.agents/skills/`](../.agents/skills/). This file covers what
+the daemon does each tick, how to operate it, the file-ownership
+matrix, the DB queries you'll re-run, and what to check when
+something breaks.
 
-> Component contracts (`schemas/component_contract.json`) ship in a
-> deliberately coarse shape today — name-based `applies_to`, free-form
-> `cost` tags, no predicate language. We will tighten it once we have
-> 3-4 real components and enough trials to know which knobs matter.
-> Don't model what we can't yet measure.
+Two seams that keep the loop clean:
 
-> The catalog ([`components.md`](components.md)) is **descriptive,
-> not prescriptive**: today an agent YAML is still the unit of
-> execution and the catalog records which atoms each composes plus
-> the running status (proposed / experimental / branch / validated
-> / rejected / superseded). When we want runtime composition, we
-> can add a real composer behind the same vocabulary without
-> touching the verdict machinery.
-
-## Architecture in one picture
-
-```
-       lab/ideas.md                    (human owns)
-            │
-            ▼ promote
-       lab/roadmap.md  ──── parsed by ────►  src/openharness/lab/runner.py  (daemon)
-                                                    │
-              ┌─────────────────────────────────────┼─────────────────────────────┐
-              ▼                                     ▼                             ▼
-   .agents/skills/lab-run-experiment       runs/experiments/<id>/      .agents/skills/{trial,
-        (codex)                            results/summary.md          experiment,cross-experiment}-critic
-              │                                     │                  .agents/skills/task-features
-              ▼                                     ▼                             │
-   scripts/exp/start.sh ──► harbor ───► trials, events.jsonl                      │ critic spawns write JSON files:
-                                                    │                             │   <trial>/critic/trial-critic.json
-                                                    │                             │   <run>/critic/comparisons/*.json
-                                                    │                             │   <run>/critic/experiment-critic.json
-                                                    │                             ▼   runs/lab/task_features/*.json
-                                                    │                          (filesystem; no DB writes)
-                                                    │                                                ▲
-                                                    └────► uv run lab ingest <run_dir> ──────────────┤
-                                                                                                     │
-                                                          uv run lab ingest-critiques  ──────────────┘
-                                                                                                     │
-                                                                                                     ▼
-                                                                                       runs/lab/trials.duckdb (cache)
-                                                                                                     │
-                                                                                                     ├──► uv run lab dashboard
-                                                                                                     └──► uv run lab query "SELECT …"
-```
-
-Two simple rules that keep the seams clean:
-
-1. **Agent code goes through codex; deterministic code goes through
-   `uv run lab`. Nothing else.**
-2. **Critic outputs are FILES (single source of truth). DuckDB is
-   a derived cache** — rebuild it any time with
+1. **Agent work goes through codex; deterministic work goes
+   through `uv run lab`. Nothing else.**
+2. **Critic outputs are files (single source of truth); DuckDB is
+   a derived cache** — rebuild any time with
    `uv run lab ingest-critiques`. No critic spawn ever writes to
-   the DB. This eliminates the writer-lock contention that
-   silently dropped spawn telemetry under parallel fan-out.
+   the DB.
 
 ## Inner loop (one tick)
 
@@ -326,92 +271,39 @@ hand.
 ## Codex tunings per skill
 
 Every orchestrator-invoked spawn goes through
-`src/openharness/lab/codex.py`, which picks a model + reasoning
-effort + reasoning summary + sandbox + ephemeral mode + timeout
-per skill from a single `SKILL_PROFILES` table. Anything left
-unset falls back to the lab defaults on `CodexConfig`
-(`gpt-5.4` / `high` / `detailed` / `danger-full-access` /
-ephemeral / 6 h safety-net timeout).
+[`src/openharness/lab/codex.py`](../src/openharness/lab/codex.py).
+The per-skill model / reasoning effort / reasoning summary /
+sandbox / timeout live in the `SKILL_PROFILES` table there —
+that's the source of truth, this doc does not duplicate it.
+Anything unset falls back to `CodexConfig` defaults (`gpt-5.4` /
+`high` / `detailed` / `danger-full-access` / ephemeral / 6 h
+safety-net timeout).
 
-**Scope.** This table covers *only* the skills the orchestrator
-invokes. Human-driven skills like `lab-propose-idea` (you curate
-ideas) and `lab-graduate-component` (you decide when to promote)
-live in the same `.agents/skills/` tree but are invoked from
-Cursor against its own model — they never go through `codex exec`,
-so they have no profile here.
+Design constraints worth knowing:
 
-**Design philosophy: signal density over throughput.** The lab
-runs autonomously overnight; the human optimizes for accurate,
-high-signal data because the design space is large and noisy
-verdicts compound. We spend tokens where they buy accuracy and
-treat the budget as generous. Reasoning summaries are kept
-detailed on every analytical spawn so a human auditing
-`runs/lab/logs/` can reconstruct *why* the model decided what
-it did, not just what it decided.
+-   **Signal density over throughput.** The lab runs unattended
+    overnight; we spend tokens where they buy accuracy because
+    noisy verdicts compound. Bulk graders (`trial-critic`,
+    `task-features`) stay on the flagship at `medium` because
+    everything downstream is built on their verdicts; the apex
+    `cross-experiment-critic` runs at `xhigh`. The only
+    intentionally cheap spawn is `lab-plan-next` (mechanical
+    roadmap nudge).
+-   **Sandbox: `danger-full-access` by default.** The loop runs
+    unattended on a dedicated machine; any OS-level sandbox
+    restriction becomes a silent failure with no human to
+    approve the override. Per-skill profiles can downgrade to
+    `workspace-write` for hand-driven debugging, but the
+    orchestrator path stays unconfined.
+-   **Timeouts are safety nets, not throughput knobs.** A spawn
+    that hits its timeout is treated as a hung process worth
+    investigating, not a slow one worth waiting on.
+-   **Effort floor is `low`, not `minimal`.** codex 0.121
+    registers `web_search` under `--full-auto` and the API
+    rejects `minimal` whenever `web_search` is registered.
 
-**Sandbox.** Default is `danger-full-access` (translated to
-`--dangerously-bypass-approvals-and-sandbox` on the CLI). The
-loop runs unattended on a dedicated machine; any OS-level
-sandbox restriction (landlock/seccomp on Linux) becomes a silent
-failure with no human to approve the override. Per-skill
-profiles can downgrade to `workspace-write` for hand-driven
-debugging, but the orchestrator path stays unconfined.
-
-| Skill | Model | Effort | Summary | Timeout | Notes |
-| --- | --- | --- | --- | --- | --- |
-| `trial-critic` | `gpt-5.4` | medium | concise | 2 h | bulk; one per trial; everything downstream is built on these verdicts |
-| `task-features` | `gpt-5.4` | medium | concise | 2 h | bulk; one per task_checksum; feeds clustering / routing |
-| `experiment-critic` | `gpt-5.4` | high | detailed | 6 h | one per experiment; produces the per-task `comparisons/*.json` + `experiment-critic.json`; `tree_ops.evaluate` reads these to compute the verdict |
-| `cross-experiment-critic` | `gpt-5.4` | **xhigh** | detailed | 12 h | **singleton**; cross-experiment trends; proposes follow-up ideas under `## Auto-proposed`; does **not** mutate the tree |
-| `lab-run-experiment` | `gpt-5.4` | high | detailed | 8 h | variant implementer + harness kickoff; code quality shapes what the experiment measures |
-| `lab-reflect-and-plan` | `gpt-5.4` | high | detailed | 4 h | tree-aware planner; reads current tree + latest journal entries; writes to `roadmap.md > ### Suggested` and `ideas.md > ## Auto-proposed` |
-| `lab-plan-next` | `gpt-5.4-mini` | low | none | 1 h | mechanical roadmap nudge — moves the just-finished entry to `## Done` |
-
-Rationale per tier:
-
-- **Bulk graders** (`trial-critic`, `task-features`) get the
-  flagship at `medium`. They run hundreds of times per
-  experiment; the temptation is to downgrade to mini for cost,
-  but every aggregation, comparison, and component-impact
-  calculation downstream is built on these verdicts. Cheap
-  trial verdicts poison the entire tower of analysis.
-- **Per-experiment aggregator** (`experiment-critic`) gets
-  `high` effort and `detailed` summaries. Its output (the
-  winning leg, the per-task pattern, the explanation) lands in
-  the `comparisons` table and drives the next experiment's
-  design.
-- **Apex spawn** (`cross-experiment-critic`) gets `xhigh` —
-  the only place we burn maximum effort. It integrates
-  hundreds of facts across experiments to rewrite
-  `components_perf` and propose follow-up ideas, shaping the
-  whole roadmap. `singleton=True` so two concurrent runs
-  cannot race on the `components_perf` table.
-- **Variant implementer** (`lab-run-experiment`) gets `high`
-  because the code it writes literally *is* the variant being
-  measured. A buggy variant is a wasted experiment. Worth
-  flipping to a `*-codex` model once we benchmark code-tuned
-  variants on this exact workload.
-- **Mechanical roadmap nudge** (`lab-plan-next`) is the only
-  mechanical skill the orchestrator invokes — it just moves
-  the just-finished entry into `## Done`. Stays on
-  `gpt-5.4-mini` at `low`; more model intelligence does not
-  improve the outcome.
-
-**Timeouts are safety nets, not throughput knobs.** Each upper
-bound is generous enough that a healthy spawn at the configured
-effort level never approaches it, but tight enough that a wedged
-subprocess can't sit forever on a pool slot and stall the
-daemon. A spawn that hits its timeout is treated as a hung
-process worth investigating, not a slow one worth waiting on.
-
-**Effort floor is `low`, not `minimal`**, because codex 0.121
-registers `web_search` under `--full-auto` and the API rejects
-`minimal` whenever `web_search` is registered. If we ever
-disable `web_search` per skill, the mechanical helpers can
-drop to `minimal`.
-
-To override for a one-off (e.g. while debugging a critic, or
-running an A/B between effort levels on the same skill):
+Override for a one-off (debugging a critic, A/B between effort
+levels on the same skill):
 
 ```python
 from openharness.lab import codex as cx
@@ -437,35 +329,6 @@ each file under `runs/lab/logs/` is self-describing:
 | Critic skill fails repeatedly for one trial | grep the matching log under `runs/lab/logs/` for the skill name + trial id | Re-run by hand: `codex exec` against the same skill+args; usually it's a JSON-shape mismatch we can fix in the SKILL.md. |
 | `misconfigurations` keeps growing | `SELECT DISTINCT kind, component_id FROM misconfigurations` | Either fix the offending agent YAML, the component spec, or downgrade the check by relaxing `applies_to`. |
 | Schema mismatch errors after a code update | run `uv run lab init` | Applies any new `src/openharness/lab/migrations/NNNN_*.sql`. |
-
-## What the autonomous loop is *not*
-
-- It does **not** propose ideas. The human owns `lab/ideas.md > ##
-  Proposed`. Cross-experiment-critic only suggests follow-ups in
-  `## Auto-proposed`, never in the queue.
-- It does **not** edit `lab/roadmap.md > ## Up next`. Promotions to
-  the queue stay manual through `uv run lab roadmap add`.
-- It does **not** pick a model or a configuration mid-experiment.
-  Codex picks the model for the agent spawn; the experiment YAML
-  picks the model for the variant.
-- It does **not** retry forever on a failed roadmap entry. Failures
-  leave the entry in place and surface in the spawn log; a human
-  decides whether to fix the spec, lower the cost, or drop the
-  entry.
-
-## Suggested first runs
-
-1. **Smoke the wiring with no spend**:
-   `uv run lab daemon start --foreground --once --dry-run`.
-2. **Smoke the wiring on a cheap entry**: queue a smoke-only
-   variant (e.g. `loop-guard-tb2-paired` already on the roadmap) and
-   run `--foreground --once` so you can read every log line as it
-   happens.
-3. **Promote to `--background`** once the inner loop has worked
-   end-to-end at least once.
-4. **Open the dashboard** (`uv run lab dashboard`) before walking
-   away — that's the fastest way to see whether the run actually
-   produced what you expected.
 
 ## Skills involved
 

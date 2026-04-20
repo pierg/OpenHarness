@@ -122,7 +122,7 @@ Use this skill (and pick the right action skill below) when the user:
 | File | Sections | Mutability |
 |------|----------|------------|
 | `lab/README.md` | Mental model + workflow. Human-facing intro. | Edit when the framework changes shape. |
-| `lab/AUTONOMOUS.md` | Operating guide for the daemon: tick, file-ownership matrix, codex auth, model profiles, troubleshooting. | Edit when the daemon's behaviour or skill profiles change. |
+| `lab/OPERATIONS.md` | Operating guide for the daemon: tick, file-ownership matrix, codex auth, model profiles, troubleshooting. | Edit when the daemon's behaviour or skill profiles change. |
 | `lab/ideas.md` | `## Proposed` (themed) → `## Trying` → `## Graduated` → `## Rejected` → `## Auto-proposed`. | Append-only. State changes by **moving entries between sections** + appending cross-ref bullets. Never rewrite an existing bullet. |
 | `lab/roadmap.md` | `## Up next` (with `### Suggested` substream) → `## Done`. | Mutable. `## Up next` is reordered freely; `### Suggested` is daemon-only; entries move to `## Done` when their experiment runs. |
 | `lab/experiments.md` | One reverse-chronological list of `## YYYY-MM-DD — <slug>` entries; each has 5 `### …` subsections. | Append-only. New entries appended at the top with empty subsections; subsections are filled in by deterministic helpers and never manually rewritten. |
@@ -134,7 +134,7 @@ into `CHANGELOG.md` instead — not the lab.
 
 ## File ownership (the autonomy contract)
 
-The complete matrix lives in `lab/AUTONOMOUS.md`. Most-relevant rows:
+The complete matrix lives in `lab/OPERATIONS.md`. Most-relevant rows:
 
 | File / section | Human writes | Daemon writes |
 |----------------|--------------|---------------|
@@ -380,7 +380,7 @@ error to the user instead of trying to "fix" the file by hand.
 
 -   [`lab/README.md`](../../../lab/README.md) — the human-facing
     mental model.
--   [`lab/AUTONOMOUS.md`](../../../lab/AUTONOMOUS.md) — the
+-   [`lab/OPERATIONS.md`](../../../lab/OPERATIONS.md) — the
     operating guide for the daemon (tick, file-ownership matrix,
     codex auth, model profiles, troubleshooting).
 -   [`docs/runs.md`](../../../docs/runs.md) — how

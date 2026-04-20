@@ -2,8 +2,6 @@
 
 ## Up next
 
-
-
 ### loop-guard-tb2-paired
 
 -   **Idea:** [`loop-guard`](ideas.md#loop-guard)
@@ -57,9 +55,6 @@
 -   **Cost:** smoke ~$0.40 (small near-miss slice, 2 legs)
 
 ## Done
-
-
-
 
 ### tb2-baseline-full-sweep
 

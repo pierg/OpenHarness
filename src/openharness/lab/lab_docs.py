@@ -362,11 +362,7 @@ def append_auto_proposed_idea(
 
     if "## Auto-proposed" not in text:
         # Insert a new section at the very bottom so humans see it last.
-        text = text.rstrip() + (
-            "\n\n## Auto-proposed\n\n"
-            "_Suggested by `cross-experiment-critic`. Promote to `## Proposed` "
-            "manually if you want them to be runnable._\n"
-        )
+        text = text.rstrip() + "\n\n## Auto-proposed\n"
 
     entry = (
         f"\n#### {idea_id}\n\n"
@@ -782,9 +778,6 @@ class TreeSnapshot:
     branches: list[TreeBranch]
     rejected: list[TreeRejected]
     proposed: list[TreeProposed]
-
-
-_CONFIGS_HEADER = "# Configs\n\n_(see [`AUTONOMOUS.md`](AUTONOMOUS.md) for the full file-ownership matrix.)_\n"
 
 
 def _ensure_configs_skeleton(text: str) -> str:
