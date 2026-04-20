@@ -2,16 +2,27 @@
 
 Inner loop, per top entry in `lab/roadmap.md > ## Up next`:
 
-    1. Spawn `lab-run-experiment` to implement the variant + kick off
-       `scripts/exp/start.sh exec ...`.
-    2. Poll the run dir until `results/summary.md` exists.
-    3. `uv run lab ingest <run_dir>`.
-    4. Per uncritiqued trial → spawn `trial-critic`.
-    5. Per unseen task_checksum → spawn `task-features`.
-    6. Once all per-trial critiques land → spawn `experiment-critic`.
-    7. Every Mth experiment → spawn `cross-experiment-critic`.
-    8. Spawn `lab-plan-next` to move the entry to `## Done`.
-    9. Sleep (or loop straight into the next entry).
+    1.  Spawn `lab-run-experiment` to implement the variant + kick off
+        `scripts/exp/start.sh exec ...`.
+    2.  Poll the run dir until `results/summary.md` exists.
+    3.  `uv run lab ingest <run_dir>`.
+    4.  Per uncritiqued trial → spawn `trial-critic`.
+    5.  Per unseen task_checksum → spawn `task-features`.
+    6.  Once all per-trial critiques land → spawn `experiment-critic`.
+    7.  `uv run lab ingest-critiques` (refresh the derived cache).
+    8.  Tree close-out (deterministic; no codex spawns):
+        a.  `journal_synth.synthesize` — fill ### Aggregate / ###
+            Mutation impact / ### Failure modes / ### Linked
+            follow-ups in the journal entry.
+        b.  `tree_ops.evaluate` + `tree.apply_diff` — write the
+            ### Tree effect block; auto-apply AddBranch / Reject /
+            NoOp; STAGE Graduate (awaiting `lab graduate confirm`).
+    9.  Spawn `lab-reflect-and-plan` (tree-aware planner) to write
+        0..N entries under `roadmap.md > ## Up next > ### Suggested`
+        and `ideas.md > ## Auto-proposed`.
+    10. Every Mth experiment → spawn `cross-experiment-critic`.
+    11. Spawn `lab-plan-next` to move the entry to `## Done`.
+    12. Sleep (or loop straight into the next entry).
 
 The daemon is **single-tenant**: it acquires
 `runs/lab/orchestrator.lock` at startup and refuses to run if
@@ -33,8 +44,12 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from openharness.lab import codex as codex_adapter
+from openharness.lab import critic_io
 from openharness.lab import db as labdb
 from openharness.lab import ingest as labingest
+from openharness.lab import journal_synth
+from openharness.lab import tree as labtree
+from openharness.lab import tree_ops
 from openharness.lab.paths import (
     EXPERIMENTS_RUNS_ROOT,
     LAB_ROOT,
@@ -173,32 +188,77 @@ def _codex_cfg(cfg: OrchestratorConfig) -> codex_adapter.CodexConfig:
     )
 
 
-def _trials_needing_critique(instance_id: str) -> list[tuple[str, str]]:
+def trials_needing_critique(instance_id: str) -> list[tuple[str, str]]:
+    """Trials in `instance_id` lacking `critic/trial-critic.json` on disk.
+
+    The trials registry lives in DuckDB (cheap iteration) but the
+    presence test is purely on-disk: a trial is "done" when the
+    critic file exists next to its evidence. This avoids having to
+    keep the DB cache up to date during a backfill.
+
+    Returns `[(trial_id, trial_dir), ...]` ordered by task and leg
+    so logs read predictably during a backfill.
+    """
     with labdb.reader() as conn:
         rows = conn.execute(
-            """
-            SELECT t.trial_id, t.trial_dir
-            FROM trials t LEFT JOIN trial_critiques c USING (trial_id)
-            WHERE t.instance_id = ? AND c.trial_id IS NULL
-            ORDER BY t.task_name, t.leg_id
-            """,
+            "SELECT trial_id, trial_dir FROM trials WHERE instance_id = ? "
+            "ORDER BY task_name, leg_id",
             [instance_id],
         ).fetchall()
-    return [(r[0], r[1]) for r in rows]
+    out: list[tuple[str, str]] = []
+    for trial_id, trial_dir in rows:
+        if not critic_io.trial_critique_path(trial_dir).is_file():
+            out.append((trial_id, trial_dir))
+    return out
 
 
-def _checksums_needing_features(instance_id: str) -> list[str]:
+def checksums_needing_features(instance_id: str) -> list[str]:
+    """`task_checksum`s touched by `instance_id` lacking a feature file.
+
+    Features are keyed by checksum (deduped across experiments), so a
+    backfill of one experiment may discover checksums that were ALSO
+    touched by other experiments and never extracted. We still scope
+    by `instance_id` here because the orchestrator only ever asks
+    "what does THIS run need"; a global pass uses
+    `lab analyze --include-cross-experiment` plus its own walk.
+    """
     with labdb.reader() as conn:
         rows = conn.execute(
-            """
-            SELECT DISTINCT t.task_checksum
-            FROM trials t LEFT JOIN task_features f USING (task_checksum)
-            WHERE t.instance_id = ? AND t.task_checksum IS NOT NULL
-              AND f.task_checksum IS NULL
-            """,
+            "SELECT DISTINCT task_checksum FROM trials "
+            "WHERE instance_id = ? AND task_checksum IS NOT NULL",
             [instance_id],
         ).fetchall()
-    return [r[0] for r in rows]
+    out: list[str] = []
+    for (checksum,) in rows:
+        if not critic_io.task_features_path(checksum).is_file():
+            out.append(checksum)
+    return out
+
+
+def comparison_exists(instance_id: str) -> bool:
+    """True iff `<run_dir>/critic/comparisons/` has at least one file."""
+    run_dir = critic_io.run_dir_from_instance(instance_id)
+    if run_dir is None:
+        return False
+    cmp_dir = run_dir / critic_io.CRITIC_DIRNAME / "comparisons"
+    if not cmp_dir.is_dir():
+        return False
+    return any(cmp_dir.glob("*.json"))
+
+
+def instance_exists(instance_id: str) -> bool:
+    with labdb.reader() as conn:
+        (n,) = conn.execute(
+            "SELECT count(*) FROM experiments WHERE instance_id = ?",
+            [instance_id],
+        ).fetchone()
+    return int(n) > 0
+
+
+# Back-compat aliases so existing call sites keep working until they
+# migrate to the public names above.
+_trials_needing_critique = trials_needing_critique
+_checksums_needing_features = checksums_needing_features
 
 
 def _completed_runs_count() -> int:
@@ -282,11 +342,75 @@ def _process_entry(entry: RoadmapEntry, cfg: OrchestratorConfig) -> bool:
             cfg=cx, parent_run_dir=run_dir,
         )
 
-    # 7. every Mth completed experiment → cross-experiment-critic.
+    # (Cross-experiment-critic moved below; it must run AFTER
+    #  ingest-critiques + tree apply so it sees the latest state.)
+
+    # 8. refresh the DB cache from the on-disk critic artifacts.
+    # The critic spawns above wrote files (single source of truth);
+    # this materializes them into the DuckDB cache so the
+    # tree-evaluation step below sees the new rows.
+    cache_counts = labingest.ingest_critiques([run_dir])
+    log.info(
+        "ingest-critiques after %s: %s", entry.slug,
+        ", ".join(f"{k}={v}" for k, v in cache_counts.items() if v),
+    )
+
+    # 9. close the loop on the tree (deterministic; no codex spawns).
+    #
+    # 9a. Synthesize the journal entry's narrative subsections
+    #     (### Aggregate / Mutation impact / Failure modes /
+    #      Linked follow-ups) from the critic JSONs we just landed.
+    try:
+        sections = journal_synth.synthesize(
+            slug=entry.slug, instance_id=summary.instance_id,
+        )
+        log.info(
+            "synthesize wrote %d section(s) into '%s': %s",
+            len(sections), entry.slug, ", ".join(sections),
+        )
+    except Exception:
+        log.exception("journal synthesize failed for %s", entry.slug)
+
+    # 9b. Compute the TreeDiff and apply it. AddBranch / Reject /
+    #     NoOp auto-apply (mutating configs.md and bumping the
+    #     status of any uniquely-introduced atoms in components.md).
+    #     Graduate is STAGED — written to the journal but not
+    #     applied to trunk.yaml until a human runs `lab graduate
+    #     confirm`.
+    try:
+        diff = tree_ops.evaluate(summary.instance_id)
+        result = labtree.apply_diff(
+            slug=entry.slug, diff=diff, applied_by="auto:daemon",
+        )
+        log.info(
+            "tree apply %s: kind=%s applied=%s target=%s",
+            entry.slug, diff.kind, result.applied, diff.target_id,
+        )
+        if diff.kind == "graduate" and not result.applied:
+            log.warning(
+                "STAGED graduate for %s → %s; awaiting `uv run lab "
+                "graduate confirm %s --applied-by human:<name>`",
+                entry.slug, diff.target_id, entry.slug,
+            )
+    except Exception:
+        log.exception("tree apply failed for %s", entry.slug)
+
+    # 9c. Tree-aware planner: reads the just-updated tree + the
+    #     latest journal entries; writes 0..N entries under
+    #     `roadmap.md > ## Up next > ### Suggested` and 0..N
+    #     entries under `ideas.md > ## Auto-proposed`. Humans
+    #     review and promote.
+    codex_adapter.run(
+        "lab-reflect-and-plan",
+        [f"--instance={summary.instance_id}"],
+        cfg=cx, parent_run_dir=run_dir,
+    )
+
+    # 10. cross-experiment-critic (still gated on xexp_every).
     if _completed_runs_count() % max(cfg.xexp_every, 1) == 0:
         codex_adapter.run("cross-experiment-critic", [], cfg=cx, parent_run_dir=run_dir)
 
-    # 8. close the loop on the roadmap.
+    # 11. close the loop on the roadmap.
     codex_adapter.run(
         "lab-plan-next",
         ["done", entry.slug,

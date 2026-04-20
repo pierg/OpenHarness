@@ -27,7 +27,9 @@ from typing import Any, Iterable, Iterator
 import duckdb
 import yaml
 
+from openharness.lab import critic_io
 from openharness.lab import db as labdb
+from openharness.lab.paths import EXPERIMENTS_RUNS_ROOT, REPO_ROOT
 
 logger = logging.getLogger(__name__)
 
@@ -508,3 +510,540 @@ def ingest_runs(
         for d in run_dirs:
             summaries.append(ingest_run(d, conn=conn))
     return summaries
+
+
+# ---------------------------------------------------------------------------
+# Critic artifact ingest (file -> DB cache)
+# ---------------------------------------------------------------------------
+#
+# After the file-based critic refactor, critic skills NEVER write to
+# DuckDB themselves; they write JSON files via `critic_io`. This pair
+# of functions rebuilds the cache tables from those files on demand.
+
+_TRIAL_DIR_TO_ID_CACHE: dict[str, str] = {}
+
+
+def _trial_id_for_dir(conn: duckdb.DuckDBPyConnection, trial_dir: Path) -> str | None:
+    key = str(trial_dir.resolve())
+    cached = _TRIAL_DIR_TO_ID_CACHE.get(key)
+    if cached is not None:
+        return cached
+    row = conn.execute(
+        "SELECT trial_id FROM trials WHERE trial_dir = ?",
+        [key],
+    ).fetchone()
+    if row:
+        _TRIAL_DIR_TO_ID_CACHE[key] = row[0]
+        return row[0]
+    return None
+
+
+def _instance_id_for_run_dir(conn: duckdb.DuckDBPyConnection, run_dir: Path) -> str | None:
+    row = conn.execute(
+        "SELECT instance_id FROM experiments WHERE run_dir = ?",
+        [str(run_dir.resolve())],
+    ).fetchone()
+    return row[0] if row else None
+
+
+def _provenance_model(payload: dict[str, Any]) -> str | None:
+    prov = payload.get("provenance") or {}
+    return prov.get("critic_model") or payload.get("critic_model")
+
+
+def _provenance_created_at(payload: dict[str, Any]) -> datetime:
+    prov = payload.get("provenance") or {}
+    raw = prov.get("created_at") or payload.get("created_at")
+    if isinstance(raw, str):
+        ts = _parse_ts(raw)
+        if ts is not None:
+            return ts
+    return datetime.now(timezone.utc)
+
+
+def _upsert_trial_critique(
+    conn: duckdb.DuckDBPyConnection,
+    trial_id: str,
+    payload: dict[str, Any],
+) -> None:
+    conn.execute(
+        """
+        INSERT INTO trial_critiques (
+            trial_id, schema_version, task_summary, agent_strategy, key_actions,
+            outcome, root_cause, success_factor, anti_patterns, components_active,
+            task_features, surprising_observations, confidence, critic_model,
+            extra, created_at
+        ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+        ON CONFLICT (trial_id) DO UPDATE SET
+            schema_version = EXCLUDED.schema_version,
+            task_summary = EXCLUDED.task_summary,
+            agent_strategy = EXCLUDED.agent_strategy,
+            key_actions = EXCLUDED.key_actions,
+            outcome = EXCLUDED.outcome,
+            root_cause = EXCLUDED.root_cause,
+            success_factor = EXCLUDED.success_factor,
+            anti_patterns = EXCLUDED.anti_patterns,
+            components_active = EXCLUDED.components_active,
+            task_features = EXCLUDED.task_features,
+            surprising_observations = EXCLUDED.surprising_observations,
+            confidence = EXCLUDED.confidence,
+            critic_model = EXCLUDED.critic_model,
+            extra = EXCLUDED.extra,
+            created_at = EXCLUDED.created_at
+        """,
+        [
+            trial_id,
+            int(payload.get("schema_version", 1)),
+            payload.get("task_summary"),
+            payload.get("agent_strategy"),
+            json.dumps(payload.get("key_actions") or []),
+            payload.get("outcome"),
+            payload.get("root_cause"),
+            payload.get("success_factor"),
+            json.dumps(payload.get("anti_patterns") or []),
+            json.dumps(payload.get("components_active") or []),
+            json.dumps(payload.get("task_features") or []),
+            json.dumps(payload.get("surprising_observations") or []),
+            payload.get("confidence"),
+            _provenance_model(payload),
+            json.dumps(payload.get("extra") or {}),
+            _provenance_created_at(payload),
+        ],
+    )
+
+
+def _upsert_comparison(
+    conn: duckdb.DuckDBPyConnection,
+    instance_id: str,
+    task_name: str,
+    payload: dict[str, Any],
+) -> None:
+    conn.execute(
+        """
+        INSERT INTO comparisons (
+            instance_id, task_name, winning_leg, runner_up_leg, delta_score,
+            why, evidence, legs_compared, critic_model, created_at
+        ) VALUES (?,?,?,?,?,?,?,?,?,?)
+        ON CONFLICT (instance_id, task_name) DO UPDATE SET
+            winning_leg = EXCLUDED.winning_leg,
+            runner_up_leg = EXCLUDED.runner_up_leg,
+            delta_score = EXCLUDED.delta_score,
+            why = EXCLUDED.why,
+            evidence = EXCLUDED.evidence,
+            legs_compared = EXCLUDED.legs_compared,
+            critic_model = EXCLUDED.critic_model,
+            created_at = EXCLUDED.created_at
+        """,
+        [
+            instance_id,
+            task_name,
+            payload.get("winning_leg"),
+            payload.get("runner_up_leg"),
+            payload.get("delta_score"),
+            payload.get("why"),
+            json.dumps(payload.get("evidence") or {}),
+            json.dumps(payload.get("legs_compared") or []),
+            _provenance_model(payload),
+            _provenance_created_at(payload),
+        ],
+    )
+
+
+def _upsert_task_features(
+    conn: duckdb.DuckDBPyConnection,
+    task_checksum: str,
+    payload: dict[str, Any],
+) -> None:
+    conn.execute(
+        """
+        INSERT INTO task_features (
+            task_checksum, task_name, category, required_tools, env_complexity,
+            output_shape, keywords, extra, extracted_by, extracted_at
+        ) VALUES (?,?,?,?,?,?,?,?,?,?)
+        ON CONFLICT (task_checksum) DO UPDATE SET
+            task_name = EXCLUDED.task_name,
+            category = EXCLUDED.category,
+            required_tools = EXCLUDED.required_tools,
+            env_complexity = EXCLUDED.env_complexity,
+            output_shape = EXCLUDED.output_shape,
+            keywords = EXCLUDED.keywords,
+            extra = EXCLUDED.extra,
+            extracted_by = EXCLUDED.extracted_by,
+            extracted_at = EXCLUDED.extracted_at
+        """,
+        [
+            task_checksum,
+            payload.get("task_name"),
+            payload.get("category"),
+            json.dumps(payload.get("required_tools") or []),
+            payload.get("env_complexity"),
+            payload.get("output_shape"),
+            json.dumps(payload.get("keywords") or []),
+            json.dumps(payload.get("extra") or {}),
+            payload.get("extracted_by") or _provenance_model(payload),
+            _provenance_created_at(payload),
+        ],
+    )
+
+
+def _upsert_component_perf(
+    conn: duckdb.DuckDBPyConnection,
+    component_id: str,
+    task_cluster: str,
+    payload: dict[str, Any],
+) -> None:
+    conn.execute(
+        """
+        INSERT INTO components_perf (
+            component_id, task_cluster, n_trials, win_rate, cost_delta_pct,
+            supporting_experiments, notes, updated_at
+        ) VALUES (?,?,?,?,?,?,?,?)
+        ON CONFLICT (component_id, task_cluster) DO UPDATE SET
+            n_trials = EXCLUDED.n_trials,
+            win_rate = EXCLUDED.win_rate,
+            cost_delta_pct = EXCLUDED.cost_delta_pct,
+            supporting_experiments = EXCLUDED.supporting_experiments,
+            notes = EXCLUDED.notes,
+            updated_at = EXCLUDED.updated_at
+        """,
+        [
+            component_id,
+            task_cluster,
+            int(payload.get("n_trials", 0)),
+            payload.get("win_rate"),
+            payload.get("cost_delta_pct"),
+            json.dumps(payload.get("supporting_experiments") or []),
+            payload.get("notes"),
+            _provenance_created_at(payload),
+        ],
+    )
+
+
+def _upsert_spawn(
+    conn: duckdb.DuckDBPyConnection,
+    record: dict[str, Any],
+) -> None:
+    conn.execute(
+        """
+        INSERT INTO spawns (
+            spawn_id, skill, args, cwd, log_path, started_at,
+            finished_at, exit_code, cost_usd_estimate,
+            parent_run_dir, notes
+        ) VALUES (?,?,?,?,?,?,?,?,?,?,?)
+        ON CONFLICT (spawn_id) DO UPDATE SET
+            skill = EXCLUDED.skill,
+            args = EXCLUDED.args,
+            cwd = EXCLUDED.cwd,
+            log_path = EXCLUDED.log_path,
+            started_at = EXCLUDED.started_at,
+            finished_at = EXCLUDED.finished_at,
+            exit_code = EXCLUDED.exit_code,
+            cost_usd_estimate = EXCLUDED.cost_usd_estimate,
+            parent_run_dir = EXCLUDED.parent_run_dir,
+            notes = EXCLUDED.notes
+        """,
+        [
+            record["spawn_id"],
+            record.get("skill"),
+            json.dumps(record.get("args") or []),
+            record.get("cwd") or str(REPO_ROOT),
+            record.get("log_path"),
+            _parse_ts(record.get("started_at")),
+            _parse_ts(record.get("finished_at")),
+            record.get("exit_code"),
+            record.get("cost_usd_estimate"),
+            record.get("parent_run_dir"),
+            record.get("notes"),
+        ],
+    )
+
+
+def ingest_critiques(
+    run_dirs: Iterable[Path] | None = None,
+    *,
+    include_lab_wide: bool = True,
+) -> dict[str, int]:
+    """Walk on-disk critic artifacts and rebuild the DB cache tables.
+
+    Idempotent. Safe to call repeatedly; each row upserts on its
+    natural key. Pass `run_dirs=None` to scan every experiment under
+    `runs/experiments/`. Pass `include_lab_wide=False` to skip the
+    global artifacts (`task_features`, `components_perf`, `spawns`).
+    """
+    counts = {
+        "trial_critiques": 0,
+        "comparisons": 0,
+        "experiment_critic_files": 0,
+        "task_features": 0,
+        "components_perf": 0,
+        "spawns": 0,
+    }
+    if run_dirs is None:
+        if not EXPERIMENTS_RUNS_ROOT.is_dir():
+            scoped: list[Path] = []
+        else:
+            scoped = [d for d in EXPERIMENTS_RUNS_ROOT.iterdir() if d.is_dir()]
+    else:
+        scoped = [Path(d).resolve() for d in run_dirs]
+
+    with labdb.writer() as conn:
+        for run_dir in scoped:
+            instance_id = _instance_id_for_run_dir(conn, run_dir)
+            for trial_dir, payload in critic_io.iter_trial_critiques(run_dir):
+                tid = _trial_id_for_dir(conn, trial_dir)
+                if not tid:
+                    logger.warning(
+                        "trial_critique at %s has no matching trials row; skipping",
+                        trial_dir,
+                    )
+                    continue
+                _upsert_trial_critique(conn, tid, payload)
+                counts["trial_critiques"] += 1
+            if instance_id:
+                for task_name, payload in critic_io.iter_comparisons(run_dir):
+                    _upsert_comparison(conn, instance_id, task_name, payload)
+                    counts["comparisons"] += 1
+            exp_path = critic_io.experiment_critic_path(run_dir)
+            if exp_path.is_file():
+                counts["experiment_critic_files"] += 1
+        if include_lab_wide:
+            for checksum, payload in critic_io.iter_task_features():
+                _upsert_task_features(conn, checksum, payload)
+                counts["task_features"] += 1
+            for cid, cluster, payload in critic_io.iter_components_perf():
+                _upsert_component_perf(conn, cid, cluster, payload)
+                counts["components_perf"] += 1
+            for record in critic_io.iter_spawn_records():
+                if "spawn_id" not in record:
+                    continue
+                _upsert_spawn(conn, record)
+                counts["spawns"] += 1
+    return counts
+
+
+def dump_db_to_files(
+    *,
+    instance_id: str | None = None,
+    overwrite: bool = False,
+) -> dict[str, int]:
+    """Materialize existing DB rows to the file scheme.
+
+    One-shot migration: write `<trial_dir>/critic/trial-critic.json`,
+    `<run_dir>/critic/comparisons/<task>.json`, and
+    `runs/lab/task_features/<checksum>.json` for every row currently
+    in the DB. Skips files that already exist unless --overwrite.
+    """
+    counts = {
+        "trial_critiques": 0,
+        "comparisons": 0,
+        "task_features": 0,
+        "components_perf": 0,
+    }
+    with labdb.reader() as conn:
+        if instance_id:
+            trial_rows = conn.execute(
+                """
+                SELECT t.trial_id, t.trial_dir, c.schema_version, c.task_summary,
+                       c.agent_strategy, c.key_actions, c.outcome, c.root_cause,
+                       c.success_factor, c.anti_patterns, c.components_active,
+                       c.task_features, c.surprising_observations, c.confidence,
+                       c.critic_model, c.extra, c.created_at
+                FROM trial_critiques c JOIN trials t USING (trial_id)
+                WHERE t.instance_id = ?
+                """,
+                [instance_id],
+            ).fetchall()
+            cmp_rows = conn.execute(
+                """
+                SELECT instance_id, task_name, winning_leg, runner_up_leg,
+                       delta_score, why, evidence, legs_compared, critic_model,
+                       created_at
+                FROM comparisons WHERE instance_id = ?
+                """,
+                [instance_id],
+            ).fetchall()
+            tf_rows = conn.execute(
+                """
+                SELECT DISTINCT f.task_checksum, f.task_name, f.category,
+                       f.required_tools, f.env_complexity, f.output_shape,
+                       f.keywords, f.extra, f.extracted_by, f.extracted_at
+                FROM task_features f
+                JOIN trials t USING (task_checksum)
+                WHERE t.instance_id = ?
+                """,
+                [instance_id],
+            ).fetchall()
+        else:
+            trial_rows = conn.execute(
+                """
+                SELECT t.trial_id, t.trial_dir, c.schema_version, c.task_summary,
+                       c.agent_strategy, c.key_actions, c.outcome, c.root_cause,
+                       c.success_factor, c.anti_patterns, c.components_active,
+                       c.task_features, c.surprising_observations, c.confidence,
+                       c.critic_model, c.extra, c.created_at
+                FROM trial_critiques c JOIN trials t USING (trial_id)
+                """,
+            ).fetchall()
+            cmp_rows = conn.execute(
+                """
+                SELECT instance_id, task_name, winning_leg, runner_up_leg,
+                       delta_score, why, evidence, legs_compared, critic_model,
+                       created_at
+                FROM comparisons
+                """,
+            ).fetchall()
+            tf_rows = conn.execute(
+                """
+                SELECT task_checksum, task_name, category, required_tools,
+                       env_complexity, output_shape, keywords, extra,
+                       extracted_by, extracted_at
+                FROM task_features
+                """,
+            ).fetchall()
+        cp_rows = conn.execute(
+            """
+            SELECT component_id, task_cluster, n_trials, win_rate, cost_delta_pct,
+                   supporting_experiments, notes, updated_at
+            FROM components_perf
+            """,
+        ).fetchall()
+        run_dir_by_instance: dict[str, Path] = {}
+        for inst, run_dir in conn.execute(
+            "SELECT instance_id, run_dir FROM experiments"
+        ).fetchall():
+            run_dir_by_instance[inst] = Path(run_dir)
+
+    def _maybe_write(path: Path, body: dict[str, Any]) -> bool:
+        if path.is_file() and not overwrite:
+            return False
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(body, indent=2, default=str))
+        return True
+
+    for row in trial_rows:
+        (trial_id, trial_dir, schema_version, task_summary, agent_strategy,
+         key_actions, outcome, root_cause, success_factor, anti_patterns,
+         components_active, task_features, surprising_observations,
+         confidence, critic_model, extra, created_at) = row
+        body = {
+            "kind": "trial_critique",
+            "schema_version": int(schema_version or 1),
+            "provenance": {
+                "skill": "trial-critic",
+                "critic_model": critic_model,
+                "created_at": _ts_iso(created_at),
+                "source": "dump-critiques-to-files",
+            },
+            "trial_id": trial_id,
+            "task_summary": task_summary,
+            "agent_strategy": agent_strategy,
+            "key_actions": _maybe_loads(key_actions, []),
+            "outcome": outcome,
+            "root_cause": root_cause,
+            "success_factor": success_factor,
+            "anti_patterns": _maybe_loads(anti_patterns, []),
+            "components_active": _maybe_loads(components_active, []),
+            "task_features": _maybe_loads(task_features, []),
+            "surprising_observations": _maybe_loads(surprising_observations, []),
+            "confidence": confidence,
+            "extra": _maybe_loads(extra, {}),
+        }
+        path = critic_io.trial_critique_path(Path(trial_dir))
+        if _maybe_write(path, body):
+            counts["trial_critiques"] += 1
+    for row in cmp_rows:
+        (inst, task_name, winning_leg, runner_up_leg, delta_score, why,
+         evidence, legs_compared, critic_model, created_at) = row
+        run_dir = run_dir_by_instance.get(inst)
+        if run_dir is None:
+            continue
+        body = {
+            "kind": "comparison",
+            "schema_version": 1,
+            "provenance": {
+                "skill": "experiment-critic",
+                "critic_model": critic_model,
+                "created_at": _ts_iso(created_at),
+                "source": "dump-critiques-to-files",
+            },
+            "instance_id": inst,
+            "task_name": task_name,
+            "winning_leg": winning_leg,
+            "runner_up_leg": runner_up_leg,
+            "delta_score": delta_score,
+            "why": why,
+            "evidence": _maybe_loads(evidence, {}),
+            "legs_compared": _maybe_loads(legs_compared, []),
+        }
+        path = critic_io.comparison_path(run_dir, task_name)
+        if _maybe_write(path, body):
+            counts["comparisons"] += 1
+    for row in tf_rows:
+        (task_checksum, task_name, category, required_tools, env_complexity,
+         output_shape, keywords, extra, extracted_by, extracted_at) = row
+        body = {
+            "kind": "task_features",
+            "schema_version": 1,
+            "provenance": {
+                "skill": "task-features",
+                "critic_model": extracted_by,
+                "created_at": _ts_iso(extracted_at),
+                "source": "dump-critiques-to-files",
+            },
+            "task_checksum": task_checksum,
+            "task_name": task_name,
+            "category": category,
+            "required_tools": _maybe_loads(required_tools, []),
+            "env_complexity": env_complexity,
+            "output_shape": output_shape,
+            "keywords": _maybe_loads(keywords, []),
+            "extra": _maybe_loads(extra, {}),
+            "extracted_by": extracted_by,
+        }
+        path = critic_io.task_features_path(task_checksum)
+        if _maybe_write(path, body):
+            counts["task_features"] += 1
+    for row in cp_rows:
+        (component_id, task_cluster, n_trials, win_rate, cost_delta_pct,
+         supporting, notes, updated_at) = row
+        body = {
+            "kind": "component_perf",
+            "schema_version": 1,
+            "provenance": {
+                "skill": "cross-experiment-critic",
+                "created_at": _ts_iso(updated_at),
+                "source": "dump-critiques-to-files",
+            },
+            "component_id": component_id,
+            "task_cluster": task_cluster,
+            "n_trials": n_trials,
+            "win_rate": win_rate,
+            "cost_delta_pct": cost_delta_pct,
+            "supporting_experiments": _maybe_loads(supporting, []),
+            "notes": notes,
+        }
+        path = critic_io.component_perf_path(component_id, task_cluster)
+        if _maybe_write(path, body):
+            counts["components_perf"] += 1
+    return counts
+
+
+def _maybe_loads(value: Any, default: Any) -> Any:
+    if value is None:
+        return default
+    if isinstance(value, (list, dict)):
+        return value
+    if isinstance(value, str):
+        try:
+            return json.loads(value)
+        except json.JSONDecodeError:
+            return default
+    return default
+
+
+def _ts_iso(value: Any) -> str | None:
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        return value.isoformat()
+    return str(value)

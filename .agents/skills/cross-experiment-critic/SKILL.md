@@ -1,15 +1,20 @@
 ---
 name: cross-experiment-critic
 description: >
-  Look across all experiments in the lab DB to find component × task-
-  cluster patterns, update the `components_perf` table, and surface
-  human-curated follow-up suggestions in `lab/ideas.md > ## Auto-
-  proposed`. Use after multiple experiments have completed and the
-  user (or the orchestrator) wants to know "which component actually
-  helps which kind of task" or "what should we try next given what we
-  know". Reads the entire lab DB; writes `components_perf` rows and
-  appends to `lab/ideas.md` via `uv run lab append-followup-idea`.
-  Companion skills: trial-critic, experiment-critic, task-features.
+  Look across all experiments to find component × task-cluster
+  patterns, refresh the `components_perf` files, and surface human-
+  curated follow-up suggestions in `lab/ideas.md > ## Auto-proposed`.
+  Use after multiple experiments have completed and the user (or
+  the orchestrator) wants to know "which component actually helps
+  which kind of task" or "what should we try next given what we
+  know". Reads the entire lab DB plus all per-trial / per-task
+  critic JSON files; writes
+  `runs/lab/components_perf/<component>__<cluster>.json` via
+  `uv run lab write-component-perf`, a snapshot to
+  `runs/lab/cross_experiment/<ts>__<spawn_id>.json` via
+  `uv run lab write-cross-experiment`, and appends to `lab/ideas.md`
+  via `uv run lab append-followup-idea`. Companion skills:
+  trial-critic, experiment-critic, task-features.
 ---
 
 # Cross-Experiment Critic
@@ -21,9 +26,23 @@ feedback loop that closes the gap between "the agent finished N
 runs" and "the next idea worth queueing".
 
 You are an autonomous codex agent. You have read access to the full
-lab DB, write access to two specific tables (`components_perf` and
-`misconfigurations` once Phase 3b lands), and write access to a
-single dedicated section in `lab/ideas.md` (`## Auto-proposed`).
+lab DB plus every per-trial critic file under
+`runs/experiments/*/legs/.../<trial>/critic/trial-critic.json`,
+every per-task feature file under `runs/lab/task_features/`, and
+every per-experiment summary under
+`runs/experiments/*/critic/experiment-critic.json`. You write
+`runs/lab/components_perf/*.json`,
+`runs/lab/cross_experiment/*.json`, and a single dedicated section
+in `lab/ideas.md` (`## Auto-proposed`).
+
+### Subagent fan-out (multi_agent enabled)
+
+This skill runs with codex's `multi_agent` feature enabled.
+Decompose the analysis along independent axes — one subagent per
+component (or per task cluster) — and have each return its slice
+of the (component × cluster) win-rate table. The synthesis
+(§3 → §4 → §5) stays in the parent agent so follow-up ideas come
+out of one coherent view.
 
 ## When to Use
 
@@ -116,13 +135,36 @@ For each (component_id, task_cluster) pair with at least 5 trials:
 Write each row via:
 
 ```bash
-uv run lab upsert-component-perf <component_id> <task_cluster> --json - <<'JSON'
+uv run lab write-component-perf <component_id> <task_cluster> --json - <<'JSON'
 {
   "n_trials":               42,
   "win_rate":               0.36,
   "cost_delta_pct":         12.5,
   "supporting_experiments": ["tb2-baseline-...", "tb2-loop-guard-..."],
   "notes":                  "..."
+}
+JSON
+```
+
+The CLI writes
+`runs/lab/components_perf/<component_id>__<task_cluster>.json`.
+The DuckDB cache (`components_perf` table) is rebuilt from these
+files on demand by `uv run lab ingest-critiques`.
+
+After all per-component rows are written, persist a single
+snapshot of the entire cross-experiment view (the apex artifact)
+via:
+
+```bash
+uv run lab write-cross-experiment "$OPENHARNESS_LAB_SPAWN_ID" \
+  --critic-model "$OPENHARNESS_CODEX_MODEL" --json - <<'JSON'
+{
+  "n_experiments":     4,
+  "n_trials":          512,
+  "clusters_used":     ["python_async","build","needs_network","..."],
+  "headline":          "<2-3 sentences: what the cross-run picture says>",
+  "components_summary":[{"component_id":"loop-guard","best_cluster":"build","win_rate":0.61}],
+  "follow_up_ideas":   ["loop-guard-on-build-cluster", "..."]
 }
 JSON
 ```
@@ -145,7 +187,7 @@ For each gap, append a follow-up idea to `lab/ideas.md > ##
 Auto-proposed`:
 
 ```bash
-uv run lab append-followup-idea <kebab-id> \
+uv run lab idea auto-propose <kebab-id> \
   --motivation "<one sentence — observed pattern>" \
   --sketch     "<one or two sentences — concrete experiment to disambiguate>" \
   --source     "cross-experiment-critic@$(date +%Y-%m-%d)"
@@ -171,19 +213,26 @@ Reply with:
 
 ## Constraints
 
-- Never edit `## Proposed`, `## Trying`, `## Graduated`,
-  `## Rejected` in `lab/ideas.md`. Only `## Auto-proposed` is
-  yours.
-- Never edit `lab/roadmap.md`. Auto-proposed ideas are not
-  auto-queued — the human reads them and decides whether to
-  promote.
-- Never edit `lab/experiments.md` or `lab/components.md`. Those
-  are owned by `lab-run-experiment` and `lab-graduate-component`
-  respectively.
-- Never modify `runs/experiments/*` artefacts.
-- Confidence-tag any suggested follow-up that's based on < 10
-  trials per side; the human needs to know when the cluster is
-  thin.
+-   Never edit `## Proposed`, `## Trying`, `## Graduated`,
+    `## Rejected` in `lab/ideas.md`. Only `## Auto-proposed` is
+    yours (shared with `lab-reflect-and-plan`).
+-   Never edit `lab/roadmap.md`. Suggesting roadmap entries is
+    `lab-reflect-and-plan`'s job; this skill stays in the
+    `## Auto-proposed` lane of `lab/ideas.md`.
+-   Never edit `lab/experiments.md` (journal entries are written
+    by `lab-run-experiment` + `experiments synthesize` + `tree
+    apply`), `lab/configs.md` (the configuration tree is mutated
+    only by `lab tree apply` and `lab graduate confirm`), or
+    `lab/components.md` (the catalog is bumped automatically by
+    `lab tree apply` and edited explicitly via `lab components`).
+    **In particular, do not write any verdict, AddBranch, Reject,
+    or Graduate suggestion** — those are computed deterministically
+    by `tree_ops.evaluate` from `experiment-critic.json` +
+    `comparisons/*.json`, not proposed by you.
+-   Never modify `runs/experiments/*` artefacts.
+-   Confidence-tag any suggested follow-up that's based on < 10
+    trials per side; the human needs to know when the cluster is
+    thin.
 
 ## Example
 

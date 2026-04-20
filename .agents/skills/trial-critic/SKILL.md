@@ -124,10 +124,14 @@ claim. Do not paraphrase — quote.
 ## Output schema
 
 Persist the critique by piping a JSON object on stdin to the lab
-CLI:
+CLI. The CLI writes a file at
+`<trial_dir>/critic/trial-critic.json` — that file is the canonical
+record. The DuckDB cache (`trial_critiques` table) is rebuilt from
+these files on demand by `uv run lab ingest-critiques`.
 
 ```bash
-uv run lab insert-critique <trial_id> --critic-model "<your model id>" --json - <<'JSON'
+uv run lab write-trial-critique <trial_dir> \
+  --critic-model "$OPENHARNESS_CODEX_MODEL" --json - <<'JSON'
 {
   "schema_version": 1,
   "task_summary":            "<2-3 sentences: what the task asks for>",
@@ -145,6 +149,10 @@ uv run lab insert-critique <trial_id> --critic-model "<your model id>" --json - 
 JSON
 ```
 
+The CLI overwrites any existing `trial-critic.json`, so re-running
+this skill on the same trial replaces the previous critique
+cleanly.
+
 Field rules:
 
 - `outcome` ∈ `passed | failed | errored`. `errored` covers
@@ -160,12 +168,9 @@ Field rules:
   `no_pre_edit_inspection`, `hallucinated_success`,
   `wrong_tool_family`, `gave_up_too_early`,
   `timeout_no_recovery`.
-- `confidence` ∈ `[0, 1]`. Lower it (≤ 0.5) when the trajectory
+-   `confidence` ∈ `[0, 1]`. Lower it (≤ 0.5) when the trajectory
   is missing data, the verifier output is ambiguous, or your
   reasoning relies on a single fragment of evidence.
-
-The CLI upserts on `trial_id`, so re-running this skill replaces
-the previous critique cleanly.
 
 ## Refusal cases
 
@@ -200,7 +205,8 @@ trial-critic /path/to/runs/experiments/tb2-baseline-20260417-234913/legs/basic/h
    tests/test_cancel.py while iterating on run.py."`,
    `anti_patterns=["no_pre_edit_inspection","repeated_failed_command"]`,
    `task_features=["multi_file_edit","async_python"]`.
-5. Pipe via `uv run lab insert-critique cancel-async-tasks__rGqDyp4 --json -`.
+5. Pipe via `uv run lab write-trial-critique
+   /path/to/runs/experiments/.../cancel-async-tasks__rGqDyp4 --json -`.
 6. Report one line back to the orchestrator: `OK; outcome=failed,
    root_cause=...`.
 

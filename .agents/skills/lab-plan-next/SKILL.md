@@ -45,15 +45,25 @@ Do **not** use this skill when:
 
 ## Roadmap structure
 
-Two sections only:
-
 ```
-## Up next     ← priority order, top = next to run. Mutable; reorder freely.
-## Done        ← newest at top. Entries land here when their experiment runs (regardless of outcome).
+## Up next            ← priority order, top = next to run. Mutable; reorder freely.
+  ### Suggested       ← daemon-only sub-section (lab-reflect-and-plan). Humans promote.
+## Done               ← newest at top. Entries land here when their experiment runs (regardless of outcome).
 ```
 
 There is no `## Later` section. If something isn't worth queueing
 yet, leave it as an idea in `lab/ideas.md` and queue it when ready.
+
+The `### Suggested` substream lives **inside** `## Up next` because
+it's a sibling priority queue the daemon writes to without
+touching the human queue. Humans:
+
+-   *promote* a suggestion into the main queue with
+    `uv run lab roadmap promote <slug>` (this skill); or
+-   ignore / drop it (just delete the section).
+
+**Never edit `### Suggested` to insert your own entries** — use
+`## Up next` directly for human-curated items.
 
 ## Entry shape
 
@@ -95,10 +105,12 @@ item they're referring to.
 
 One of:
 
-- **Add a new entry** to `## Up next`.
-- **Reorder** existing entries within `## Up next`.
-- **Move a completed entry to `## Done`** with a link to the
-  matching `experiments.md` section.
+-   **Add a new entry** to `## Up next` (human-driven).
+-   **Promote a suggestion** from `### Suggested` to the main `##
+    Up next` queue (`uv run lab roadmap promote <slug>`).
+-   **Reorder** existing entries within `## Up next`.
+-   **Move a completed entry to `## Done`** with a link to the
+    matching `experiments.md` section.
 
 Confirm with the user in one short sentence before mutating.
 
@@ -131,6 +143,18 @@ uv run lab idea move <idea-id> trying \
 
 For meta-experiments (`baseline snapshot` / `infrastructure`), pass
 no `--idea` flag and skip step 2 entirely.
+
+### 4a. Promoting a suggestion
+
+```bash
+# Move the named slug from `## Up next > ### Suggested` into the
+# main `## Up next` queue, preserving its bullets.
+uv run lab roadmap promote <slug>
+```
+
+The CLI errors if `<slug>` isn't in `### Suggested` or already in
+the main queue. Use this whenever the daemon's
+`lab-reflect-and-plan` proposed something worth committing to.
 
 ### 4. Reordering
 
@@ -167,7 +191,7 @@ After saving, report:
 
 Do **not**:
 
-- Edit `lab/experiments.md` or `lab/components.md`.
+- Edit `lab/experiments.md`, `lab/configs.md`, or `lab/components.md`.
 - Touch any agent YAML or experiment spec.
 - Run any experiment.
 - Create a git worktree, commit, or push.

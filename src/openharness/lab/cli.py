@@ -2,12 +2,19 @@
 
 Two audiences, one entry point:
 
-- **Critic skills** call read/write commands against the DB:
-  `uv run lab insert-critique <trial_id> --json -`
-  `uv run lab query-trials --task <name>`
-  `uv run lab insert-comparison <instance_id> <task> --json -`
-  `uv run lab insert-task-features <checksum> --json -`
+- **Critic skills** write their outputs to files (single source of
+  truth) via thin filesystem helpers:
+  `uv run lab write-trial-critique <trial_dir> --json -`
+  `uv run lab write-comparison <run_dir> <task_name> --json -`
+  `uv run lab write-experiment-critique <run_dir> --json -`
+  `uv run lab write-task-features <task_checksum> --json -`
+  `uv run lab write-component-perf <id> <cluster> --json -`
+  `uv run lab write-cross-experiment <spawn_id> --json -`
   `uv run lab append-followup-idea <slug> --motivation ... --sketch ... --source ...`
+
+  The DB tables (`trial_critiques`, `comparisons`, `task_features`,
+  …) are derived caches; refresh them with
+  `uv run lab ingest-critiques`.
 
 - **The five existing lab/* skills** call deterministic markdown helpers:
   `uv run lab idea move <id> trying`
@@ -17,9 +24,15 @@ Two audiences, one entry point:
   `uv run lab roadmap add <slug> ...`
   `uv run lab roadmap done <slug> --ran ... --outcome ...`
 
-The orchestrator (Phase 2) calls this same CLI rather than importing
-the package directly, so the contract is identical for skills, humans,
-and the daemon.
+The orchestrator (`runner.py`) calls this same CLI rather than
+importing the package directly, so the contract is identical for
+skills, humans, and the daemon.
+
+Back-compat: the old `insert-critique <trial_id>` /
+`insert-comparison <instance> <task>` / `insert-task-features` /
+`upsert-component-perf` aliases still work — they look up the
+on-disk path from the DB and forward to the new file-writing
+helper.
 """
 
 from __future__ import annotations
@@ -34,6 +47,7 @@ import typer
 from rich.console import Console
 from rich.table import Table
 
+from openharness.lab import critic_io
 from openharness.lab import db as labdb
 from openharness.lab import ingest as labingest
 from openharness.lab import lab_docs
@@ -56,10 +70,18 @@ idea_app = typer.Typer(no_args_is_help=True, help="Edit lab/ideas.md.")
 exp_app = typer.Typer(no_args_is_help=True, help="Edit lab/experiments.md.")
 roadmap_app = typer.Typer(no_args_is_help=True, help="Edit lab/roadmap.md.")
 daemon_app = typer.Typer(no_args_is_help=True, help="Orchestrator daemon (Phase 2).")
+tree_app = typer.Typer(no_args_is_help=True, help="Inspect / mutate the configuration tree (lab/configs.md).")
+trunk_app = typer.Typer(no_args_is_help=True, help="Show / set the trunk pointer.")
+graduate_app = typer.Typer(no_args_is_help=True, help="Confirm or reject staged trunk swaps.")
+components_app = typer.Typer(no_args_is_help=True, help="Inspect / mutate the components catalog (lab/components.md).")
 app.add_typer(idea_app, name="idea")
 app.add_typer(exp_app, name="experiments")
 app.add_typer(roadmap_app, name="roadmap")
 app.add_typer(daemon_app, name="daemon")
+app.add_typer(tree_app, name="tree")
+app.add_typer(trunk_app, name="trunk")
+app.add_typer(graduate_app, name="graduate")
+app.add_typer(components_app, name="components")
 
 
 # ===== infrastructure =======================================================
@@ -179,7 +201,12 @@ def query(sql: str = typer.Argument(..., help="A read-only SQL query.")) -> None
     console.print(f"[dim]{len(rows)} row(s)[/dim]")
 
 
-# ===== writers (used by critic skills) =====================================
+# ===== writers (used by critic skills; FILE-BASED — no DB writes) ==========
+#
+# Each command writes a JSON file under the canonical layout
+# (`critic_io.py`). The DB tables are caches rebuilt on demand by
+# `uv run lab ingest-critiques`. This eliminates DuckDB single-writer
+# contention between concurrent critic spawns.
 
 
 def _read_json_arg(value: str | None) -> dict | list:
@@ -191,193 +218,267 @@ def _read_json_arg(value: str | None) -> dict | list:
     return json.loads(value)
 
 
-@app.command("insert-critique")
-def insert_critique(
-    trial_id: str = typer.Argument(..., help="Trial id this critique is about."),
+def _expect_dict(payload: dict | list, what: str) -> dict:
+    if not isinstance(payload, dict):
+        err_console.print(f"[red]{what} payload must be a JSON object[/red]")
+        raise typer.Exit(2)
+    return payload
+
+
+@app.command("write-trial-critique")
+def write_trial_critique_cmd(
+    trial_dir: Path = typer.Argument(
+        ..., help="Absolute path to the trial directory under runs/experiments/."
+    ),
     json_in: str = typer.Option(
         "-", "--json", help="JSON file path, '-' for stdin, or inline JSON string."
     ),
+    critic_model: Optional[str] = typer.Option(
+        None, "--critic-model",
+        help="Defaults to $OPENHARNESS_CODEX_MODEL set by the codex adapter.",
+    ),
+) -> None:
+    """Persist a per-trial critique to `<trial_dir>/critic/trial-critic.json`."""
+    payload = _expect_dict(_read_json_arg(json_in), "critique")
+    if not trial_dir.is_dir():
+        err_console.print(f"[red]trial_dir does not exist: {trial_dir}[/red]")
+        raise typer.Exit(2)
+    path = critic_io.write_trial_critique(
+        trial_dir, payload, critic_model=critic_model,
+    )
+    typer.echo(f"write-trial-critique ok: {path}")
+
+
+@app.command("write-comparison")
+def write_comparison_cmd(
+    run_dir: Path = typer.Argument(
+        ..., help="Absolute path to the experiment run directory."
+    ),
+    task_name: str = typer.Argument(...),
+    json_in: str = typer.Option("-", "--json"),
     critic_model: Optional[str] = typer.Option(None, "--critic-model"),
 ) -> None:
-    """Insert / replace a row in trial_critiques."""
-    payload = _read_json_arg(json_in)
-    if not isinstance(payload, dict):
-        err_console.print("[red]critique payload must be a JSON object[/red]")
+    """Persist a per-task A/B comparison to `<run_dir>/critic/comparisons/<task>.json`."""
+    payload = _expect_dict(_read_json_arg(json_in), "comparison")
+    if not run_dir.is_dir():
+        err_console.print(f"[red]run_dir does not exist: {run_dir}[/red]")
         raise typer.Exit(2)
-    schema_version = int(payload.get("schema_version", 1))
-    with labdb.writer() as conn:
-        conn.execute(
-            """
-            INSERT INTO trial_critiques (
-                trial_id, schema_version, task_summary, agent_strategy, key_actions,
-                outcome, root_cause, success_factor, anti_patterns, components_active,
-                task_features, surprising_observations, confidence, critic_model,
-                extra, created_at
-            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
-            ON CONFLICT (trial_id) DO UPDATE SET
-                schema_version = EXCLUDED.schema_version,
-                task_summary = EXCLUDED.task_summary,
-                agent_strategy = EXCLUDED.agent_strategy,
-                key_actions = EXCLUDED.key_actions,
-                outcome = EXCLUDED.outcome,
-                root_cause = EXCLUDED.root_cause,
-                success_factor = EXCLUDED.success_factor,
-                anti_patterns = EXCLUDED.anti_patterns,
-                components_active = EXCLUDED.components_active,
-                task_features = EXCLUDED.task_features,
-                surprising_observations = EXCLUDED.surprising_observations,
-                confidence = EXCLUDED.confidence,
-                critic_model = EXCLUDED.critic_model,
-                extra = EXCLUDED.extra,
-                created_at = EXCLUDED.created_at
-            """,
-            [
-                trial_id,
-                schema_version,
-                payload.get("task_summary"),
-                payload.get("agent_strategy"),
-                json.dumps(payload.get("key_actions") or []),
-                payload.get("outcome"),
-                payload.get("root_cause"),
-                payload.get("success_factor"),
-                json.dumps(payload.get("anti_patterns") or []),
-                json.dumps(payload.get("components_active") or []),
-                json.dumps(payload.get("task_features") or []),
-                json.dumps(payload.get("surprising_observations") or []),
-                payload.get("confidence"),
-                critic_model or payload.get("critic_model"),
-                json.dumps(payload.get("extra") or {}),
-                datetime.now(timezone.utc),
-            ],
+    path = critic_io.write_comparison(
+        run_dir, task_name, payload, critic_model=critic_model,
+    )
+    typer.echo(f"write-comparison ok: {path}")
+
+
+@app.command("write-experiment-critique")
+def write_experiment_critique_cmd(
+    run_dir: Path = typer.Argument(...),
+    json_in: str = typer.Option("-", "--json"),
+    critic_model: Optional[str] = typer.Option(None, "--critic-model"),
+) -> None:
+    """Persist the experiment-level critique to `<run_dir>/critic/experiment-critic.json`."""
+    payload = _expect_dict(_read_json_arg(json_in), "experiment-critic summary")
+    if not run_dir.is_dir():
+        err_console.print(f"[red]run_dir does not exist: {run_dir}[/red]")
+        raise typer.Exit(2)
+    path = critic_io.write_experiment_critique(
+        run_dir, payload, critic_model=critic_model,
+    )
+    typer.echo(f"write-experiment-critique ok: {path}")
+
+
+@app.command("write-task-features")
+def write_task_features_cmd(
+    task_checksum: str = typer.Argument(...),
+    json_in: str = typer.Option("-", "--json"),
+    extracted_by: Optional[str] = typer.Option(
+        None, "--extracted-by",
+        help="Defaults to $OPENHARNESS_CODEX_MODEL set by the codex adapter.",
+    ),
+) -> None:
+    """Persist task features to `runs/lab/task_features/<checksum>.json`."""
+    payload = _expect_dict(_read_json_arg(json_in), "task-features")
+    path = critic_io.write_task_features(
+        task_checksum, payload, extracted_by=extracted_by,
+    )
+    typer.echo(f"write-task-features ok: {path}")
+
+
+@app.command("write-component-perf")
+def write_component_perf_cmd(
+    component_id: str = typer.Argument(...),
+    task_cluster: str = typer.Argument(...),
+    json_in: str = typer.Option("-", "--json"),
+) -> None:
+    """Persist a component × task-cluster perf row to `runs/lab/components_perf/`."""
+    payload = _expect_dict(_read_json_arg(json_in), "component-perf")
+    path = critic_io.write_component_perf(component_id, task_cluster, payload)
+    typer.echo(f"write-component-perf ok: {path}")
+
+
+@app.command("write-cross-experiment")
+def write_cross_experiment_cmd(
+    spawn_id: str = typer.Argument(
+        ...,
+        help="Spawn id (or any unique tag); used to disambiguate concurrent runs.",
+    ),
+    json_in: str = typer.Option("-", "--json"),
+    critic_model: Optional[str] = typer.Option(None, "--critic-model"),
+) -> None:
+    """Persist a cross-experiment snapshot to `runs/lab/cross_experiment/`."""
+    payload = _expect_dict(_read_json_arg(json_in), "cross-experiment")
+    path = critic_io.write_cross_experiment(
+        spawn_id, payload, critic_model=critic_model,
+    )
+    typer.echo(f"write-cross-experiment ok: {path}")
+
+
+@app.command("write-auto-proposed")
+def write_auto_proposed_cmd(
+    idea_id: str = typer.Argument(...),
+    json_in: str = typer.Option("-", "--json"),
+) -> None:
+    """Append-only sink for cross-experiment follow-up suggestions."""
+    payload = _expect_dict(_read_json_arg(json_in), "auto-proposed-idea")
+    path = critic_io.write_auto_proposed(idea_id, payload)
+    typer.echo(f"write-auto-proposed ok: {path}")
+
+
+# ----- back-compat aliases ------------------------------------------------
+#
+# Old skill prompts (and older docs) used `insert-critique <trial_id>` /
+# `insert-comparison <instance_id> <task>` / `insert-task-features`
+# / `upsert-component-perf`. Keep these working by looking up the
+# on-disk path from the DB and forwarding to the file-writing
+# commands above.
+
+
+@app.command("insert-critique")
+def insert_critique_alias(
+    trial_id: str = typer.Argument(...),
+    json_in: str = typer.Option("-", "--json"),
+    critic_model: Optional[str] = typer.Option(None, "--critic-model"),
+) -> None:
+    """[deprecated alias] Forwards to write-trial-critique using DB lookup."""
+    trial_dir = critic_io.trial_dir_from_id(trial_id)
+    if trial_dir is None:
+        err_console.print(
+            f"[red]No trials row for trial_id={trial_id!r}; cannot resolve trial_dir."
+            " Run `uv run lab ingest <run_dir>` first, or call write-trial-critique"
+            " directly with an absolute path.[/red]"
         )
-    typer.echo(f"insert-critique ok: {trial_id}")
+        raise typer.Exit(2)
+    write_trial_critique_cmd(
+        trial_dir=trial_dir, json_in=json_in, critic_model=critic_model,
+    )
 
 
 @app.command("insert-comparison")
-def insert_comparison(
+def insert_comparison_alias(
     instance_id: str = typer.Argument(...),
     task_name: str = typer.Argument(...),
     json_in: str = typer.Option("-", "--json"),
     critic_model: Optional[str] = typer.Option(None, "--critic-model"),
 ) -> None:
-    payload = _read_json_arg(json_in)
-    if not isinstance(payload, dict):
-        err_console.print("[red]comparison payload must be a JSON object[/red]")
-        raise typer.Exit(2)
-    with labdb.writer() as conn:
-        conn.execute(
-            """
-            INSERT INTO comparisons (
-                instance_id, task_name, winning_leg, runner_up_leg, delta_score,
-                why, evidence, legs_compared, critic_model, created_at
-            ) VALUES (?,?,?,?,?,?,?,?,?,?)
-            ON CONFLICT (instance_id, task_name) DO UPDATE SET
-                winning_leg = EXCLUDED.winning_leg,
-                runner_up_leg = EXCLUDED.runner_up_leg,
-                delta_score = EXCLUDED.delta_score,
-                why = EXCLUDED.why,
-                evidence = EXCLUDED.evidence,
-                legs_compared = EXCLUDED.legs_compared,
-                critic_model = EXCLUDED.critic_model,
-                created_at = EXCLUDED.created_at
-            """,
-            [
-                instance_id,
-                task_name,
-                payload.get("winning_leg"),
-                payload.get("runner_up_leg"),
-                payload.get("delta_score"),
-                payload.get("why"),
-                json.dumps(payload.get("evidence") or {}),
-                json.dumps(payload.get("legs_compared") or []),
-                critic_model or payload.get("critic_model"),
-                datetime.now(timezone.utc),
-            ],
+    """[deprecated alias] Forwards to write-comparison using DB lookup."""
+    run_dir = critic_io.run_dir_from_instance(instance_id)
+    if run_dir is None:
+        err_console.print(
+            f"[red]No experiments row for instance_id={instance_id!r}.[/red]"
         )
-    typer.echo(f"insert-comparison ok: {instance_id}/{task_name}")
+        raise typer.Exit(2)
+    write_comparison_cmd(
+        run_dir=run_dir, task_name=task_name, json_in=json_in, critic_model=critic_model,
+    )
 
 
 @app.command("insert-task-features")
-def insert_task_features(
+def insert_task_features_alias(
     task_checksum: str = typer.Argument(...),
     json_in: str = typer.Option("-", "--json"),
     extracted_by: Optional[str] = typer.Option(None, "--extracted-by"),
 ) -> None:
-    payload = _read_json_arg(json_in)
-    if not isinstance(payload, dict):
-        err_console.print("[red]task-features payload must be a JSON object[/red]")
-        raise typer.Exit(2)
-    with labdb.writer() as conn:
-        conn.execute(
-            """
-            INSERT INTO task_features (
-                task_checksum, task_name, category, required_tools, env_complexity,
-                output_shape, keywords, extra, extracted_by, extracted_at
-            ) VALUES (?,?,?,?,?,?,?,?,?,?)
-            ON CONFLICT (task_checksum) DO UPDATE SET
-                task_name = EXCLUDED.task_name,
-                category = EXCLUDED.category,
-                required_tools = EXCLUDED.required_tools,
-                env_complexity = EXCLUDED.env_complexity,
-                output_shape = EXCLUDED.output_shape,
-                keywords = EXCLUDED.keywords,
-                extra = EXCLUDED.extra,
-                extracted_by = EXCLUDED.extracted_by,
-                extracted_at = EXCLUDED.extracted_at
-            """,
-            [
-                task_checksum,
-                payload.get("task_name"),
-                payload.get("category"),
-                json.dumps(payload.get("required_tools") or []),
-                payload.get("env_complexity"),
-                payload.get("output_shape"),
-                json.dumps(payload.get("keywords") or []),
-                json.dumps(payload.get("extra") or {}),
-                extracted_by or payload.get("extracted_by"),
-                datetime.now(timezone.utc),
-            ],
-        )
-    typer.echo(f"insert-task-features ok: {task_checksum[:12]}…")
+    """[deprecated alias] Forwards to write-task-features."""
+    write_task_features_cmd(
+        task_checksum=task_checksum, json_in=json_in, extracted_by=extracted_by,
+    )
 
 
 @app.command("upsert-component-perf")
-def upsert_component_perf(
+def upsert_component_perf_alias(
     component_id: str = typer.Argument(...),
     task_cluster: str = typer.Argument(...),
     json_in: str = typer.Option("-", "--json"),
 ) -> None:
-    payload = _read_json_arg(json_in)
-    if not isinstance(payload, dict):
-        err_console.print("[red]component-perf payload must be a JSON object[/red]")
-        raise typer.Exit(2)
-    with labdb.writer() as conn:
-        conn.execute(
-            """
-            INSERT INTO components_perf (
-                component_id, task_cluster, n_trials, win_rate, cost_delta_pct,
-                supporting_experiments, notes, updated_at
-            ) VALUES (?,?,?,?,?,?,?,?)
-            ON CONFLICT (component_id, task_cluster) DO UPDATE SET
-                n_trials = EXCLUDED.n_trials,
-                win_rate = EXCLUDED.win_rate,
-                cost_delta_pct = EXCLUDED.cost_delta_pct,
-                supporting_experiments = EXCLUDED.supporting_experiments,
-                notes = EXCLUDED.notes,
-                updated_at = EXCLUDED.updated_at
-            """,
-            [
-                component_id,
-                task_cluster,
-                int(payload.get("n_trials", 0)),
-                payload.get("win_rate"),
-                payload.get("cost_delta_pct"),
-                json.dumps(payload.get("supporting_experiments") or []),
-                payload.get("notes"),
-                datetime.now(timezone.utc),
-            ],
-        )
-    typer.echo(f"upsert-component-perf ok: {component_id}/{task_cluster}")
+    """[deprecated alias] Forwards to write-component-perf."""
+    write_component_perf_cmd(
+        component_id=component_id, task_cluster=task_cluster, json_in=json_in,
+    )
+
+
+# ===== ingest-critiques + dump-critiques-to-files ==========================
+
+
+@app.command("ingest-critiques")
+def ingest_critiques_cmd(
+    run_dirs: list[Path] = typer.Argument(
+        None,
+        help=(
+            "One or more experiment run dirs to scan. Omit to scan ALL "
+            "experiment dirs under runs/experiments/."
+        ),
+    ),
+    include_lab_wide: bool = typer.Option(
+        True, "--lab-wide/--no-lab-wide",
+        help=(
+            "Also load lab-wide artifacts: task_features, components_perf, "
+            "spawns. Off if you only want to refresh per-experiment caches."
+        ),
+    ),
+) -> None:
+    """Rebuild the DB cache tables from on-disk critic artifacts."""
+    summary = labingest.ingest_critiques(
+        run_dirs or None, include_lab_wide=include_lab_wide,
+    )
+    typer.echo(
+        f"ingest-critiques: trial_critiques={summary['trial_critiques']} "
+        f"comparisons={summary['comparisons']} "
+        f"experiment_critic_files={summary['experiment_critic_files']} "
+        f"task_features={summary['task_features']} "
+        f"components_perf={summary['components_perf']} "
+        f"spawns={summary['spawns']}"
+    )
+
+
+@app.command("dump-critiques-to-files")
+def dump_critiques_to_files_cmd(
+    instance_id: Optional[str] = typer.Argument(
+        None, help="Restrict the dump to one instance. Omit for ALL."
+    ),
+    overwrite: bool = typer.Option(
+        False, "--overwrite",
+        help="Overwrite existing critic files. Off by default — preserves any "
+             "newer file already on disk.",
+    ),
+) -> None:
+    """One-shot migration: dump existing DB rows to the file scheme.
+
+    Use this once after the file-based refactor lands to materialize
+    historical critiques (which were inserted into DuckDB by the old
+    `insert-critique` path) onto the new on-disk layout. After this
+    runs, every trial / task feature / comparison has a JSON file
+    next to its evidence and the DB rows can be regenerated from
+    them at any time.
+    """
+    summary = labingest.dump_db_to_files(
+        instance_id=instance_id, overwrite=overwrite,
+    )
+    typer.echo(
+        f"dumped: trial_critiques={summary['trial_critiques']} "
+        f"comparisons={summary['comparisons']} "
+        f"task_features={summary['task_features']} "
+        f"components_perf={summary['components_perf']} "
+        f"(overwrite={overwrite})"
+    )
 
 
 # ===== ideas / experiments / roadmap markdown helpers ======================
@@ -442,8 +543,66 @@ def cmd_exp_stub(
     hypothesis: str = typer.Option(..., "--hypothesis"),
     variant: str = typer.Option(..., "--variant"),
 ) -> None:
+    """Legacy stub (Variant/Results/Notes/Decision shape).
+
+    Kept for back-compat with old experiments. New entries should use
+    `lab experiments append-entry` (tree+journal shape).
+    """
     lab_docs.stub_experiment(slug=slug, hypothesis=hypothesis, variant=variant)
     typer.echo(f"stubbed experiment {slug!r}")
+
+
+@exp_app.command("append-entry")
+def cmd_exp_append_entry(
+    slug: str,
+    type_: str = typer.Option(
+        "paired-ablation",
+        "--type",
+        help="paired-ablation | broad-sweep | smoke",
+    ),
+    trunk: str = typer.Option(
+        "",
+        "--trunk",
+        help="Trunk agent id at run-time (e.g. 'basic'). "
+             "Defaults to `uv run lab trunk show`.",
+    ),
+    mutation: Optional[str] = typer.Option(
+        None,
+        "--mutation",
+        help="One-line description of what differs from trunk. "
+             "Omit for --type broad-sweep.",
+    ),
+    hypothesis: str = typer.Option(..., "--hypothesis"),
+    run_path: Optional[str] = typer.Option(
+        None,
+        "--run",
+        help="repo-relative path, e.g. runs/experiments/<id>. Optional.",
+    ),
+) -> None:
+    """Append a new journal entry (tree+journal shape) at the top of
+    `lab/experiments.md`.
+
+    Header is filled in immediately; the five `### <section>` blocks
+    are stubbed empty and populated later by `experiments synthesize`
+    and `tree apply`.
+    """
+    if not trunk:
+        snap = lab_docs.tree_snapshot()
+        trunk = snap.trunk_id or "unknown"
+    trunk_md = (
+        f"[`{trunk}`](../src/openharness/agents/configs/{trunk}.yaml)"
+        if not trunk.startswith("[")
+        else trunk
+    )
+    lab_docs.append_journal_entry(
+        slug=slug,
+        type_=type_,
+        trunk_at_runtime=trunk_md,
+        mutation=mutation,
+        hypothesis=hypothesis,
+        run_path=run_path,
+    )
+    typer.echo(f"appended journal entry {slug!r} (type={type_})")
 
 
 @exp_app.command("fill")
@@ -519,6 +678,678 @@ def dashboard(
         "--browser.gatherUsageStats", "false",
     ]
     raise typer.Exit(subprocess.call(cmd))
+
+
+# ===== analyze (manual backfill) ============================================
+
+
+@app.command()
+def analyze(
+    instance_id: str = typer.Argument(
+        ...,
+        help="The experiment instance_id to analyze (matches `experiments.instance_id`).",
+    ),
+    concurrency: int = typer.Option(
+        4, "--concurrency", "-j", min=1, max=32,
+        help="Max parallel codex spawns. Defaults to the codex adapter's pool size.",
+    ),
+    dry_run: bool = typer.Option(
+        False, "--dry-run",
+        help="Print the spawn plan and exit. No codex calls.",
+    ),
+    limit_trials: Optional[int] = typer.Option(
+        None, "--limit-trials",
+        help="Cap how many trial-critic spawns to run. Useful for smoke tests.",
+    ),
+    limit_features: Optional[int] = typer.Option(
+        None, "--limit-features",
+        help="Cap how many task-features spawns to run.",
+    ),
+    skip_trial_critic: bool = typer.Option(
+        False, "--skip-trial-critic", help="Skip Phase A trial-critic fan-out.",
+    ),
+    skip_task_features: bool = typer.Option(
+        False, "--skip-task-features", help="Skip Phase A task-features fan-out.",
+    ),
+    skip_experiment_critic: bool = typer.Option(
+        False, "--skip-experiment-critic", help="Skip Phase B experiment-critic.",
+    ),
+    force_experiment_critic: bool = typer.Option(
+        False, "--force-experiment-critic",
+        help="Run experiment-critic even if comparison rows already exist.",
+    ),
+    include_cross_experiment: bool = typer.Option(
+        False, "--include-cross-experiment",
+        help=(
+            "Also run cross-experiment-critic after Phase B. Off by default "
+            "because the apex spawn analyzes the WHOLE database, not just "
+            "this instance."
+        ),
+    ),
+) -> None:
+    """Backfill critic data for an existing experiment.
+
+    Mirrors the daemon's post-ingest pipeline (steps 4-7), but
+    targeted at one instance and triggered manually. Three phases:
+
+      A. parallel: trial-critic over uncritiqued trials  +
+                   task-features over unseen task_checksums
+      B. sequential: experiment-critic <instance_id>
+                     (only if every trial now has a critique)
+      C. sequential (opt-in): cross-experiment-critic
+
+    Use --dry-run to preview the spawn plan, --limit-trials N to
+    smoke a small batch first, --concurrency N to tune the pool.
+    """
+    from openharness.lab import codex as codex_adapter
+    from openharness.lab.runner import (
+        checksums_needing_features,
+        comparison_exists,
+        instance_exists,
+        trials_needing_critique,
+    )
+
+    if not LAB_DB_PATH.exists():
+        err_console.print("[red]No lab DB. Run `uv run lab init` and `uv run lab ingest <run_dir>` first.[/red]")
+        raise typer.Exit(1)
+    if not instance_exists(instance_id):
+        err_console.print(f"[red]instance_id {instance_id!r} not found in `experiments` table[/red]")
+        raise typer.Exit(1)
+
+    # ---- gather work ------------------------------------------------------
+    trial_jobs = [] if skip_trial_critic else trials_needing_critique(instance_id)
+    feature_jobs = [] if skip_task_features else checksums_needing_features(instance_id)
+    if limit_trials is not None:
+        trial_jobs = trial_jobs[:limit_trials]
+    if limit_features is not None:
+        feature_jobs = feature_jobs[:limit_features]
+
+    cmp_already = comparison_exists(instance_id)
+    will_run_exp_critic = not skip_experiment_critic and (
+        force_experiment_critic or not cmp_already
+    )
+
+    # ---- print plan -------------------------------------------------------
+    plan = Table(title=f"analyze plan for {instance_id}", show_header=True)
+    plan.add_column("phase")
+    plan.add_column("skill")
+    plan.add_column("count", justify="right")
+    plan.add_column("notes")
+    plan.add_row(
+        "A", "trial-critic", str(len(trial_jobs)),
+        "skipped" if skip_trial_critic else f"limit={limit_trials}" if limit_trials else "all uncritiqued",
+    )
+    plan.add_row(
+        "A", "task-features", str(len(feature_jobs)),
+        "skipped" if skip_task_features else f"limit={limit_features}" if limit_features else "all unseen checksums",
+    )
+    plan.add_row(
+        "B", "experiment-critic",
+        "1" if will_run_exp_critic else "0",
+        "skipped" if skip_experiment_critic
+        else "comparison rows already present (use --force-experiment-critic to re-run)" if cmp_already and not force_experiment_critic
+        else "would run",
+    )
+    plan.add_row(
+        "C", "cross-experiment-critic",
+        "1" if include_cross_experiment else "0",
+        "opt in with --include-cross-experiment" if not include_cross_experiment
+        else "WHOLE DB scope; xhigh, singleton, ~12h cap",
+    )
+    console.print(plan)
+
+    if dry_run:
+        typer.echo("(dry-run; no spawns issued)")
+        raise typer.Exit(0)
+
+    if not (trial_jobs or feature_jobs or will_run_exp_critic or include_cross_experiment):
+        typer.echo("nothing to do.")
+        raise typer.Exit(0)
+
+    # ---- build a codex config tuned for backfill --------------------------
+    # NB: enforce_orchestrator_lock=False because `analyze` is a
+    # human-triggered backfill, not the daemon — it must NOT contend
+    # with the orchestrator lock. record_in_db=True so spawns still
+    # land in the `spawns` table (so this run is auditable next to
+    # daemon-driven runs).
+    cx = codex_adapter.CodexConfig(
+        max_concurrency=concurrency,
+        enforce_orchestrator_lock=False,
+        record_in_db=True,
+    )
+
+    started = datetime.now(timezone.utc)
+    typer.echo(f"\n=== Phase A: per-trial + per-checksum (concurrency={concurrency}) ===")
+    # Interleave so monitoring sees both row counts climbing in
+    # parallel; the global semaphore decides actual concurrency.
+    trial_invs = [("trial-critic", [trial_dir]) for _, trial_dir in trial_jobs]
+    feat_invs = [("task-features", [c]) for c in feature_jobs]
+    invocations: list[tuple[str, list[str]]] = []
+    for i in range(max(len(trial_invs), len(feat_invs))):
+        if i < len(trial_invs):
+            invocations.append(trial_invs[i])
+        if i < len(feat_invs):
+            invocations.append(feat_invs[i])
+    if invocations:
+        results_a = codex_adapter.run_many(invocations, cfg=cx)
+        n_ok = sum(1 for r in results_a if r.ok)
+        n_fail = len(results_a) - n_ok
+        typer.echo(f"Phase A done: {n_ok} ok, {n_fail} failed.")
+        if n_fail:
+            err_console.print("[yellow]failed spawn logs:[/yellow]")
+            for r in results_a:
+                if not r.ok:
+                    err_console.print(f"  {r.skill} args={r.args} -> exit={r.exit_code} log={r.log_path}")
+    else:
+        typer.echo("Phase A: nothing to do.")
+
+    # Re-check after Phase A: experiment-critic only makes sense once
+    # every trial has a critique; warn loudly if any are missing.
+    still_needing = trials_needing_critique(instance_id)
+    if will_run_exp_critic and still_needing:
+        err_console.print(
+            f"[yellow]Skipping experiment-critic: {len(still_needing)} trial(s) "
+            "still missing critiques after Phase A. Re-run analyze to retry.[/yellow]"
+        )
+        will_run_exp_critic = False
+
+    if will_run_exp_critic:
+        typer.echo("\n=== Phase B: experiment-critic ===")
+        r = codex_adapter.run("experiment-critic", [instance_id], cfg=cx)
+        typer.echo(
+            f"experiment-critic exit={r.exit_code} log={r.log_path}"
+            f" duration={r.duration_sec:.0f}s"
+        )
+
+    if include_cross_experiment:
+        typer.echo("\n=== Phase C: cross-experiment-critic ===")
+        r = codex_adapter.run("cross-experiment-critic", [], cfg=cx)
+        typer.echo(
+            f"cross-experiment-critic exit={r.exit_code} log={r.log_path}"
+            f" duration={r.duration_sec:.0f}s"
+        )
+
+    # Refresh the DB cache from the on-disk critic artifacts the
+    # spawns above produced. Critic outputs are files (single
+    # source of truth); the DB tables are derived.
+    typer.echo("\n=== refreshing DB cache from critic files ===")
+    run_dir = critic_io.run_dir_from_instance(instance_id)
+    cache = labingest.ingest_critiques(
+        [run_dir] if run_dir else None,
+        include_lab_wide=True,
+    )
+    typer.echo(
+        "ingest-critiques: " + ", ".join(f"{k}={v}" for k, v in cache.items())
+    )
+
+    elapsed = (datetime.now(timezone.utc) - started).total_seconds()
+    typer.echo(f"\nanalyze done in {elapsed:.0f}s ({elapsed/60:.1f}m).")
+
+
+# ===== tree / trunk / graduate / experiments-synthesize ===================
+#
+# All of these commands are *deterministic* mutations of the lab.
+# They never touch codex. Critic skills and the daemon call them via
+# this CLI; humans do too. The runner's close-loop is just:
+#
+#   lab experiments synthesize <slug>      # write Aggregate / Mutation impact
+#   lab tree apply <slug>                  # tree_ops.evaluate + tree.apply_diff
+#   lab roadmap suggest <new_slug> ...     # if the verdict surfaces a follow-up
+#   lab graduate confirm <slug>            # human-only step for trunk swaps
+
+
+def _lookup_instance_for_slug(conn: object, slug: str) -> str | None:
+    """Best-effort: map a journal slug to an `experiments.instance_id`.
+
+    Resolution order (each rejects to the next on miss):
+      1. exact: instance_id == slug
+      2. cached: tree_diffs.slug == slug
+      3. prefix: instance_id LIKE slug || '-%'
+      4. experiment_id == slug
+      5. slug starts with `<experiment_id>-` for some row
+    """
+    exact = conn.execute(  # type: ignore[attr-defined]
+        "SELECT instance_id FROM experiments WHERE instance_id = ?",
+        [slug],
+    ).fetchone()
+    if exact:
+        return exact[0]
+    cached = conn.execute(  # type: ignore[attr-defined]
+        "SELECT instance_id FROM tree_diffs WHERE slug = ?", [slug],
+    ).fetchone()
+    if cached and cached[0]:
+        return cached[0]
+    prefix = conn.execute(  # type: ignore[attr-defined]
+        "SELECT instance_id FROM experiments "
+        "WHERE instance_id LIKE ? || '-%' "
+        "ORDER BY created_at DESC LIMIT 1",
+        [slug],
+    ).fetchone()
+    if prefix:
+        return prefix[0]
+    by_eid = conn.execute(  # type: ignore[attr-defined]
+        "SELECT instance_id FROM experiments "
+        "WHERE experiment_id = ? "
+        "ORDER BY created_at DESC LIMIT 1",
+        [slug],
+    ).fetchone()
+    if by_eid:
+        return by_eid[0]
+    rows = conn.execute(  # type: ignore[attr-defined]
+        "SELECT instance_id, experiment_id FROM experiments "
+        "ORDER BY created_at DESC"
+    ).fetchall()
+    for inst_id, eid in rows:
+        if eid and slug.startswith(f"{eid}-"):
+            return inst_id
+    return None
+
+
+def _resolve_diff_for_slug(slug: str):
+    # -> tuple[str, tree_ops.TreeDiff]; lazy import to avoid cycles.
+    """Look up the experiment instance for a slug and recompute its diff.
+
+    Falls back to the cached row in `tree_diffs` if the slug isn't in
+    `experiments`. We always recompute from `tree_ops.evaluate` when
+    we have an instance_id so the verdict reflects the latest data.
+    """
+    from openharness.lab import tree_ops as _tree_ops
+
+    instance_id: str | None = None
+    with labdb.reader() as conn:
+        instance_id = _lookup_instance_for_slug(conn, slug)
+
+    if not instance_id:
+        err_console.print(
+            f"[red]Could not resolve slug {slug!r} to an instance_id.[/red]"
+        )
+        raise typer.Exit(2)
+
+    diff = _tree_ops.evaluate(instance_id)
+    return instance_id, diff
+
+
+@tree_app.command("show")
+def tree_show(json_out: bool = typer.Option(False, "--json")) -> None:
+    """Print the current configuration tree (trunk + branches + rejected)."""
+    snap = lab_docs.tree_snapshot()
+    if json_out:
+        typer.echo(json.dumps({
+            "trunk_id": snap.trunk_id,
+            "trunk_anchor": snap.trunk_anchor,
+            "branches": [b.__dict__ for b in snap.branches],
+            "rejected": [r.__dict__ for r in snap.rejected],
+            "proposed": [p.__dict__ for p in snap.proposed],
+        }, indent=2))
+        return
+    console.print(f"[bold]Trunk:[/bold] [cyan]{snap.trunk_id}[/cyan]")
+    if snap.trunk_anchor:
+        console.print(f"  [dim]{snap.trunk_anchor}[/dim]")
+    if snap.branches:
+        t = Table(title="Branches", show_header=True)
+        t.add_column("ID")
+        t.add_column("Mutation")
+        t.add_column("Use-when")
+        t.add_column("Last verified")
+        for b in snap.branches:
+            t.add_row(b.branch_id, b.mutation, b.use_when, b.last_verified or "")
+        console.print(t)
+    else:
+        console.print("[dim]Branches: (none)[/dim]")
+    if snap.rejected:
+        t = Table(title="Rejected", show_header=True)
+        t.add_column("ID")
+        t.add_column("Reason")
+        t.add_column("Evidence")
+        for r in snap.rejected:
+            t.add_row(r.branch_id, r.reason, r.evidence or "")
+        console.print(t)
+
+
+@tree_app.command("apply")
+def tree_apply(
+    slug: str = typer.Argument(...),
+    instance: Optional[str] = typer.Option(
+        None, "--instance",
+        help="Override: use this instance_id (else resolved from slug).",
+    ),
+    applied_by: str = typer.Option("auto:cli", "--applied-by"),
+    dry_run: bool = typer.Option(
+        False, "--dry-run",
+        help="Print the diff that would be applied; do not write.",
+    ),
+) -> None:
+    """Recompute the TreeDiff for `slug` and apply it to the lab."""
+    from openharness.lab import tree as _tree
+    from openharness.lab import tree_ops as _tree_ops
+
+    if instance:
+        diff = _tree_ops.evaluate(instance)
+    else:
+        _, diff = _resolve_diff_for_slug(slug)
+
+    console.print(f"[bold]TreeDiff for {slug}:[/bold]")
+    console.print(json.dumps(diff.to_dict(), indent=2, default=str))
+
+    if dry_run:
+        typer.echo("(dry-run; no edits)")
+        raise typer.Exit(0)
+
+    result = _tree.apply_diff(slug=slug, diff=diff, applied_by=applied_by)
+    typer.echo(
+        f"\napplied={result.applied} (by={result.applied_by}); "
+        f"journal_block_written={result.journal_block_written}"
+    )
+    for note in result.notes:
+        typer.echo(f"  - {note}")
+
+
+@trunk_app.command("show")
+def trunk_show() -> None:
+    """Print the current trunk id (last `trunk_changes` row, else trunk.yaml)."""
+    from openharness.lab import tree_ops as _tree_ops
+
+    tid = _tree_ops.current_trunk_id()
+    typer.echo(tid)
+
+
+@trunk_app.command("set")
+def trunk_set(
+    trunk_id: str = typer.Argument(...),
+    reason: str = typer.Option(..., "--reason"),
+    journal_link: Optional[str] = typer.Option(
+        None, "--journal-link",
+        help="e.g. '[`tb2-baseline-full-sweep`](experiments.md#...)'",
+    ),
+    audit: bool = typer.Option(
+        True, "--audit/--no-audit",
+        help="Also append a `trunk_changes` row.",
+    ),
+) -> None:
+    """Manually set the `## Trunk` pointer in configs.md (and audit it).
+
+    NOTE: this only edits the markdown + audit log. It does NOT copy
+    `<trunk_id>.yaml → trunk.yaml`. Use `lab graduate confirm` for
+    that — it's the path that swaps the actual agent file.
+    """
+    from openharness.lab.tree_ops import current_trunk_id, insert_trunk_change
+
+    prev = current_trunk_id()
+    lab_docs.set_trunk(trunk_id=trunk_id, reason=reason, journal_link=journal_link)
+    msg = f"trunk set to {trunk_id!r}"
+    if audit:
+        with labdb.writer() as conn:
+            insert_trunk_change(
+                conn,
+                at_ts=datetime.now(timezone.utc),
+                from_id=prev if prev != trunk_id else None,
+                to_id=trunk_id,
+                reason=reason,
+                applied_by="human:cli",
+            )
+        msg += " (audited in trunk_changes)"
+    typer.echo(msg)
+
+
+@graduate_app.command("confirm")
+def graduate_confirm(
+    slug: str = typer.Argument(...),
+    applied_by: str = typer.Option(
+        ..., "--applied-by",
+        help="e.g. 'human:alice' — required so trunk swaps are attributable.",
+    ),
+    reason: Optional[str] = typer.Option(
+        None, "--reason",
+        help="Override the rationale (else the diff's own rationale is used).",
+    ),
+    instance: Optional[str] = typer.Option(
+        None, "--instance",
+        help="Override: use this instance_id (else resolved from slug).",
+    ),
+) -> None:
+    """Confirm a STAGED Graduate diff: copy `<target>.yaml → trunk.yaml` + audit.
+
+    This is the only path that swaps the actual trunk YAML. It
+    requires `--applied-by` so we always know who made the call.
+    """
+    from openharness.lab import tree as _tree
+    from openharness.lab import tree_ops as _tree_ops
+
+    if instance:
+        diff = _tree_ops.evaluate(instance)
+    else:
+        _, diff = _resolve_diff_for_slug(slug)
+
+    if diff.kind != "graduate":
+        err_console.print(
+            f"[red]TreeDiff for {slug!r} is kind={diff.kind!r}, not 'graduate'."
+            f" Nothing to confirm.[/red]"
+        )
+        raise typer.Exit(2)
+
+    result = _tree.confirm_graduate(
+        slug=slug, diff=diff, applied_by=applied_by, reason=reason,
+    )
+    typer.echo(f"graduated `{diff.target_id}` → trunk (by={applied_by}).")
+    for note in result.notes:
+        typer.echo(f"  - {note}")
+
+
+@exp_app.command("synthesize")
+def cmd_exp_synthesize(
+    slug: str = typer.Argument(...),
+    instance: Optional[str] = typer.Option(
+        None, "--instance",
+        help="Override: use this instance_id (else looked up from slug).",
+    ),
+    sections: list[str] = typer.Option(
+        [], "--section",
+        help=(
+            "Repeat to limit which `### <section>`s are synthesised. "
+            "Default: Aggregate, Mutation impact, Failure modes, "
+            "Linked follow-ups (the four narrative sections; "
+            "Tree effect comes from `lab tree apply`)."
+        ),
+    ),
+) -> None:
+    """Synthesize narrative journal sections for `slug` from critic JSONs.
+
+    Reads `<run_dir>/critic/experiment-critic.json`, the per-task
+    `comparisons/*.json`, and the trial critiques, then writes the
+    `### Aggregate`, `### Mutation impact`, `### Failure modes`, and
+    `### Linked follow-ups` blocks into the matching journal entry.
+    Idempotent: re-running rewrites in place.
+    """
+    from openharness.lab import journal_synth
+
+    instance_id = instance
+    if not instance_id:
+        with labdb.reader() as conn:
+            instance_id = _lookup_instance_for_slug(conn, slug)
+        if not instance_id:
+            err_console.print(
+                f"[red]No experiment matches slug {slug!r}.[/red]"
+            )
+            raise typer.Exit(2)
+
+    written = journal_synth.synthesize(
+        slug=slug, instance_id=instance_id,
+        only_sections=sections or None,
+    )
+    typer.echo(f"synthesized {len(written)} section(s) into {slug!r}:")
+    for section in written:
+        typer.echo(f"  - ### {section}")
+
+
+# ===== roadmap suggest / promote ==========================================
+
+
+@roadmap_app.command("suggest")
+def cmd_roadmap_suggest(
+    slug: str,
+    hypothesis: str = typer.Option(..., "--hypothesis"),
+    source: str = typer.Option(
+        ..., "--source",
+        help="e.g. 'cross-experiment-critic@2026-04-18' or 'lab-reflect-and-plan'.",
+    ),
+    cost: Optional[str] = typer.Option(None, "--cost"),
+) -> None:
+    """Append a daemon-proposed entry to `## Up next > ### Suggested`.
+
+    The Suggested subsection is the agent write-zone; humans promote
+    one to the main queue with `lab roadmap promote <slug>`.
+    """
+    lab_docs.add_suggested_followup(
+        slug=slug, hypothesis=hypothesis, source=source, cost=cost,
+    )
+    typer.echo(f"suggested {slug!r} (source={source})")
+
+
+@roadmap_app.command("promote")
+def cmd_roadmap_promote(slug: str) -> None:
+    """Move `### Suggested > #### <slug>` into the main `## Up next` queue."""
+    try:
+        lab_docs.promote_suggested(slug=slug)
+    except lab_docs.LabDocError as exc:
+        err_console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(2) from exc
+    typer.echo(f"promoted {slug!r} to ## Up next")
+
+
+# ===== idea auto-propose (cross-experiment-critic write-zone) ==============
+
+
+@idea_app.command("auto-propose")
+def cmd_idea_auto_propose(
+    idea_id: str,
+    motivation: str = typer.Option(..., "--motivation"),
+    sketch: str = typer.Option(..., "--sketch"),
+    source: str = typer.Option(
+        ..., "--source",
+        help="e.g. 'cross-experiment-critic@2026-04-18'.",
+    ),
+) -> None:
+    """Append a follow-up to `## Auto-proposed` (alias for the legacy command)."""
+    lab_docs.append_auto_proposed_idea(
+        idea_id=idea_id, motivation=motivation, sketch=sketch, source=source,
+    )
+    typer.echo(f"auto-proposed {idea_id!r}")
+
+
+# ===== components catalog ==================================================
+
+
+@components_app.command("show")
+def components_show(
+    kind: Optional[str] = typer.Option(
+        None, "--kind", help="Filter to one of Architecture/Runtime/Tools/Prompt/Model.",
+    ),
+    json_out: bool = typer.Option(False, "--json"),
+) -> None:
+    """Print the components catalog (atoms grouped by kind + status)."""
+    from openharness.lab import components_doc as cdoc
+
+    cat = cdoc.read_catalog()
+    if json_out:
+        out: dict[str, list[dict]] = {}
+        for k, entries in cat.by_kind.items():
+            if kind and k != kind:
+                continue
+            out[k] = [
+                {
+                    "id": e.component_id,
+                    "status": e.status,
+                    "description": e.description,
+                    "used_by": e.used_by,
+                    "evidence": e.evidence,
+                }
+                for e in entries
+            ]
+        typer.echo(json.dumps(out, indent=2))
+        return
+
+    for k in cdoc.CATALOG_KINDS:
+        if kind and k != kind:
+            continue
+        entries = cat.by_kind.get(k, [])
+        if not entries:
+            console.print(f"[bold]{k}:[/bold] [dim](none)[/dim]")
+            continue
+        t = Table(title=k, show_header=True)
+        t.add_column("ID", style="cyan")
+        t.add_column("Status")
+        t.add_column("Description")
+        t.add_column("Used by")
+        for e in entries:
+            t.add_row(
+                e.component_id,
+                _status_badge(e.status),
+                e.description,
+                ", ".join(e.used_by) if e.used_by else "—",
+            )
+        console.print(t)
+
+
+def _status_badge(status: str) -> str:
+    return {
+        "proposed":     "[dim]proposed[/dim]",
+        "experimental": "[yellow]experimental[/yellow]",
+        "branch":       "[cyan]branch[/cyan]",
+        "validated":    "[green]validated[/green]",
+        "rejected":     "[red]rejected[/red]",
+        "superseded":   "[magenta]superseded[/magenta]",
+    }.get(status, status)
+
+
+@components_app.command("upsert")
+def components_upsert(
+    component_id: str = typer.Argument(...),
+    kind: str = typer.Option(..., "--kind", help="Architecture/Runtime/Tools/Prompt/Model."),
+    description: Optional[str] = typer.Option(None, "--description"),
+    status: Optional[str] = typer.Option(
+        None, "--status",
+        help="proposed/experimental/branch/validated/rejected/superseded "
+             "(forward-only via this command).",
+    ),
+    used_by: Optional[str] = typer.Option(
+        None, "--used-by",
+        help="Comma-separated agent ids that include this component.",
+    ),
+    evidence: Optional[str] = typer.Option(
+        None, "--evidence",
+        help="Markdown link or short string to append to the Evidence column.",
+    ),
+) -> None:
+    """Insert or update a component entry. Status bumps are forward-only."""
+    from openharness.lab import components_doc as cdoc
+
+    used_list = [u.strip() for u in used_by.split(",") if u.strip()] if used_by else None
+    ev_list = [evidence.strip()] if evidence else None
+    entry = cdoc.upsert(
+        component_id=component_id,
+        kind=kind,
+        description=description,
+        status=status,
+        used_by=used_list,
+        evidence=ev_list,
+    )
+    typer.echo(f"upserted {entry.component_id!r} [{entry.status}] under {entry.kind}")
+
+
+@components_app.command("set-status")
+def components_set_status(
+    component_id: str = typer.Argument(...),
+    status: str = typer.Argument(..., help="One of proposed/experimental/branch/validated/rejected/superseded."),
+    evidence: Optional[str] = typer.Option(
+        None, "--evidence",
+        help="Markdown link or short string to append to the Evidence column.",
+    ),
+) -> None:
+    """Unconditional status set (humans only — bypasses the bump lattice)."""
+    from openharness.lab import components_doc as cdoc
+
+    entry = cdoc.set_status(component_id=component_id, status=status, evidence=evidence)
+    typer.echo(f"set {entry.component_id!r} → {entry.status}")
 
 
 # ===== daemon ==============================================================

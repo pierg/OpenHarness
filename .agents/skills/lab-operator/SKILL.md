@@ -30,18 +30,51 @@ This skill is task-only.
 ## Quick orientation (always run first)
 
 When the user invokes this skill, **always start with the same
-three reads** so you know the current state before doing anything:
+six reads** so you know the current state before doing anything:
 
 ```bash
+codex login status                       # MUST say 'Logged in using ChatGPT'
 uv run lab daemon status
 uv run lab info
+uv run lab tree show                     # current trunk + branches
+uv run lab query "SELECT slug, kind, applied, applied_by
+                  FROM tree_diffs ORDER BY applied_at DESC NULLS LAST LIMIT 5"
 uv run lab query "SELECT skill, exit_code, started_at
                   FROM spawns ORDER BY started_at DESC LIMIT 5"
 ```
 
 Then summarise to the user in two-to-four lines: is the daemon
-up, what was the last spawn, how many trials/critiques are in the
-DB. Don't take any action until you've reported this.
+up, what's the trunk, are there any **staged Graduate verdicts
+awaiting human confirmation** (`tree_diffs.kind = 'graduate' AND
+applied = FALSE`), what was the last spawn, how many
+trials/critiques are in the DB. Don't take any action until you've
+reported this.
+
+**Staged graduates are special** — they're the one place where the
+autonomous loop blocks on a human. If `tree_diffs` shows one,
+mention it explicitly and offer to invoke `lab-graduate-component`
+to confirm or reject.
+
+### Codex auth: ChatGPT subscription only (HARD RULE)
+
+The lab is **not allowed** to use an OpenAI API key for codex.
+ChatGPT-subscription auth is the only accepted mode (it has the
+quota the user pays for; the API-key path bills against a separate
+exhaustible balance and has burned us once already).
+
+If `codex login status` does NOT say `Logged in using ChatGPT`,
+**stop and report** before doing anything else. The fix is:
+
+```bash
+codex logout
+codex login                              # interactive: pick "Sign in with ChatGPT"
+```
+
+The orchestrator already enforces this in code
+(`codex._check_auth()` refuses `auth_mode='apikey'`, and
+`codex.run()` strips `OPENAI_API_KEY` from the child env), so any
+API-key auth will surface as a hard `CodexAdapterError` on the
+first spawn — but flagging it up front saves a wasted tick.
 
 ## Common tasks
 
@@ -155,6 +188,40 @@ uv run lab daemon start --background  # or whichever launch mode
 Don't skip the `status` check between stop and start — re-locking
 while the previous pid is still finalising will fail.
 
+### "What's the tree look like right now?"
+
+```bash
+uv run lab tree show                     # human-readable trunk + branches
+uv run lab tree show --json              # for piping
+uv run lab trunk show                    # just the trunk id
+uv run lab query "
+  SELECT at_ts, from_id, to_id, reason, applied_by
+  FROM trunk_changes ORDER BY at_ts DESC LIMIT 10"
+```
+
+For a deeper view, read `lab/configs.md` (the configuration tree)
+and `lab/components.md` (the catalog of building-block atoms with
+their current statuses). The journal of what proposed each branch /
+rejection is in `lab/experiments.md` under each entry's
+`### Tree effect` block. Use `uv run lab components show` to see
+which atoms are still `proposed` vs `experimental` vs `validated`.
+
+### "Are there any pending verdicts I need to confirm?"
+
+```bash
+uv run lab query "
+  SELECT instance_id, slug, target_id, rationale
+  FROM tree_diffs WHERE kind = 'graduate' AND applied = FALSE"
+```
+
+Each row is a *staged* trunk swap waiting on the human. If any
+exist, walk the user through them:
+
+1.  Show the journal entry's `### Mutation impact` and
+    `### Tree effect` blocks.
+2.  Offer to invoke [`lab-graduate-component`](../lab-graduate-component/SKILL.md)
+    to confirm (or reject by leaving it alone).
+
 ### "How did the latest experiment do?"
 
 ```bash
@@ -243,9 +310,12 @@ reply, even if the user only asked one question. Two patterns:
 
 **After "is anything happening?":**
 > Daemon: running (pid 12345), started 14m ago.
+> Trunk: `basic` (anchored 2026-04-17 by `tb2-baseline-full-sweep`).
 > Last spawn: `trial-critic` exit 0, 32s ago, on
 > `cancel-async-tasks__rGqDyp4` in `tb2-baseline-…`.
 > DB: 267 trials, 234 critiqued, 0 misconfigurations.
+> Pending: 1 staged graduate (`loop-guard-tb2-paired` →
+> `loop-guard`); run `lab-graduate-component` to confirm.
 
 **After "start it" / "restart it":**
 > Started in tmux session `openharness-lab` (pid 23456).

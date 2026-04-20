@@ -78,9 +78,15 @@ features null.
 
 ## Output schema
 
+The CLI writes a file at
+`runs/lab/task_features/<task_checksum>.json` — that file is the
+canonical record. The DuckDB cache (`task_features` table) is
+rebuilt from these files on demand by
+`uv run lab ingest-critiques`.
+
 ```bash
-uv run lab insert-task-features <task_checksum> \
-  --extracted-by "<your model>" --json - <<'JSON'
+uv run lab write-task-features <task_checksum> \
+  --extracted-by "$OPENHARNESS_CODEX_MODEL" --json - <<'JSON'
 {
   "task_name":      "cancel-async-tasks",
   "category":       "python_async",
@@ -145,8 +151,9 @@ OK; cached features for f3a8b9... (cancel-async-tasks).
 
 ## Constraints
 
-- One row per `task_checksum`. The CLI upserts, but the orchestrator
-  only invokes you when no row exists, so the common case is insert.
+- One file per `task_checksum`. The CLI overwrites if it's already
+  there, but the orchestrator only invokes you when no file exists,
+  so the common case is a fresh write.
 - Do not edit any markdown under `lab/`.
 - Do not modify `runs/experiments/*` artifacts.
 - Do not run trials.

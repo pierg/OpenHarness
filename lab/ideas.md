@@ -76,3 +76,19 @@ _(none)_
 ## Rejected
 
 _(none)_
+
+## Auto-proposed
+
+_Suggested by `cross-experiment-critic`. Promote to `## Proposed` manually if you want them to be runnable._
+
+#### loop-guard-on-planner-executor
+
+-   **Motivation:** Once loop-guard lands as a runtime atom on trunk, the same mechanism is more likely to help on planner_executor (which adds a planning hop that can also stall) than on basic alone. Composition test, not yet runnable.
+-   **Sketch:** Paired ablation on planner_executor only: leg A current YAML; leg B same YAML with loop-guard runtime atom enabled. Run on the three positive clusters from the planner_executor branch (security_certificates, system_administration, python_data) plus a same-size negative-cluster control.
+-   **Auto-proposed by:** lab-reflect-and-plan@2026-04-18
+
+#### tool-result-summariser-paired
+
+-   **Motivation:** Sibling of context-compaction but cheaper to test in isolation: rather than truncating raw tool stdout, inject an LLM-generated short summary of any tool result above K tokens before the next turn. Could rescue reflection (currently rejected) without the brittle line-count heuristic of context-compaction.
+-   **Sketch:** Implement behind an AgentConfig flag (off by default). Paired ablation on basic (cheapest harness) with the flag on/off on a slice biased toward tasks where tool stdout exceeded 50 lines in tb2-baseline-full-sweep. Re-test on reflection only if the basic ablation is positive.
+-   **Auto-proposed by:** lab-reflect-and-plan@2026-04-18

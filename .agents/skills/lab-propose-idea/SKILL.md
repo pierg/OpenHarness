@@ -44,8 +44,9 @@ before writing. Examples: `executor-bash-timeout-aware-retry`,
 Before adding, **check for collisions across all lab files**:
 
 ```bash
-rg -n "^####? " lab/ideas.md lab/components.md
+rg -n "^####? " lab/ideas.md
 rg -n "^### " lab/roadmap.md lab/experiments.md
+rg -n "^\| \`" lab/configs.md lab/components.md
 ```
 
 If the id is already used in any of the four lab files, pick a
@@ -120,8 +121,8 @@ After saving, report:
 
 Do **not**:
 
-- Edit `lab/roadmap.md`, `lab/experiments.md`, or
-  `lab/components.md`.
+- Edit `lab/roadmap.md`, `lab/experiments.md`, `lab/configs.md`,
+  or `lab/components.md`.
 - Touch any agent YAML.
 - Run any experiment.
 - Create a git worktree, commit, or push.

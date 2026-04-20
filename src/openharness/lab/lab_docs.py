@@ -30,6 +30,18 @@ VALID_IDEAS_SECTIONS: tuple[str, ...] = ("Proposed", "Trying", "Graduated", "Rej
 VALID_ROADMAP_SECTIONS: tuple[str, ...] = ("Up next", "Done")
 VALID_THEMES: tuple[str, ...] = ("Architecture", "Runtime", "Tools", "Memory")
 
+# Sections of a tree-shaped journal entry (the new shape; see plan).
+JOURNAL_SECTIONS: tuple[str, ...] = (
+    "Aggregate",
+    "Mutation impact",
+    "Failure modes",
+    "Tree effect",
+    "Linked follow-ups",
+)
+
+# Sections inside `lab/configs.md` (the configuration tree).
+TREE_SECTIONS: tuple[str, ...] = ("Trunk", "Branches", "Rejected", "Proposed")
+
 
 class LabDocError(RuntimeError):
     """Raised when a lab markdown mutation cannot be safely applied."""
@@ -57,8 +69,8 @@ def _experiments_path(lab_root: Path) -> Path:
     return lab_root / "experiments.md"
 
 
-def _components_path(lab_root: Path) -> Path:
-    return lab_root / "components.md"
+def _configs_path(lab_root: Path) -> Path:
+    return lab_root / "configs.md"
 
 
 def _read(path: Path) -> str:
@@ -570,6 +582,586 @@ def move_roadmap_entry_to_done(
     new_text = "\n\n".join(c for c in rebuilt if c.strip()).rstrip() + "\n"
     _write(path, new_text)
     return new_text
+
+
+# ----- summary.md → results table renderer ---------------------------------
+
+
+# ----- experiments.md: structured journal-entry CRUD ----------------------
+#
+# The new tree-shaped journal entries are nested:
+#
+#     ## YYYY-MM-DD — <slug>
+#     - **Type:** ...
+#     - **Hypothesis:** ...
+#
+#     ### Aggregate
+#     ### Mutation impact
+#     ### Failure modes
+#     ### Tree effect
+#     ### Linked follow-ups
+#
+# `set_section(slug, "Tree effect", body)` rewrites exactly one ###
+# section inside one ## entry. Idempotent. Tolerates missing entries
+# by raising `LabDocError` so the caller (CLI / runner) decides.
+
+
+def _entry_pattern(slug: str) -> "re.Pattern[str]":
+    return re.compile(
+        r"(?P<header>## \d{4}-\d{2}-\d{2} — "
+        + re.escape(slug)
+        + r"\b.*?)(?=\n## |\Z)",
+        re.DOTALL,
+    )
+
+
+def _entry_text(text: str, slug: str) -> tuple[int, int, str]:
+    m = _entry_pattern(slug).search(text)
+    if not m:
+        raise LabDocError(f"No experiment entry for slug {slug!r}.")
+    return m.start(), m.end(), m.group("header")
+
+
+def get_section(*, slug: str, section: str, lab_root: Path = LAB_ROOT) -> str | None:
+    """Return the body of `### <section>` inside `## … — <slug>`, or None."""
+    text = _read(_experiments_path(lab_root))
+    try:
+        _, _, entry = _entry_text(text, slug)
+    except LabDocError:
+        return None
+    pat = re.compile(
+        r"^### " + re.escape(section) + r"\s*\n(?P<body>.*?)(?=\n### |\Z)",
+        re.DOTALL | re.MULTILINE,
+    )
+    m = pat.search(entry)
+    if not m:
+        return None
+    return m.group("body").strip("\n")
+
+
+def set_section(
+    *,
+    slug: str,
+    section: str,
+    body: str,
+    lab_root: Path = LAB_ROOT,
+) -> str:
+    """Replace (or create) `### <section>` inside the journal entry for `slug`.
+
+    Sections are inserted in the canonical order from `JOURNAL_SECTIONS`
+    if they don't yet exist, so the entry always reads top-down in
+    the same shape.
+    """
+    path = _experiments_path(lab_root)
+    text = _read(path)
+    start, end, entry = _entry_text(text, slug)
+    body = body.rstrip() + "\n"
+    section_header = f"### {section}\n"
+
+    pat = re.compile(
+        r"^### " + re.escape(section) + r"\s*\n.*?(?=\n### |\Z)",
+        re.DOTALL | re.MULTILINE,
+    )
+    new_block = section_header + body
+    if pat.search(entry):
+        new_entry = pat.sub(new_block.rstrip(), entry, count=1)
+    else:
+        # Insert in canonical order: walk JOURNAL_SECTIONS, find the next
+        # one already present, insert before it. If none, append.
+        try:
+            idx = JOURNAL_SECTIONS.index(section)
+        except ValueError:
+            idx = len(JOURNAL_SECTIONS)
+        successor: re.Match | None = None
+        for s in JOURNAL_SECTIONS[idx + 1 :]:
+            m = re.search(
+                r"^### " + re.escape(s) + r"\s*$", entry, re.MULTILINE
+            )
+            if m:
+                successor = m
+                break
+        if successor:
+            insert_at = successor.start()
+            new_entry = (
+                entry[:insert_at].rstrip()
+                + "\n\n"
+                + new_block.rstrip()
+                + "\n\n"
+                + entry[insert_at:].lstrip()
+            )
+        else:
+            new_entry = entry.rstrip() + "\n\n" + new_block.rstrip() + "\n"
+    new_text = text[:start] + new_entry.rstrip() + "\n" + text[end:]
+    _write(path, new_text)
+    return new_text
+
+
+def journal_entry_exists(slug: str, *, lab_root: Path = LAB_ROOT) -> bool:
+    text = _read(_experiments_path(lab_root))
+    return _entry_pattern(slug).search(text) is not None
+
+
+def append_journal_entry(
+    *,
+    slug: str,
+    type_: str,
+    trunk_at_runtime: str,
+    mutation: str | None,
+    hypothesis: str,
+    run_path: str | None,
+    on_date: date | None = None,
+    lab_root: Path = LAB_ROOT,
+) -> str:
+    """Insert a new tree-shaped journal entry at the top of `experiments.md`.
+
+    Stub-shaped: header bullets present, every `### <section>` empty,
+    populated later by `synthesize` and `tree apply`.
+    """
+    path = _experiments_path(lab_root)
+    text = _read(path)
+    on_date = on_date or date.today()
+    header = f"## {on_date.isoformat()} — {slug}"
+    if header in text:
+        raise LabDocError(f"Experiment {slug!r} already in journal.")
+
+    bullets = [
+        f"-   **Type:** {type_.strip()}",
+        f"-   **Trunk at run-time:** {trunk_at_runtime.strip()}",
+    ]
+    if mutation:
+        bullets.append(f"-   **Mutation:** {mutation.strip()}")
+    bullets.append(f"-   **Hypothesis:** {hypothesis.strip()}")
+    if run_path:
+        bullets.append(f"-   **Run:** [`{run_path}`](../{run_path})")
+    else:
+        bullets.append("-   **Run:** _(filled after the run completes)_")
+
+    sections = "\n\n".join(f"### {s}\n\n_(pending)_" for s in JOURNAL_SECTIONS)
+    stub = f"{header}\n\n" + "\n".join(bullets) + "\n\n" + sections + "\n"
+
+    parts = _split_top_sections(text, level=2)
+    preamble = parts[0][1]
+    rebuilt = preamble.rstrip() + "\n\n" + stub.rstrip() + "\n"
+    for heading, body in parts[1:]:
+        if heading is None:
+            continue
+        rebuilt += f"\n## {heading}\n\n{body.rstrip()}\n"
+    _write(path, rebuilt)
+    return rebuilt
+
+
+# ----- configs.md: configuration-tree CRUD ---------------------------------
+
+
+@dataclass(slots=True)
+class TreeBranch:
+    branch_id: str
+    mutation: str
+    use_when: str
+    last_verified: str | None = None
+
+
+@dataclass(slots=True)
+class TreeRejected:
+    branch_id: str
+    reason: str
+    evidence: str | None = None
+
+
+@dataclass(slots=True)
+class TreeProposed:
+    branch_id: str
+    sketch: str
+    linked_idea: str | None = None
+
+
+@dataclass(slots=True)
+class TreeSnapshot:
+    trunk_id: str
+    trunk_anchor: str | None
+    branches: list[TreeBranch]
+    rejected: list[TreeRejected]
+    proposed: list[TreeProposed]
+
+
+_CONFIGS_HEADER = "# Configs\n\n_(see [`AUTONOMOUS.md`](AUTONOMOUS.md) for the full file-ownership matrix.)_\n"
+
+
+def _ensure_configs_skeleton(text: str) -> str:
+    """If configs.md is missing any tree section, add an empty one.
+
+    Adds empty Trunk / Branches / Rejected / Proposed sections at the
+    end of the file if any are missing.
+    """
+    out = text.rstrip()
+    for s in TREE_SECTIONS:
+        if not re.search(rf"^## {re.escape(s)}\b", out, re.MULTILINE):
+            out += f"\n\n## {s}\n\n_(none)_\n"
+    return out + "\n"
+
+
+def tree_snapshot(*, lab_root: Path = LAB_ROOT) -> TreeSnapshot:
+    """Parse `lab/configs.md` and return the current configuration-tree state."""
+    path = _configs_path(lab_root)
+    text = _read(path)
+    text = _ensure_configs_skeleton(text)
+    parts = dict(_split_top_sections(text, level=2))
+
+    trunk_body = parts.get("Trunk", "")
+    trunk_id = "basic"
+    trunk_anchor: str | None = None
+    m_id = re.search(r"\*\*Agent:\*\*\s*\[`([^`]+)`\]", trunk_body)
+    if m_id:
+        trunk_id = m_id.group(1)
+    m_why = re.search(r"\*\*Why:\*\*\s*(.+)", trunk_body)
+    if m_why:
+        trunk_anchor = m_why.group(1).strip()
+
+    branches: list[TreeBranch] = []
+    for row in _parse_md_table(parts.get("Branches", "")):
+        if len(row) < 4:
+            continue
+        branches.append(TreeBranch(
+            branch_id=_strip_md_link(row[0]),
+            mutation=row[1],
+            use_when=row[2],
+            last_verified=row[3] or None,
+        ))
+
+    rejected: list[TreeRejected] = []
+    for row in _parse_md_table(parts.get("Rejected", "")):
+        if len(row) < 2:
+            continue
+        rejected.append(TreeRejected(
+            branch_id=_strip_md_link(row[0]),
+            reason=row[1],
+            evidence=row[2] if len(row) > 2 else None,
+        ))
+
+    proposed: list[TreeProposed] = []
+    proposed_body = parts.get("Proposed", "")
+    for row in _parse_md_table(proposed_body):
+        if len(row) < 2:
+            continue
+        proposed.append(TreeProposed(
+            branch_id=_strip_md_link(row[0]),
+            sketch=row[1],
+            linked_idea=row[2] if len(row) > 2 else None,
+        ))
+
+    return TreeSnapshot(
+        trunk_id=trunk_id,
+        trunk_anchor=trunk_anchor,
+        branches=branches,
+        rejected=rejected,
+        proposed=proposed,
+    )
+
+
+def _parse_md_table(body: str) -> list[list[str]]:
+    """Return data rows (no header, no separator) of a single MD table."""
+    rows: list[list[str]] = []
+    saw_header = False
+    saw_sep = False
+    for line in body.splitlines():
+        line = line.strip()
+        if not line.startswith("|"):
+            continue
+        cells = [c.strip() for c in line.strip("|").split("|")]
+        # Skip header + separator row.
+        if not saw_header:
+            saw_header = True
+            continue
+        if not saw_sep:
+            if cells and set(cells[0]) <= {"-", ":", " "}:
+                saw_sep = True
+                continue
+            saw_sep = True
+        rows.append(cells)
+    return rows
+
+
+def _strip_md_link(cell: str) -> str:
+    """Return the visible text of a markdown link, or the raw cell."""
+    cell = cell.strip()
+    m = re.match(r"^\[`?([^\]`]+)`?\]\([^)]+\)$", cell)
+    if m:
+        return m.group(1)
+    m = re.match(r"^`([^`]+)`$", cell)
+    if m:
+        return m.group(1)
+    return cell
+
+
+def set_trunk(
+    *,
+    trunk_id: str,
+    reason: str,
+    journal_link: str | None = None,
+    lab_root: Path = LAB_ROOT,
+) -> str:
+    """Rewrite `## Trunk` in configs.md to point at `trunk_id`."""
+    path = _configs_path(lab_root)
+    text = _read(path)
+    text = _ensure_configs_skeleton(text)
+    body_lines = [
+        f"-   **Agent:** [`{trunk_id}`](../src/openharness/agents/configs/{trunk_id}.yaml)",
+        f"-   **Why:** {reason.strip()}",
+    ]
+    if journal_link:
+        body_lines.append(f"-   **Anchored by:** {journal_link.strip()}")
+    new_body = "\n".join(body_lines)
+    new_text = _replace_top_section(text, "Trunk", new_body)
+    _write(path, new_text)
+    return new_text
+
+
+def add_branch(
+    *,
+    branch_id: str,
+    mutation: str,
+    use_when: str,
+    last_verified: str,
+    lab_root: Path = LAB_ROOT,
+) -> str:
+    """Append a row to `## Branches` (or replace if `branch_id` already there)."""
+    path = _configs_path(lab_root)
+    text = _read(path)
+    text = _ensure_configs_skeleton(text)
+    snap = tree_snapshot(lab_root=lab_root)
+    branches = [b for b in snap.branches if b.branch_id != branch_id]
+    branches.append(TreeBranch(
+        branch_id=branch_id, mutation=mutation,
+        use_when=use_when, last_verified=last_verified,
+    ))
+    body = _render_branches_table(branches)
+    new_text = _replace_top_section(text, "Branches", body)
+    _write(path, new_text)
+    return new_text
+
+
+def add_rejected(
+    *,
+    branch_id: str,
+    reason: str,
+    evidence: str,
+    lab_root: Path = LAB_ROOT,
+) -> str:
+    """Append a row to `## Rejected` (replace if `branch_id` already there)."""
+    path = _configs_path(lab_root)
+    text = _read(path)
+    text = _ensure_configs_skeleton(text)
+    snap = tree_snapshot(lab_root=lab_root)
+    rejected = [r for r in snap.rejected if r.branch_id != branch_id]
+    rejected.append(TreeRejected(branch_id=branch_id, reason=reason, evidence=evidence))
+    body = _render_rejected_table(rejected)
+    new_text = _replace_top_section(text, "Rejected", body)
+    _write(path, new_text)
+    return new_text
+
+
+def _render_branches_table(branches: list[TreeBranch]) -> str:
+    if not branches:
+        return "_(none)_"
+    lines = [
+        "| ID | Mutation vs trunk | Use-when predicate | Last verified |",
+        "|----|-------------------|--------------------|---------------|",
+    ]
+    for b in branches:
+        lines.append(
+            f"| `{b.branch_id}` | {b.mutation} | {b.use_when} | "
+            f"{b.last_verified or ''} |"
+        )
+    return "\n".join(lines)
+
+
+def _render_rejected_table(rejected: list[TreeRejected]) -> str:
+    if not rejected:
+        return "_(none)_"
+    lines = [
+        "| ID | Reason | Evidence |",
+        "|----|--------|----------|",
+    ]
+    for r in rejected:
+        lines.append(f"| `{r.branch_id}` | {r.reason} | {r.evidence or ''} |")
+    return "\n".join(lines)
+
+
+def _replace_top_section(text: str, heading: str, new_body: str) -> str:
+    """Replace the body of a `## <heading>` section in-place."""
+    parts = _split_top_sections(text, level=2)
+    rebuilt: list[str] = []
+    found = False
+    for h, b in parts:
+        if h is None:
+            if b.strip():
+                rebuilt.append(b.rstrip())
+            continue
+        if h == heading:
+            rebuilt.append(f"## {h}\n\n{new_body.rstrip()}")
+            found = True
+        else:
+            rebuilt.append(f"## {h}\n\n{b.rstrip()}")
+    if not found:
+        rebuilt.append(f"## {heading}\n\n{new_body.rstrip()}")
+    return "\n\n".join(c for c in rebuilt if c.strip()).rstrip() + "\n"
+
+
+# ----- roadmap.md: Suggested + promote -------------------------------------
+
+
+def add_suggested_followup(
+    *,
+    slug: str,
+    hypothesis: str,
+    source: str,
+    cost: str | None = None,
+    lab_root: Path = LAB_ROOT,
+) -> str:
+    """Append an entry to `## Up next > ### Suggested` (daemon write-zone).
+
+    The Suggested section is a staging area: a human promotes one to
+    the main `## Up next` queue with `roadmap promote`. Idempotent:
+    re-adding the same slug rewrites the bullets.
+    """
+    path = _roadmap_path(lab_root)
+    text = _read(path)
+    parts = _split_top_sections(text, level=2)
+    rebuilt: list[str] = []
+    found_up_next = False
+    for h, b in parts:
+        if h is None:
+            if b.strip():
+                rebuilt.append(b.rstrip())
+            continue
+        if h == "Up next":
+            found_up_next = True
+            new_body = _set_or_append_suggested(
+                b, slug=slug, hypothesis=hypothesis, source=source, cost=cost,
+            )
+            rebuilt.append(f"## Up next\n\n{new_body.rstrip()}")
+        else:
+            rebuilt.append(f"## {h}\n\n{b.rstrip()}")
+    if not found_up_next:
+        body = _set_or_append_suggested(
+            "_(none)_", slug=slug, hypothesis=hypothesis, source=source, cost=cost,
+        )
+        rebuilt.append(f"## Up next\n\n{body.rstrip()}")
+    new_text = "\n\n".join(c for c in rebuilt if c.strip()).rstrip() + "\n"
+    _write(path, new_text)
+    return new_text
+
+
+def _set_or_append_suggested(
+    up_next_body: str,
+    *,
+    slug: str,
+    hypothesis: str,
+    source: str,
+    cost: str | None,
+) -> str:
+    """Inside the body of `## Up next`, set/replace `### Suggested > #### <slug>`."""
+    suggested_re = re.compile(
+        r"^### Suggested\s*\n(?P<body>.*?)(?=\n### (?!Suggested)|\Z)",
+        re.DOTALL | re.MULTILINE,
+    )
+    bullet = (
+        f"#### {slug}\n\n"
+        f"-   **Hypothesis:** {hypothesis.strip()}\n"
+        f"-   **Source:** {source.strip()}\n"
+    )
+    if cost:
+        bullet += f"-   **Cost:** {cost.strip()}\n"
+    m = suggested_re.search(up_next_body)
+    if m:
+        sug_body = m.group("body").strip()
+        # Drop any prior copy of this slug.
+        per_slug = re.compile(
+            rf"#### {re.escape(slug)}\b.*?(?=\n#### |\Z)", re.DOTALL,
+        )
+        sug_body = per_slug.sub("", sug_body).strip()
+        if sug_body and sug_body != "_(none)_":
+            sug_body = sug_body.rstrip() + "\n\n" + bullet.rstrip()
+        else:
+            sug_body = bullet.rstrip()
+        new_block = f"### Suggested\n\n{sug_body.rstrip()}"
+        return up_next_body[: m.start()] + new_block + up_next_body[m.end():]
+    # No Suggested subsection yet — append one at the bottom of Up next.
+    new_block = f"### Suggested\n\n{bullet.rstrip()}"
+    base = up_next_body.rstrip()
+    if base == "_(none)_":
+        base = ""
+    return (base + "\n\n" + new_block).strip()
+
+
+def promote_suggested(*, slug: str, lab_root: Path = LAB_ROOT) -> str:
+    """Move a `### Suggested > #### <slug>` entry into the main `## Up next` queue.
+
+    The promoted entry becomes a normal `### <slug>` block. The
+    `Source:` bullet is preserved so we never lose attribution.
+    """
+    path = _roadmap_path(lab_root)
+    text = _read(path)
+    parts = _split_top_sections(text, level=2)
+    rebuilt: list[str] = []
+    found = False
+    for h, b in parts:
+        if h is None:
+            if b.strip():
+                rebuilt.append(b.rstrip())
+            continue
+        if h == "Up next":
+            new_body, promoted = _promote_suggested_inplace(b, slug)
+            if not promoted:
+                raise LabDocError(
+                    f"No `### Suggested > #### {slug}` entry to promote in roadmap.md."
+                )
+            found = True
+            rebuilt.append(f"## Up next\n\n{new_body.rstrip()}")
+        else:
+            rebuilt.append(f"## {h}\n\n{b.rstrip()}")
+    if not found:
+        raise LabDocError("No `## Up next` section in roadmap.md")
+    new_text = "\n\n".join(c for c in rebuilt if c.strip()).rstrip() + "\n"
+    _write(path, new_text)
+    return new_text
+
+
+def _promote_suggested_inplace(up_next_body: str, slug: str) -> tuple[str, bool]:
+    suggested_re = re.compile(
+        r"^### Suggested\s*\n(?P<body>.*?)(?=\n### (?!Suggested)|\Z)",
+        re.DOTALL | re.MULTILINE,
+    )
+    m = suggested_re.search(up_next_body)
+    if not m:
+        return up_next_body, False
+    sug_body = m.group("body").strip()
+    per_slug = re.compile(
+        rf"#### {re.escape(slug)}\b(?P<entry>.*?)(?=\n#### |\Z)", re.DOTALL,
+    )
+    em = per_slug.search(sug_body)
+    if not em:
+        return up_next_body, False
+    body = em.group("entry").strip()
+    new_main_block = f"### {slug}\n\n{body}"
+    # Strip the suggested entry, then inject the new main block at the
+    # top of Up next (above the Suggested subsection).
+    sug_body_after = (sug_body[: em.start()] + sug_body[em.end():]).strip()
+    if not sug_body_after:
+        sug_body_after = "_(none)_"
+    suggested_block_new = f"### Suggested\n\n{sug_body_after}"
+    new_up = (
+        new_main_block.rstrip()
+        + "\n\n"
+        + up_next_body[: m.start()].rstrip()
+        + (
+            "\n\n" + suggested_block_new.rstrip()
+            if up_next_body[: m.start()].strip()
+            else suggested_block_new.rstrip()
+        )
+        + up_next_body[m.end():]
+    )
+    return new_up.strip(), True
 
 
 # ----- summary.md → results table renderer ---------------------------------

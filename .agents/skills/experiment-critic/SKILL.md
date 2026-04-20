@@ -6,25 +6,51 @@ description: >
   outcomes. Use when an experiment finishes and the human or
   orchestrator asks "which leg actually won, and why?", "what tasks
   did leg X solve that leg Y didn't?", or "summarise this run beyond
-  the aggregate pass rate". Reads the lab DB (`trials`,
-  `trial_critiques`, `task_features`); writes one row per task to the
-  `comparisons` table via `uv run lab insert-comparison`, plus a
-  human-facing `runs/experiments/<id>/results/critic_summary.md`.
-  Companion skills: trial-critic (must have run first), cross-
-  experiment-critic, task-features.
+  the aggregate pass rate". Reads per-trial critic JSON files under
+  `<run_dir>/legs/.../<trial>/critic/trial-critic.json` plus the
+  trials registry in DuckDB; writes one file per task to
+  `<run_dir>/critic/comparisons/<task>.json` via
+  `uv run lab write-comparison`, an experiment summary to
+  `<run_dir>/critic/experiment-critic.json` via
+  `uv run lab write-experiment-critique`, and a human-facing
+  `runs/experiments/<id>/results/critic_summary.md`. Companion
+  skills: trial-critic (must have run first), cross-experiment-critic,
+  task-features.
 ---
 
 # Experiment Critic
 
-The aggregate "pass rate per leg" table that lands in
-`lab/experiments.md` says nothing about *which tasks* one leg won
-that another didn't, or *why*. This skill closes that gap by joining
-per-trial critiques across legs of a single experiment instance and
-producing a per-task verdict.
+The aggregate `### Aggregate` table that lands in the experiment's
+journal entry (`lab/experiments.md`) says nothing about *which tasks*
+one leg won that another didn't, or *why*. This skill closes that
+gap by joining per-trial critiques across legs of a single
+experiment instance and producing a per-task verdict.
+
+The output of this skill is what `tree_ops.evaluate(<instance_id>)`
+reads (alongside the per-task `comparisons/*.json`) to compute the
+`### Tree effect` block — i.e. the **TreeDiff** that `lab tree
+apply` writes back to `lab/experiments.md` and (for AddBranch /
+Reject / NoOp) to `lab/configs.md`, with the unique-to-target atoms
+forward-bumped in `lab/components.md`. **Be precise about
+mutation_impact and failure_modes** — those fields directly drive
+`### Mutation impact` and `### Failure modes` in the journal.
 
 You are an autonomous codex agent. You have read access to the lab
-DB via `uv run lab query …`; you write back via `uv run lab
-insert-comparison …` and a single Markdown file.
+DB via `uv run lab query …`; you read per-trial critiques as files
+under each trial's `critic/trial-critic.json`; and you write back
+via `uv run lab write-comparison …`,
+`uv run lab write-experiment-critique …`, and a single Markdown
+file (`results/critic_summary.md`).
+
+### Subagent fan-out (multi_agent enabled)
+
+This skill runs with codex's `multi_agent` feature enabled. The
+per-task analysis is naturally parallel: you have N independent
+tasks to compare across legs, and each comparison only depends on
+that task's per-trial critiques. **Delegate to subagents** in
+batches (e.g. 8 tasks per subagent) so the wall-clock stays
+bounded as N grows. The synthesis step (§4 below) must remain in
+the parent agent; only the per-task comparisons (§3) parallelize.
 
 ## When to Use
 
@@ -36,16 +62,16 @@ insert-comparison …` and a single Markdown file.
 
 Do **not** use this skill:
 
-- Before all per-trial critiques are present. Pre-flight:
+- Before all per-trial critiques are present. Pre-flight by
+  walking the run dir for missing files:
   ```bash
-  uv run lab query "
-    SELECT leg_id, count(*) AS missing
-    FROM trials t LEFT JOIN trial_critiques c USING (trial_id)
-    WHERE t.instance_id = '<instance>' AND c.trial_id IS NULL
-    GROUP BY leg_id"
+  find <run_dir>/legs -type d -name 'harbor' -prune -o -type d \
+    -path '*/legs/*/harbor/*' -print | while read d; do
+      [ -f "$d/critic/trial-critic.json" ] || echo "missing: $d"
+    done | head
   ```
-  If any row's `missing > 0`, refuse and report which trials still
-  need critiques (`uv run lab query-trials --instance <id> --needs-critique`).
+  If any trial dir is missing its `critic/trial-critic.json`,
+  refuse and report which trials still need critiques.
 - For cross-experiment patterns. That's `cross-experiment-critic`.
 
 ## Inputs
@@ -78,22 +104,22 @@ cleanly — there is nothing to compare against.
 
 For every task in this experiment, gather:
 
-- The score and outcome on each leg.
+- The score and outcome on each leg (from the trials registry).
 - Each leg's per-trial critique (`task_summary`, `agent_strategy`,
   `outcome`, `root_cause` / `success_factor`, `anti_patterns`,
-  `key_actions`, `surprising_observations`).
-- The task's features from `task_features` (if present).
+  `key_actions`, `surprising_observations`) — read from
+  `<trial_dir>/critic/trial-critic.json`.
+- The task's features from `runs/lab/task_features/<checksum>.json`
+  if present.
 
-Helpful query:
+Locate per-trial files for one task:
 
 ```bash
 uv run lab query "
-  SELECT t.task_name, t.leg_id, t.passed, t.score, t.cost_usd,
-         c.outcome, c.root_cause, c.success_factor,
-         c.agent_strategy, c.anti_patterns, c.key_actions
-  FROM trials t LEFT JOIN trial_critiques c USING (trial_id)
-  WHERE t.instance_id = '<instance>'
+  SELECT t.task_name, t.leg_id, t.passed, t.score, t.cost_usd, t.trial_dir
+  FROM trials t WHERE t.instance_id = '<instance>'
   ORDER BY t.task_name, t.leg_id"
+# then for each row, read $trial_dir/critic/trial-critic.json
 ```
 
 ### 3. Write one comparison per task
@@ -120,8 +146,8 @@ For each `task_name`, decide:
 Persist via:
 
 ```bash
-uv run lab insert-comparison <instance_id> <task_name> \
-  --critic-model "<your model>" --json - <<'JSON'
+uv run lab write-comparison <run_dir> <task_name> \
+  --critic-model "$OPENHARNESS_CODEX_MODEL" --json - <<'JSON'
 {
   "winning_leg":   "basic",
   "runner_up_leg": "react",
@@ -132,6 +158,10 @@ uv run lab insert-comparison <instance_id> <task_name> \
 }
 JSON
 ```
+
+The CLI writes `<run_dir>/critic/comparisons/<task_name>.json`.
+The `comparisons` DB table is rebuilt from these files on demand
+by `uv run lab ingest-critiques`.
 
 ### 4. Synthesise patterns at the experiment level
 
@@ -147,11 +177,47 @@ After all per-task comparisons are written, look for groupings:
   `planner_executor` exhibits `hallucinated_success` 3× more than
   `basic`.
 
-### 5. Emit the human-facing summary
+### 5. Persist the experiment-level summary
 
-Write a Markdown file at
-`runs/experiments/<instance_id>/results/critic_summary.md`. Suggested
-shape (you may adapt):
+Persist the synthesis as a structured file too — this is what
+`cross-experiment-critic` reads:
+
+```bash
+uv run lab write-experiment-critique <run_dir> \
+  --critic-model "$OPENHARNESS_CODEX_MODEL" --json - <<'JSON'
+{
+  "instance_id":       "<instance>",
+  "headline":          "<2-3 sentences: what decided this run>",
+  "mutation_impact":   "<2-4 sentences: did the mutation help, hurt, or wash? where? why? Reference deltas in pp.>",
+  "leg_winners":       [{"leg": "basic", "tasks": ["a","b","c"], "common_factor": "..."}],
+  "all_legs_failed":   ["task1", "task2"],
+  "failure_modes":     [{"name": "tool-output-overflow", "count": 12, "description": "..."}, ...],
+  "anti_pattern_skew": [{"leg": "planner_executor", "anti_pattern": "hallucinated_success", "ratio_vs_baseline": 3.0}],
+  "follow_up_seeds":   ["...", "..."]
+}
+JSON
+```
+
+**Required fields the journal renderer reads directly** (do not omit
+or rename — `journal_synth.synthesize` falls back to
+DB-only stats when these are missing, which produces less useful
+journal entries):
+
+-   `mutation_impact`: **string** (preferred) or list/dict. Drives
+    `### Mutation impact`. State the headline delta in percentage
+    points, the cluster(s) where it shifted most, and a one-sentence
+    causal hypothesis.
+-   `failure_modes`: list of objects with `{name, count, description}`
+    (or list of strings, or a single string). Drives `### Failure
+    modes`. Roll up the per-trial `anti_patterns` and `outcome`
+    fields into the 3–6 dominant modes; cite counts.
+-   `follow_up_seeds`: list of short strings. Drives `### Linked
+    follow-ups`. Each seed becomes a candidate `## Auto-proposed`
+    idea — write them as concrete, testable hypotheses.
+
+Then write a Markdown file at
+`runs/experiments/<instance_id>/results/critic_summary.md`.
+Suggested shape (you may adapt):
 
 ```markdown
 # Critic summary — <instance_id>
@@ -185,27 +251,33 @@ Reply to the orchestrator / user with:
 - The instance id processed.
 - Number of tasks compared, number of "all legs failed" tasks.
 - Path to `critic_summary.md`.
-- Path to per-task DB rows: `uv run lab query "SELECT * FROM
-  comparisons WHERE instance_id = '<id>'"`.
+- Path to per-task comparison files:
+  `<run_dir>/critic/comparisons/`.
 
 ## Refusal cases
 
-- Pre-flight critique check fails (any leg has `missing > 0`
-  trial_critique rows). Report which trials are missing.
+- Pre-flight critique check fails (any trial dir is missing its
+  `critic/trial-critic.json`). Report which trials are missing.
 - Only one leg exists. Emit a stripped `critic_summary.md` (header
-  + headline only) and exit, but write **no** `comparisons` rows.
+  + headline only) and exit, but write **no** `comparisons/` files.
 - DB has zero trials for this instance. Run
   `uv run lab ingest <run_dir>` first.
 
 ## Constraints
 
-- Never edit `lab/experiments.md`, `lab/ideas.md`, `lab/roadmap.md`,
-  or `lab/components.md`. The aggregate table in `experiments.md`
-  is owned by `lab-run-experiment`; follow-up ideas in
-  `## Auto-proposed` are owned by `cross-experiment-critic`.
-- Never ingest, never run new agents, never modify any
-  `runs/experiments/*` artifact other than `results/critic_summary.md`.
-- Quote per-trial critiques and `key_actions`; do not paraphrase.
+-   Never edit `lab/experiments.md`, `lab/ideas.md`, `lab/roadmap.md`,
+    `lab/configs.md`, or `lab/components.md`. The journal entry's narrative subsections
+    (`### Aggregate / Mutation impact / Failure modes / Linked
+    follow-ups`) are written by `uv run lab experiments synthesize`,
+    which reads the `experiment-critic.json` you wrote here. The
+    `### Tree effect` block is written by `uv run lab tree apply`,
+    which calls `tree_ops.evaluate`. Follow-up ideas in
+    `## Auto-proposed` are written by `cross-experiment-critic` /
+    `lab-reflect-and-plan`. **You only write JSON files.**
+-   Never ingest, never run new agents, never modify any
+    `runs/experiments/*` artifact other than
+    `results/critic_summary.md` and the files under `critic/`.
+-   Quote per-trial critiques and `key_actions`; do not paraphrase.
 
 ## Example
 
