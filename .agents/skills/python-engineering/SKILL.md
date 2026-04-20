@@ -1,9 +1,9 @@
-# Python Engineering Guidelines
+---
+name: python-engineering
+description: Python conventions focusing on fail-fast principles, strict typing, and robust data modeling. Use for all source and test files.
+---
 
----
-**name:** python-engineering
-**description:** Python conventions focusing on fail-fast principles, strict typing, and robust data modeling. Use for all source and test files.
----
+# Python Engineering Guidelines
 
 ## 1. Fail Fast & Defensive Design
 * **No Silent Fallbacks:** Never use "magic" values (e.g., `""`, `-1`, `None`) to mask missing config or broken context. Raise `RuntimeError` or `ValueError` immediately.

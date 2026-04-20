@@ -34,6 +34,26 @@
 -   **Depends on:** `tb2-baseline-full-sweep`
 -   **Cost:** ~$5-10.
 
+### Suggested
+
+#### planner-executor-cluster-confirmation
+
+-   **Hypothesis:** A focused re-run of trunk vs planner_executor on the three positive clusters {security_certificates, system_administration, python_data} with n>=5 per cluster confirms the use-when predicate isn't an artefact of n=1/3/7 from tb2-baseline-full-sweep.
+-   **Source:** lab-reflect-and-plan@2026-04-18
+-   **Cost:** smoke ~$1.50; full not needed (this IS the focused full)
+
+#### react-tentative-cluster-retest
+
+-   **Hypothesis:** Re-running trunk vs react on react's one positive cluster from tb2-baseline-full-sweep with n>=5 flips the current no_op (1 positive cluster, threshold 2, Δ $/pass +546%) into either a clean add_branch or reject. React is currently a tentative branch we cannot route to with confidence.
+-   **Source:** lab-reflect-and-plan@2026-04-18
+-   **Cost:** smoke ~$2.00 (react burns ~$0.25/trial × ~5 trials × 2 legs)
+
+#### extended-budget-paired-on-trunk
+
+-   **Hypothesis:** Bumping max_turns 30→60 and max_tokens 8192→16384 on the trunk (basic) on a focused near-miss slice converts >=2 currently-failing tasks into passes, validating whether the 22.5% baseline is budget-bound or capability-bound. Cheapest possible test of the 'extended-budget' idea.
+-   **Source:** lab-reflect-and-plan@2026-04-18
+-   **Cost:** smoke ~$0.40 (small near-miss slice, 2 legs)
+
 ## Done
 
 ### tb2-baseline-full-sweep

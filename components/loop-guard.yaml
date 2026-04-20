@@ -1,0 +1,27 @@
+id: loop-guard
+description: |
+  Detects no-progress turns (repeated tool calls or empty assistant
+  output) and steers the agent toward recovery before the turn budget
+  is exhausted.
+status: proposed
+version: 0.1.0
+applies_to:
+  architectures: [simple, planner_executor, react, reflection]
+  agents: []
+provides:
+  runtime_flags:
+    loop_guard.enabled: true
+conflicts_with: []
+cost:
+  - no_runtime_overhead
+  - extra_prompt_tokens_negligible
+evidence:
+  ideas: [loop-guard]
+  experiments: []
+wires:
+  tools_add: []
+  prompts_append: {}
+  extras:
+    loop_guard:
+      enabled: true
+      max_repeats: 3

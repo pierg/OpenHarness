@@ -44,8 +44,9 @@ before writing. Examples: `executor-bash-timeout-aware-retry`,
 Before adding, **check for collisions across all lab files**:
 
 ```bash
-rg -n "^####? " lab/ideas.md lab/components.md
+rg -n "^####? " lab/ideas.md
 rg -n "^### " lab/roadmap.md lab/experiments.md
+rg -n "^\| \`" lab/configs.md lab/components.md
 ```
 
 If the id is already used in any of the four lab files, pick a
@@ -88,10 +89,23 @@ Do **not** add:
 
 ### 4. Insert under the right theme
 
-Read `lab/ideas.md`. Find `## Proposed > ### <Theme>`. Append the
-new `#### <kebab-id>` entry at the **bottom** of that theme
-subsection (preserve order — first in, first out). Do not touch any
-other section.
+**Use the CLI for the actual edit** — it preserves entry shape and
+section ordering, refuses duplicate ids, and rejects non-kebab-case
+ids:
+
+```bash
+uv run lab idea append <kebab-id> \
+  --theme <Architecture|Runtime|Tools|Memory> \
+  --motivation "<one sentence on why we'd want this>" \
+  --sketch "<one or two sentences on what the change actually is>"
+```
+
+Behind the scenes, this finds `## Proposed > ### <Theme>` in
+`lab/ideas.md` and appends the new `#### <kebab-id>` entry at the
+bottom of that theme subsection. No other section is touched.
+
+If the CLI errors with "already exists" or "must be kebab-case", fix
+the id and retry — never edit the markdown by hand.
 
 ### 5. Confirm and report
 
@@ -107,8 +121,8 @@ After saving, report:
 
 Do **not**:
 
-- Edit `lab/roadmap.md`, `lab/experiments.md`, or
-  `lab/components.md`.
+- Edit `lab/roadmap.md`, `lab/experiments.md`, `lab/configs.md`,
+  or `lab/components.md`.
 - Touch any agent YAML.
 - Run any experiment.
 - Create a git worktree, commit, or push.

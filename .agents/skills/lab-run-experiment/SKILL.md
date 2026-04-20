@@ -45,43 +45,46 @@ Do **not** use this skill for:
 
 ## Experiments.md entry shape
 
-Newest at the top. The header section in `lab/experiments.md` may
-contain a one-time reset note and nothing else; below it sits a
-single reverse-chronological list of dated entries.
+Newest at the top. Single reverse-chronological list of dated
+entries. **Each entry has a fixed header (5 bullets) and exactly
+five canonical subsections, all written by deterministic helpers
+— never by hand.**
 
 ```markdown
 ## YYYY-MM-DD — <slug>
 
--   **Hypothesis:** one sentence.
--   **Variant:** what differs vs the current baseline   _(or: "leg A vs leg B" for paired runs)_
+-   **Type:** `paired-ablation` | `broad-sweep` | `smoke`
+-   **Trunk at run-time:** [`trunk@<sha>`](../src/openharness/agents/configs/trunk.yaml)
+-   **Mutation:** one-line description of what differs from trunk.
+    _(omit for `broad-sweep`)_
+-   **Hypothesis:** one sentence on what we expect to learn.
 -   **Run:** [`runs/experiments/<instance-id>/`](../runs/experiments/<instance-id>/)
 
-### Results
-
-| Leg | Trials | Passed | Errored | Pass rate | Total tokens | Cost (USD) |
-|-----|-------:|-------:|--------:|----------:|-------------:|-----------:|
-| ... |        |        |         |           |              |            |
-
-### Notes
-
--   3–6 short bullets of qualitative observations.
-
-### Decision
-
-graduate `<id>`   _(or: iterate — see follow-up `<slug>` / reject)_
+### Aggregate
+### Mutation impact
+### Failure modes
+### Tree effect
+### Linked follow-ups
 ```
 
 Rules:
 
-- **Status is implicit.** A new entry inserted above existing ones
-  with an empty Results table is in-progress; once the table is
-  populated and the Decision line filled in, it's complete. Never
-  add a `Status:` field.
-- **No `Held constant:` field.** The current baseline is defined
-  once in `lab/README.md > ## Current state`. The entry's
-  `Variant:` line states what differs.
-- **No header rewriting.** When you add a new entry, append it
-  above the previous newest entry; never touch existing entries.
+-   **Status is implicit.** An entry whose subsections are empty is
+    in-progress; once `synthesize` and `tree apply` have populated
+    them, the entry is complete. Never add a `Status:` field.
+-   **Default type is `paired-ablation`** (trunk leg + 1 mutation
+    leg). Use `broad-sweep` only when re-baselining (running every
+    branch + trunk on the full slice).
+-   **No `Held constant:` / `Notes:` / `Decision:` fields.** The
+    `Mutation` bullet states what differs; `### Failure modes`
+    captures qualitative notes; `### Tree effect` carries the
+    verdict.
+-   **No header rewriting.** When you add a new entry, append it
+    above the previous newest entry; never touch existing entries.
+-   **The `### Tree effect` block is the single source of truth for
+    the verdict.** It is written by `uv run lab tree apply <slug>`,
+    which calls `tree_ops.evaluate(<instance_id>)`. Do not hand-write
+    a verdict.
 
 ## Instructions
 
@@ -89,22 +92,25 @@ Rules:
 
 Establish in this order:
 
-1. **Roadmap entry** (if any) — if the user said "run the next
-   thing" or named a roadmap slug, read `lab/roadmap.md` and
-   confirm which `## Up next` item you're picking up. The roadmap
-   entry's `**Plan:**` line is the spec for steps 2–4 below.
-2. **Idea id** — must already exist in `lab/ideas.md`. If the user
-   hasn't proposed it yet, run `lab-propose-idea` first, then
-   continue here. Roadmap entries with `**Idea:** baseline snapshot`
-   or `infrastructure` skip this.
-3. **Baseline** — what you compare against. The current baseline
-   is documented in `lab/README.md > ## Current state`. Either
-   compare against it implicitly or against a prior entry in
-   `lab/experiments.md`.
-4. **Variant** — exactly what differs from the baseline (one
-   sentence; this becomes the entry's `Variant:` line).
-5. **Run plan** — single run, or paired run (two legs that differ
-   only in the variable under test).
+1.  **Roadmap entry** (if any) — if the user said "run the next
+    thing" or named a roadmap slug, read `lab/roadmap.md` and
+    confirm which `## Up next` item you're picking up. The roadmap
+    entry's `**Plan:**` line is the spec for steps 2–4 below.
+2.  **Idea id** — must already exist in `lab/ideas.md`. If the user
+    hasn't proposed it yet, run `lab-propose-idea` first, then
+    continue here. Roadmap entries with
+    `**Idea:** baseline snapshot` or `infrastructure` skip this.
+3.  **Trunk** — read `uv run lab trunk show` (or the `## Trunk`
+    section of `lab/configs.md`). The trunk is the canonical
+    "leg A" of any paired ablation; the experiment is defined as
+    "trunk + delta".
+4.  **Mutation** — exactly what differs from the trunk (one
+    sentence; this becomes the entry's `Mutation:` line). For a
+    `broad-sweep` (e.g. re-baselining), there is no mutation —
+    every leg is independent.
+5.  **Type** — pick `paired-ablation` (default), `broad-sweep`
+    (re-baselining), or `smoke` (1–3 cached tasks for wiring
+    sanity).
 
 State the plan back to the user in 3–5 lines and **wait for
 confirmation** before doing anything destructive.
@@ -142,46 +148,36 @@ decided.
 
 If the experiment is testing a previously-proposed idea **and the
 idea isn't already in `## Trying`** (it would already be there if
-the experiment was queued via `lab-plan-next`), edit
-`lab/ideas.md`:
+the experiment was queued via `lab-plan-next`), promote it via
+the CLI:
 
-- Cut the `#### <idea-id>` entry from its theme subsection under
-  `## Proposed`.
-- Paste it under `## Trying`.
-- Append one bullet to the entry:
-  `-   **Trying in:** [<roadmap-slug>](roadmap.md#<roadmap-slug>)`.
-- Don't rewrite the existing Motivation / Sketch bullets.
+```bash
+uv run lab idea move <idea-id> trying \
+  --cross-ref "**Trying in:** [<slug>](roadmap.md#<slug>)"
+```
 
 If the experiment has no associated idea (baseline snapshot /
 infrastructure), skip this step.
 
-### 5. Add a stub entry at the top of lab/experiments.md
+### 5. Append the journal entry at the top of lab/experiments.md
 
-Insert the new section **above** all existing dated sections (newest
-on top). Use the entry shape documented above, with an empty
-Results table and placeholder Notes / Decision:
+Use the CLI — it inserts the entry **above** all existing dated
+sections with the canonical 5-bullet header and 5 empty
+subsections (`### Aggregate`, `### Mutation impact`, `### Failure
+modes`, `### Tree effect`, `### Linked follow-ups`):
 
-```markdown
-## YYYY-MM-DD — <slug>
-
--   **Hypothesis:** <one sentence — copy from the roadmap entry's Hypothesis>
--   **Variant:** <what differs from the baseline>
--   **Run:** _(filled after the run completes)_
-
-### Results
-
-| Leg | Trials | Passed | Errored | Pass rate | Total tokens | Cost (USD) |
-|-----|-------:|-------:|--------:|----------:|-------------:|-----------:|
-|     |        |        |         |           |              |            |
-
-### Notes
-
--   _(filled after the run completes)_
-
-### Decision
-
-_(filled after the run completes)_
+```bash
+uv run lab experiments append-entry <slug> \
+  --type paired-ablation \
+  --trunk "$(uv run lab trunk show)" \
+  --mutation "<one-line description of the delta>" \
+  --hypothesis "<one sentence — copy from the roadmap entry's Hypothesis>" \
+  --run "runs/experiments/<instance-id>"
 ```
+
+Use `--type broad-sweep` (and omit `--mutation`) for re-baselining
+runs. The CLI errors if `<slug>` is already stubbed today, so
+retries are safe.
 
 ### 6. Make the experiment-specific edits
 
@@ -327,90 +323,119 @@ directory: `runs/experiments/<instance-id>/`. Inside:
 - `legs/<agent>/harbor/<instance>-<agent>/<task>/` — per-trial
   artifacts (`run.json`, `result.json`, trajectories).
 
-### 9. Fill in the experiment entry
+### 9. Close out the journal entry and the tree
 
-Read `runs/experiments/<instance-id>/results/summary.md` and the
-relevant `legs/*/harbor/.../result.json` files. Update the entry
-in `lab/experiments.md` **without rewriting the existing bullets**:
+Once the run is complete, ingest the run dir, then let the
+deterministic helpers fill in the journal subsections and apply
+the verdict to the tree. **None of these steps are
+agent-judgment.** Each one is a single CLI call.
 
-- **Run:** replace the `_(filled after the run completes)_`
-  placeholder with the path link.
-- **Results table:** copy numbers from `results/summary.md`.
-- **Notes:** 3–6 short bullets — qualitative observations from
-  trajectories (no `400` errors, planner hallucination count,
-  loop-guard nudges fired, agent timeouts, 429 rate-limit hits in
-  `events.jsonl`, etc.). For trajectory-level evidence, grep:
+```bash
+# 9a. Mirror per-trial rows into the lab DB (idempotent on trial_id).
+uv run lab ingest runs/experiments/<instance-id>
 
-  ```bash
-  rg -l "loop_guard_nudge" runs/experiments/<instance-id>/legs
-  rg -l "thought_signature" runs/experiments/<instance-id>/legs
-  rg "\"status\":\\s*429" runs/experiments/<instance-id>/legs
-  ```
+# 9b. Refresh the critic-derived cache so the next steps see the
+#     experiment-critic / comparisons / task-features / tree_diffs
+#     rows. This is also called automatically by the daemon.
+uv run lab ingest-critiques runs/experiments/<instance-id>
 
-- **Decision:** one of:
-  - `graduate <id>` — invoke `lab-graduate-component` next.
-  - `iterate — see follow-up <slug>` — record the follow-up and
-    consider queueing it via `lab-plan-next`.
-  - `reject` — the idea entry will move from `## Trying` to
-    `## Rejected` in `lab/ideas.md` (append a `**Rejected:**`
-    bullet with the date and reason; link to this experiment).
+# 9c. Fill the four narrative subsections from the critic JSONs +
+#     DB stats. Idempotent; safe to re-run after a critic re-spawn.
+uv run lab experiments synthesize <slug>
 
-### 10. Hand off to the roadmap
+# 9d. Compute the TreeDiff via tree_ops.evaluate(<instance_id>),
+#     write the `### Tree effect` block, and either auto-apply
+#     (AddBranch / Reject / NoOp → mutate configs.md and forward-bump
+#     unique-to-target atoms in components.md) or stage for human
+#     (Graduate). Use --dry-run first if you want to see the verdict
+#     before persisting.
+uv run lab tree apply <slug>
+```
 
-If the experiment came from a `lab/roadmap.md` entry, hand off to
-`lab-plan-next` to move that entry from `## Up next` to `## Done`
-with `**Ran:**` and `**Outcome:**` bullets pointing at the new
-experiments.md entry. Do this **regardless** of the decision —
-the roadmap records the plan, not the outcome.
+`tree apply`'s output names the verdict, the affected target id,
+and (for `graduate`) the slug + applied_by needed by `uv run lab
+graduate confirm`. Surface that to the user.
+
+If you want trajectory-level evidence to confirm a verdict before
+running 9d, useful greps are:
+
+```bash
+rg -l "loop_guard_nudge" runs/experiments/<instance-id>/legs
+rg -l "thought_signature" runs/experiments/<instance-id>/legs
+rg "\"status\":\\s*429" runs/experiments/<instance-id>/legs
+```
+
+### 10. Hand off to planner + roadmap
+
+```bash
+# 10a. Tree-aware planner: reads the current tree + the latest
+#      journal entries, writes 0..N entries under
+#      roadmap.md > ## Up next > ### Suggested and 0..N entries
+#      under ideas.md > ## Auto-proposed.
+codex exec --skill lab-reflect-and-plan --instance <instance-id>
+
+# 10b. Move the just-finished entry to `## Done`.
+codex exec --skill lab-plan-next --slug <slug>
+```
+
+If the verdict was `graduate`, also tell the user:
+
+> "Trunk swap is staged. Run
+> `uv run lab graduate confirm <slug> --applied-by human:<you>` —
+> or invoke the `lab-graduate-component` skill in Cursor — to
+> apply it to `trunk.yaml`."
 
 ### 11. Tidy up
 
-- If you used a worktree and the experiment is complete:
-  - Stage and commit the experiment-specific edits + the lab
-    edits on the experiment branch (`lab/<slug>`). Do not push.
-  - If the decision is `reject`, optionally delete the worktree:
-    `git worktree remove "$WORKTREE"` from the main checkout.
-- If the decision is `graduate`, hand off to
-  `lab-graduate-component` with the slug.
+-   If you used a worktree and the experiment is complete:
+    -   Stage and commit the experiment-specific edits + the lab
+        edits on the experiment branch (`lab/<slug>`). Do not push.
+    -   If the verdict is `reject`, optionally delete the worktree:
+        `git worktree remove "$WORKTREE"` from the main checkout.
+-   If the verdict is `graduate`, hand off to
+    `lab-graduate-component` with the slug.
 
 Always finish with:
 
-- The slug + date.
-- The run directory path (repo-relative).
-- Headline numbers (pass rates per leg).
-- The decision and the next concrete step (often: queue the
-  follow-up via `lab-plan-next`).
+-   The slug + date.
+-   The run directory path (repo-relative).
+-   Headline numbers (pass rates per leg).
+-   The verdict (from `### Tree effect`) and the next concrete
+    step (auto-applied → nothing for the human; staged
+    `graduate` → `lab graduate confirm <slug>`; queued follow-ups
+    → check `roadmap.md > ### Suggested`).
 
 ## Examples
 
-### Example: kick off the next roadmap item (long sweep — path B)
+### Example: kick off the next roadmap item (broad sweep — path B)
 
 Input: "Run the next thing on the roadmap."
 
 Output:
 
-1. Read `lab/roadmap.md`. Top of `## Up next` is
-   `tb2-baseline-full-sweep`. State the plan back: 3 legs ×
-   ~89 tasks, expected ~$15-25 over 1–3 hours. Pick **path B**
-   (tmux) so the user can attach to Harbor's TUI and so the run
-   survives if the agent loop is interrupted.
-2. Confirm with user, recommending a `uv run plan tb2-baseline`
-   sanity check first.
-3. No worktree (pure baseline run, no agent edits).
-4. No idea move (it's a `baseline snapshot`).
-5. Insert the stub at the top of `lab/experiments.md`.
-6. Kick off: `scripts/exp/start.sh exec tb2-baseline`. Capture
-   the printed session name and log path. Surface them to the
-   user along with `scripts/exp/attach.sh <session>` so they can
-   peek anytime.
-7. Find the run dir: `ls -dt runs/experiments/* | head -1`.
-8. Poll loop: every 10 minutes, run
-   `scripts/exp/status.sh <instance-id>` until
-   `runs/experiments/<instance-id>/results/summary.md` exists.
-   Use `Await` between polls.
-9. Fill in the experiment entry from `results/summary.md`.
-10. Hand off to `lab-plan-next` to move
-    `tb2-baseline-full-sweep` to `## Done`.
+1.  Read `lab/roadmap.md`. Top of `## Up next` is
+    `tb2-baseline-full-sweep`. Type = `broad-sweep` (re-baselining
+    every branch on the full slice). State the plan back: 3 legs ×
+    ~89 tasks, expected ~$15-25 over 1–3 hours. Pick **path B**
+    (tmux) so the user can attach to Harbor's TUI and so the run
+    survives if the agent loop is interrupted.
+2.  Confirm with user, recommending a `uv run plan tb2-baseline`
+    sanity check first.
+3.  No worktree (pure baseline run, no agent edits).
+4.  No idea move (it's a `baseline snapshot`).
+5.  `uv run lab experiments append-entry tb2-baseline-full-sweep
+    --type broad-sweep --hypothesis "..." --run runs/experiments/<id>`
+6.  Kick off: `scripts/exp/start.sh exec tb2-baseline`. Capture
+    the printed session name and log path. Surface them to the
+    user along with `scripts/exp/attach.sh <session>` so they can
+    peek anytime.
+7.  Poll loop with `Await`; the run is done when
+    `runs/experiments/<id>/results/summary.md` exists.
+8.  Run `uv run lab ingest`, `ingest-critiques`, `experiments
+    synthesize`, `tree apply` (in that order).
+9.  Hand off to `lab-reflect-and-plan` (writes Suggested
+    follow-ups) and `lab-plan-next` (moves the roadmap entry to
+    `## Done`).
 
 ### Example: paired ablation on smoke (short — path A)
 
@@ -418,29 +443,31 @@ Input: "Run a loop-guard ablation on tb2 smoke with planner_executor."
 
 Output:
 
-1. Propose plan: slug `loop-guard-tb2-paired`, leg A =
-   `planner_executor` with `LoopGuardConfig.enabled=False`
-   (current default), leg B = same agent with `enabled=True` plus
-   `loop-guard` listed in `components:`. Variant line: "leg B has
-   loop-guard enabled, leg A has it disabled". Smoke run, agent
-   manages it end-to-end → **path A**. Confirm with user.
-2. Create worktree `lab/loop-guard-tb2-paired`.
-3. Add a new leg in a copy of `experiments/tb2-baseline.yaml` for
-   the experimental variant.
-4. (If not already there) move `loop-guard` from
-   `## Proposed > Runtime` to `## Trying` in `lab/ideas.md`.
-5. Insert the stub at the top of `lab/experiments.md`.
-6. Kick off via the agent's `Shell` tool with `block_until_ms: 0`:
-   `uv run exec <copied-spec> --profile smoke`. Capture the
-   `task_id`.
-7. Find the run dir, then poll with `Await` every 60–120 s until
-   `results/summary.md` exists (smoke is fast — usually 2–10 min).
-   `scripts/exp/status.sh <instance-id>` works fine here too if a
-   richer status snapshot is wanted.
-8. Read `runs/experiments/<instance>/results/summary.md`, fill the
-   entry, write decision.
-9. Hand off to `lab-plan-next` to move `loop-guard-tb2-paired` to
-   `## Done`.
+1.  Propose plan: slug `loop-guard-tb2-paired`, type
+    `paired-ablation`, leg A = trunk (`planner_executor` branch
+    via `uv run lab tree show`), leg B = same agent with
+    `loop-guard` enabled. Mutation line: "loop-guard component
+    enabled on top of planner_executor branch". Smoke run, agent
+    manages it end-to-end → **path A**. Confirm with user.
+2.  Create worktree `lab/loop-guard-tb2-paired`.
+3.  Add a new leg in a copy of `experiments/tb2-baseline.yaml` for
+    the experimental variant.
+4.  (If not already there) move `loop-guard` from
+    `## Proposed > Runtime` to `## Trying` in `lab/ideas.md`.
+5.  `uv run lab experiments append-entry loop-guard-tb2-paired
+    --type paired-ablation --trunk basic --mutation "loop-guard on
+    planner_executor branch" --hypothesis "..." --run
+    runs/experiments/<id>`
+6.  Kick off via the agent's `Shell` tool with `block_until_ms: 0`:
+    `uv run exec <copied-spec> --profile smoke`. Capture the
+    `task_id`.
+7.  Poll with `Await` every 60–120 s until `results/summary.md`
+    exists.
+8.  Run `uv run lab ingest`, `ingest-critiques`, `experiments
+    synthesize`, `tree apply`.
+9.  Hand off to `lab-reflect-and-plan` + `lab-plan-next`. If the
+    verdict was `graduate`, surface the `lab graduate confirm`
+    command to the user.
 
 ### Example: trying a brand-new idea (path A, may switch to B)
 
@@ -448,21 +475,21 @@ Input: "Let's try `tool-result-summariser`."
 
 Output:
 
-1. If the idea isn't yet in `lab/ideas.md` → invoke
-   `lab-propose-idea` first.
-2. (Optional) hand off to `lab-plan-next` to record the queue
-   entry, then immediately pick it up. Or skip the queue and run
-   directly — both are fine for one-off explorations.
-3. Slug `tool-result-summariser-smoke`. Confirm a minimal smoke
-   plan with the user (e.g. smoke profile, `planner_executor`,
-   summariser injected at threshold K=2000 tokens). Smoke → start
-   on **path A**; if the user asks to graduate this to a full
-   sweep next, switch to path B for that run.
-4. Create worktree.
-5. Move the idea to `## Trying`.
-6. Implement the summariser behind a toggle.
-7. Stub the experiment entry.
-8. Kick off via `Shell` background mode:
-   `uv run exec ... --profile smoke`. Poll with `Await` until
-   `results/summary.md` exists.
-9. Fill in results, write decision.
+1.  If the idea isn't yet in `lab/ideas.md` → invoke
+    `lab-propose-idea` first.
+2.  (Optional) hand off to `lab-plan-next` to record the queue
+    entry, then immediately pick it up. Or skip the queue and run
+    directly — both are fine for one-off explorations.
+3.  Slug `tool-result-summariser-smoke`, type `smoke`. Confirm a
+    minimal plan with the user (e.g. smoke profile, current trunk
+    + summariser at threshold K=2000 tokens). Smoke → start on
+    **path A**; if the user asks to graduate to a full sweep,
+    switch to path B for that run.
+4.  Create worktree.
+5.  Move the idea to `## Trying`.
+6.  Implement the summariser behind a toggle.
+7.  `uv run lab experiments append-entry ...`.
+8.  Kick off via `Shell` background mode; poll with `Await`.
+9.  Run `uv run lab ingest`, `ingest-critiques`, `experiments
+    synthesize`, `tree apply`. Hand off to `lab-reflect-and-plan`
+    + `lab-plan-next`.

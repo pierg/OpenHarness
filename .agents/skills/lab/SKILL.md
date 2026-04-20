@@ -1,97 +1,176 @@
 ---
 name: lab
 description: >
-  Router for the OpenHarness fork's agent-iteration framework. Use
-  when the user mentions "lab/", asks how to track an agent idea,
-  asks how the experimentation framework works, asks where ideas /
-  experiments / components / roadmap are tracked, or you encounter
-  the lab/ directory and need to know how to interact with it. Owns
-  the structural conventions for the four lab files; all entry shapes
-  and edit rules are documented here. Points at four action skills:
-  lab-propose-idea, lab-plan-next, lab-run-experiment,
-  lab-graduate-component.
+  Router for the OpenHarness fork's autonomous-research lab. Use
+  when the user mentions "lab/", asks how the experimentation
+  framework works, asks where ideas / experiments / components /
+  roadmap are tracked, asks about the trunk / branches / verdicts,
+  or you encounter the lab/ directory and need to know how to
+  interact with it. Owns the structural conventions for the four
+  lab files (the "tree-vs-journal" model) and the file-ownership
+  contract; all entry shapes and edit rules are documented here.
+  Points at action skills: lab-propose-idea, lab-plan-next,
+  lab-run-experiment, lab-graduate-component, lab-reflect-and-plan,
+  lab-operator (drives the autonomous daemon).
 ---
 
-# Lab — Agent Iteration Framework
+# Lab — Autonomous Agent-Research Framework
 
-The `lab/` folder at the repo root is the audit trail for agent
-improvements. The markdowns are deliberately stripped of any
-self-documenting prose — no templates, no how-to, no per-file
-conventions — so a human reader sees only entries. **All structural
-rules live in this skill and the four action skills.** Never put
-templates, rules, or how-to back into the lab markdowns.
+The `lab/` folder at the repo root is a small, high-signal audit
+surface in front of an autonomous research loop. **Three artifacts
+have completely different lifetimes:**
 
-## Files
+| Artifact | What it is | Lifetime |
+|----------|------------|----------|
+| `lab/configs.md` | **The configuration tree** — trunk + branches + rejected + proposed *agent configs* (composed harnesses we've actually run). The current best knowledge. | Persistent state, mutated by `lab tree apply`. |
+| `lab/components.md` | **The catalog of atoms** — every architectural / runtime / tools / prompt / model building block we've experimented with, plus its current status (proposed / experimental / branch / validated / rejected / superseded). The vocabulary we compose from. | Persistent state, mutated as a side-effect of `lab tree apply` (and via `lab components` for explicit edits). |
+| `lab/experiments.md` | **The journal** — append-only log of dated events. Each entry records exactly one experiment that proposed one diff to the tree. | Append-only, never edited. |
 
-| File | Sections | Mutability |
-|------|----------|------------|
-| `lab/README.md` | Workflow + current state at a glance. Human-facing intro. | Edit when the framework changes shape, or when "current state" needs refreshing (after a sweep lands, a component graduates, the baseline shifts). |
-| `lab/ideas.md` | `## Proposed` (themed) → `## Trying` → `## Graduated` → `## Rejected` | Append-only entries. State changes by **moving entries between sections** and appending cross-reference bullets. Never rewrite an existing bullet. |
-| `lab/roadmap.md` | `## Up next` → `## Done` | **Mutable.** `## Up next` is reordered freely. Entries move to `## Done` when the experiment runs (regardless of outcome). |
-| `lab/experiments.md` | One reverse-chronological list of `## YYYY-MM-DD — <slug>` entries below an optional reset note. | Append-only. A new entry is added at the top in `in-progress` shape (no Results table); the same entry is filled in once the run completes. Never rewritten after that. |
-| `lab/components.md` | `## Active` → `## Retired` | Append-only sections. Status lines and impact lines are appended, not replaced. |
+Configs.md and components.md describe the same evidence at two
+levels: configs.md records *which compositions* are validated
+together; components.md records *which atoms* are validated, where
+they're used, and why they were rejected. Verdicts are computed
+from agent-config legs (configs.md), and component statuses are
+auto-bumped from those verdicts (forward-only — never demoted).
 
-Tier-1 changes (bug fixes, small prompt tweaks we'd never revert) go
-into [`CHANGELOG.md`](../../../CHANGELOG.md) instead — not the lab.
+Two human-curated planning surfaces feed the loop:
+
+| File | Contents |
+|------|----------|
+| `lab/ideas.md` | Themed backlog. Humans own `## Proposed / Trying / Graduated / Rejected`; daemon owns `## Auto-proposed`. |
+| `lab/roadmap.md` | Priority queue. Humans own `## Up next`; daemon writes follow-ups under `## Up next > ### Suggested` (humans promote to the main queue). |
+
+The lab markdowns are deliberately stripped of any self-documenting
+prose — no templates, no how-to, no per-file conventions. **All
+structural rules live in this skill and the action skills below.**
+Never put templates, rules, or how-to back into the lab markdowns.
+
+## Mental model (one picture)
+
+```
+ideas.md ───► roadmap.md ───► lab-run-experiment ───► runs/experiments/<id>/
+                                                            │
+                                                            ▼
+                                          experiment-critic + tree_ops.evaluate
+                                                            │
+                                                            ▼
+                                                    TreeDiff
+                                            (graduate | add_branch | reject | no_op)
+                                                            │
+                          ┌─────────────────────────────────┴────────────────────────────────┐
+                          ▼                                                                  ▼
+              configs.md (the configuration tree)                          experiments.md (the journal)
+              ── Trunk (1)                                                   ── ## YYYY-MM-DD — <slug>
+              ── Branches (n; specializations)                                  ── ### Aggregate
+              ── Rejected (n; with reason)                                      ── ### Mutation impact
+              ── Proposed (untested)                                            ── ### Failure modes
+                          │                                                     ── ### Tree effect      ◄── one per entry
+                          │ side-effect (forward-only bump)                     ── ### Linked follow-ups
+                          ▼
+              components.md (the catalog of atoms)
+              ── Architecture | Runtime | Tools | Prompt | Model
+              ── statuses: proposed → experimental → branch → validated;  rejected | superseded
+```
+
+Key invariants:
+
+1.  **Configs = state. Journal = log. Components = derived view.**
+    Experiments don't branch; each proposes one TreeDiff over agent
+    configs that the tree may or may not absorb. Component statuses
+    are auto-bumped from those verdicts (never demoted by automation).
+2.  **One trunk at a time.**
+    `src/openharness/agents/configs/trunk.yaml` is the source of
+    truth for the current best agent. `lab/configs.md > ## Trunk`
+    points at the same agent id.
+3.  **Asymmetric autonomy.** Daemon auto-applies AddBranch / Reject
+    / NoOp. Trunk swaps require `uv run lab graduate confirm <slug>`
+    (or the `lab-graduate-component` skill in Cursor).
+4.  **Default experiment = paired ablation** (trunk leg + 1 mutation
+    leg). `type: broad-sweep` is opt-in for re-baselining.
+5.  **Composition is descriptive today, prescriptive later.** Agent
+    YAMLs are still the unit of execution; components.md just
+    *describes* which atoms each composes. A future runtime-
+    composition path can add a real composer when we want it without
+    touching the verdict machinery.
 
 ## When to Use
 
 Use this skill (and pick the right action skill below) when the user:
 
-- says "I have an idea for the agent" / "what if we…" → use
-  **`lab-propose-idea`**
-- says "queue X for next" / "add X to the roadmap" / "what's the next
-  experiment?" / "reorder the queue" → use **`lab-plan-next`**
-- says "let's try X" / "run an experiment for X" / "test this on
-  tb2-baseline" / "run the next thing on the roadmap" → use
-  **`lab-run-experiment`**
-- says "promote X" / "graduate X" / "X worked, let's adopt it" →
-  use **`lab-graduate-component`**
-- asks "how is X tracked?" or "is X already wired up?" → answer by
-  reading the lab files; no action skill needed.
-- asks "what's our experimentation framework?" → explain the
-  workflow below in 2–3 sentences and point at `lab/README.md`.
+-   says "I have an idea for the agent" / "what if we…" → use
+    **`lab-propose-idea`**.
+-   says "queue X for next" / "add X to the roadmap" / "what's the
+    next experiment?" / "reorder the queue" / "promote a Suggested
+    entry" → use **`lab-plan-next`**.
+-   says "let's try X" / "run an experiment for X" / "test this on
+    tb2-baseline" / "run the next thing on the roadmap" → use
+    **`lab-run-experiment`**.
+-   says "promote X" / "graduate X" / "X worked, let's adopt it" /
+    "confirm the staged trunk swap" → use **`lab-graduate-component`**.
+-   says "what should we run next?" / "reflect on the latest results"
+    → use **`lab-reflect-and-plan`**.
+-   says "check the lab" / "is the daemon running" / "what's the
+    orchestrator doing" / "start the lab" / "stop the daemon" /
+    "restart the lab" / "how's the current experiment going" → use
+    **`lab-operator`**.
+-   asks "what's our experimentation framework?" → explain the
+    tree-vs-journal model in 2–3 sentences and point at
+    `lab/README.md`.
 
-## Workflow
+## Files at a glance
 
-```
-ideas.md "Proposed"
-   │  promote to the queue (lab-plan-next)
-   ▼
-roadmap.md "Up next"
-   │  run it (lab-run-experiment)
-   ▼
-experiments.md  (new dated entry, status implicit by Results table)
-   │
-   ├──► roadmap.md "Done"   (link back to the experiment)
-   │
-   ├──► ideas.md "Graduated"  ──► components.md   (lab-graduate-component)
-   │
-   └──► ideas.md "Rejected"                       (no value, with reason)
-```
+| File | Sections | Mutability |
+|------|----------|------------|
+| `lab/README.md` | Mental model + workflow. Human-facing intro. | Edit when the framework changes shape. |
+| `lab/OPERATIONS.md` | Operating guide for the daemon: tick, file-ownership matrix, codex auth, model profiles, troubleshooting. | Edit when the daemon's behaviour or skill profiles change. |
+| `lab/ideas.md` | `## Proposed` (themed) → `## Trying` → `## Graduated` → `## Rejected` → `## Auto-proposed`. | Append-only. State changes by **moving entries between sections** + appending cross-ref bullets. Never rewrite an existing bullet. |
+| `lab/roadmap.md` | `## Up next` (with `### Suggested` substream) → `## Done`. | Mutable. `## Up next` is reordered freely; `### Suggested` is daemon-only; entries move to `## Done` when their experiment runs. |
+| `lab/experiments.md` | One reverse-chronological list of `## YYYY-MM-DD — <slug>` entries; each has 5 `### …` subsections. | Append-only. New entries appended at the top with empty subsections; subsections are filled in by deterministic helpers and never manually rewritten. |
+| `lab/configs.md` | `## Trunk` → `## Branches` → `## Rejected` → `## Proposed`. The tree of composed agent configs. | Trunk swaps via `lab graduate confirm` only. Branches/Rejected/Proposed mutated by `lab tree apply`. Rare manual edits OK. |
+| `lab/components.md` | `## Architecture` → `## Runtime` → `## Tools` → `## Prompt` → `## Model`. One row per atom. | Auto-bumped (forward only) by `lab tree apply`. Manual edits via `lab components upsert` / `lab components set-status`. |
+
+Tier-1 changes (bug fixes, small prompt tweaks we'd never revert) go
+into `CHANGELOG.md` instead — not the lab.
+
+## File ownership (the autonomy contract)
+
+The complete matrix lives in `lab/OPERATIONS.md`. Most-relevant rows:
+
+| File / section | Human writes | Daemon writes |
+|----------------|--------------|---------------|
+| `lab/ideas.md > ## Proposed / Trying / Graduated / Rejected` | yes | no |
+| `lab/ideas.md > ## Auto-proposed` | read-only | `cross-experiment-critic`, `lab-reflect-and-plan` |
+| `lab/roadmap.md > ## Up next` (main queue) | yes | `## Done` move only |
+| `lab/roadmap.md > ## Up next > ### Suggested` | promote to main queue | `lab-reflect-and-plan` |
+| `lab/experiments.md` (whole entry) | no | `lab-run-experiment` (header) + `experiments synthesize` (sections) + `tree apply` (### Tree effect) |
+| `lab/configs.md > ## Branches / ## Rejected / ## Proposed` | rare | `lab tree apply` |
+| `lab/configs.md > ## Trunk` | via `lab trunk set` or `lab graduate confirm` | only via `graduate confirm` |
+| `lab/components.md` (any kind) | `lab components upsert` / `lab components set-status` | `lab tree apply` (forward-only status bump as a verdict side-effect) |
+| `src/openharness/agents/configs/trunk.yaml` | rare | only via `lab graduate confirm` |
+
+If you find yourself wanting to write to a daemon-only zone by hand,
+stop — there's a CLI for it (see below).
 
 ## Conventions Common to All Lab Skills
 
 ### Stable kebab-case ids
 
-- Idea ids: `loop-guard`, `planner-rerank`, `episodic-memory`.
-- Roadmap slugs: `<idea-id>-<short-context>` or just the idea id if
-  unique. E.g. `loop-guard-tb2-paired`,
-  `tb2-baseline-full-sweep`. For meta-experiments, set
-  `**Idea:**` to `baseline snapshot` or `infrastructure` — these
-  don't need a backing idea entry.
-- Experiment slugs: `YYYY-MM-DD — <roadmap-slug>` (the date
-  prefixes the slug; the slug itself usually matches the roadmap
-  entry it came from).
-- Component ids: same kebab-case as the idea they came from.
-- **Once an id appears in any lab file, never reuse it for
-  something else.** Check collisions across all four lab files
-  before introducing a new id:
+-   Idea ids: `loop-guard`, `planner-rerank`, `episodic-memory`.
+-   Roadmap slugs: `<idea-id>-<short-context>` or just the idea id if
+    unique. E.g. `loop-guard-tb2-paired`, `tb2-baseline-full-sweep`.
+-   Experiment slugs: same as the roadmap entry that spawned them
+    (the date prefixes the journal entry header, not the slug).
+-   Component / branch / agent ids: kebab-case; same id across the
+    tree and the agent YAMLs.
+-   **Once an id appears in any lab file, never reuse it for
+    something else.** Check collisions across all files:
 
-  ```bash
-  rg -n "^####? " lab/ideas.md lab/components.md
-  rg -n "^### " lab/roadmap.md lab/experiments.md
-  ```
+    ```bash
+    rg -n "^####? " lab/ideas.md
+    rg -n "^### " lab/roadmap.md
+    rg -n "^## " lab/experiments.md
+    rg -n "^\| \`" lab/configs.md lab/components.md
+    ```
 
 ### Themes in `ideas.md`
 
@@ -124,20 +203,7 @@ condensed forms:
 ```
 
 When the entry moves to a new section, **append cross-ref bullets**
-at the end (do not edit the existing two):
-
-```markdown
-#### <kebab-id>
-
--   **Motivation:** ...
--   **Sketch:** ...
--   **Trying in:** [<roadmap-slug>](roadmap.md#<roadmap-slug>)
--   **Graduated as:** [`<component-id>`](components.md#<component-id>)
--   **Rejected:** YYYY-MM-DD — <one-line reason>; see [<experiment-slug>](experiments.md#YYYY-MM-DD--<slug>)
-```
-
-Only the bullets relevant to the entry's current section need to be
-present.
+at the end (do not edit the existing two).
 
 **`roadmap.md` entry** (under `## Up next` or `## Done`):
 
@@ -146,108 +212,180 @@ present.
 
 -   **Idea:** [`<idea-id>`](ideas.md#<idea-id>)   _(or: baseline snapshot / infrastructure)_
 -   **Hypothesis:** one sentence on what we expect to learn.
--   **Plan:** one paragraph — agents, slice, what varies vs the current baseline.
+-   **Plan:** one paragraph — agents, slice, what varies vs the current trunk.
 -   **Depends on:** `<other-slug>`   _(omit if nothing)_
 -   **Cost:** ~$X, ~Y hours wall-clock   _(omit if smoke / unknown)_
 ```
 
-When moved to `## Done`, **append two bullets**:
+When moved to `## Done`, **append two bullets**: `**Ran:**` and
+`**Outcome:**`.
+
+**`roadmap.md > ## Up next > ### Suggested` entry** (daemon-only):
 
 ```markdown
--   **Ran:** [<experiment-slug>](experiments.md#YYYY-MM-DD--<slug>)
--   **Outcome:** one sentence — headline pass rates + decision (graduate / iterate / reject).
+#### <slug>
+
+-   **Hypothesis:** one sentence.
+-   **Source:** `<source-tag>` (e.g. `lab-reflect-and-plan@2026-04-18`).
+-   **Cost:** ~$X   _(optional)_
 ```
+
+Humans review and run `uv run lab roadmap promote <slug>` to move
+into the main queue.
 
 **`experiments.md` entry** (newest at top):
 
 ```markdown
 ## YYYY-MM-DD — <slug>
 
+-   **Type:** paired-ablation | broad-sweep | smoke
+-   **Trunk at run-time:** [`trunk@<sha>`](../src/openharness/agents/configs/trunk.yaml)
+-   **Mutation:** <one-liner>          (omit for broad-sweep)
 -   **Hypothesis:** one sentence.
--   **Variant:** what differs vs the current baseline   _(or: "leg A vs leg B" for paired runs)_
--   **Run:** [`runs/experiments/<instance-id>/`](../runs/experiments/<instance-id>/)
+-   **Run:** [`runs/experiments/<id>`](../runs/experiments/<id>)
 
-### Results
-
-| Leg | Trials | Passed | Errored | Pass rate | Total tokens | Cost (USD) |
-|-----|-------:|-------:|--------:|----------:|-------------:|-----------:|
-| ... |        |        |         |           |              |            |
-
-### Notes
-
--   3–6 short bullets of qualitative observations.
-
-### Decision
-
-graduate `<id>`   _(or: iterate — see follow-up `<slug>` / reject)_
+### Aggregate           ← `lab experiments synthesize`
+### Mutation impact     ← `lab experiments synthesize`
+### Failure modes       ← `lab experiments synthesize` (from experiment-critic.json)
+### Tree effect         ← `lab tree apply` (single source of truth for the verdict)
+### Linked follow-ups   ← `lab-reflect-and-plan` (writes the cross-refs back)
 ```
 
-**Status is implicit:** an entry without a Results table (or with an
-empty table) is in-progress; an entry with a populated table is
-complete. Never add a `Status:` field.
+The `### Tree effect` block always names: the verdict (Graduate /
+AddBranch / Reject / NoOp), the target id, the rationale, the
+delta numbers, and the application status (auto / staged / human).
 
-**`components.md` entry** (under `## Active`):
+**`configs.md`** (the configuration tree; not an "entry" file — four sections):
 
 ```markdown
-### <component-id>
+## Trunk
+-   **Agent:** [`trunk`](../src/openharness/agents/configs/trunk.yaml) (alias of `<id>`)
+-   **Why:** ...
+-   **Anchored by:** [`<journal-entry>`](experiments.md#YYYY-MM-DD--<slug>)
 
--   **Scope:** `<files where the component is implemented or wired>`
--   **Applies to:** `<agents that activate it>`
--   **Hypothesis:** one sentence on what the component is for.
--   **Wired in:** [<experiment-slug>](experiments.md#YYYY-MM-DD--<slug>)
--   **Impact:** one or two sentences citing headline numbers.
+## Branches
+| ID | Mutation vs trunk | Use-when predicate | Last verified |
+
+## Rejected
+| ID | Reason | Evidence |
+
+## Proposed
+| ID | Sketch | Linked idea |
 ```
 
-Lifecycle in `components.md` is `wired` → `validated` → `adopted` →
-`retired`. The status is encoded by which section the entry sits in
-(`## Active` vs `## Retired`) plus an optional **Status:** bullet
-when finer detail matters. Multiple supporting experiments append
-new `**Wired in:**` bullets — don't replace.
+**`components.md`** (the catalog of atoms; one table per kind):
+
+```markdown
+## Architecture | ## Runtime | ## Tools | ## Prompt | ## Model
+
+| ID | Status | Description | Used by | Evidence |
+```
+
+Status lattice: `proposed → experimental → branch → validated`
+(forward-only via `lab tree apply` and `lab components upsert`),
+plus terminal `rejected` / `superseded` reachable only via
+`lab components set-status`.
 
 ### Mutability rules (one paragraph)
 
-- `ideas.md`, `experiments.md`, `components.md` are **append-only**.
-  To change state on an idea, move the entry between sections and
-  append cross-ref bullets; never rewrite the existing bullets.
-  Experiments are never rewritten once results land.
-- `roadmap.md` is **mutable**. Reorder `## Up next` freely. Move
-  entries to `## Done` when their experiment runs.
+-   `ideas.md`, `experiments.md` are **append-only**. To change an
+    idea's state, move the entry between sections and append
+    cross-ref bullets. Journal entries are filled in once and
+    never rewritten.
+-   `roadmap.md`, `configs.md`, `components.md` are **mutable** but
+    only via the right tool — `lab roadmap *` for roadmap,
+    `lab tree *` / `lab trunk *` / `lab graduate confirm` for the
+    configuration tree, `lab components *` for the catalog.
 
 ### What never goes into the lab markdowns
 
 These rules exist so the lab markdowns stay clean for human review:
 
-- No `## How to use` / `## Template` / `## Conventions` sections.
-- No `Status:` field on any entry — state lives in section
-  membership.
-- No "what each file does" prose at the top of `ideas.md`,
-  `roadmap.md`, or `experiments.md` — the README does that once.
-- No `## Current baseline` table in `experiments.md` — the README
-  carries it.
-- No "Expected experiment" field on `ideas.md` entries — that
-  detail moves into the roadmap entry the moment the idea is
-  queued.
-- No `Held constant:` field on `experiments.md` entries — the
-  baseline is defined once in `README.md`; the entry's `Variant:`
-  states what differs.
+-   No `## How to use` / `## Template` / `## Conventions` sections.
+-   No "what each file is for" prose at the top of any lab file —
+    `lab/README.md` carries it (and only it).
+-   No `Status:` field on any entry — state lives in section
+    membership.
+-   No `## Current baseline` table in `experiments.md` — the trunk
+    section of `configs.md` carries that.
 
-If you're tempted to add explanatory prose to a markdown, add it to
-the relevant skill instead.
+If you're tempted to add explanatory prose to a lab markdown, add
+it to the relevant SKILL.md or to `lab/README.md` instead.
+
+## Deterministic mutations go through `uv run lab`
+
+All mutations on `lab/*.md`, `trunk.yaml`, and the lab DuckDB flow
+through the `uv run lab` Typer CLI defined in
+[`src/openharness/lab/cli.py`](../../../src/openharness/lab/cli.py).
+The action skills do the *judgment* (which idea, which decision,
+how to phrase results); the CLI does the *editing* (validating
+section membership, preserving entry shape, never silently
+corrupting). This means humans, Cursor, codex, and the orchestrator
+daemon all mutate the lab via the same code path.
+
+Quick reference (each action skill below covers its own subset):
+
+```bash
+# Configuration tree (configs.md)
+uv run lab tree show [--json]
+uv run lab tree apply <slug> [--instance <id>] [--dry-run]
+uv run lab trunk show
+uv run lab trunk set <agent-id> --reason "..."
+uv run lab graduate confirm <slug> --applied-by human:<name> [--reason "..."]
+
+# Components catalog (components.md)
+uv run lab components show [--kind Architecture|Runtime|Tools|Prompt|Model] [--json]
+uv run lab components upsert <id> --kind <Kind> [--description "..."] [--status <s>] [--used-by "a,b"] [--evidence "..."]
+uv run lab components set-status <id> <status> [--evidence "..."]   # humans only — bypasses bump lattice
+
+# Journal (experiments.md) — header is appended by lab-run-experiment;
+# all sections except `### Tree effect` are filled by `synthesize`;
+# the verdict block is filled by `tree apply`.
+uv run lab experiments synthesize <slug>          # narrative sections
+uv run lab tree apply <slug>                      # ### Tree effect
+
+# Roadmap
+uv run lab roadmap add <slug> --idea <id> --hypothesis "..." --plan "..." [--depends-on <slug>] [--cost "..."]
+uv run lab roadmap done <slug> --ran "[<exp-slug>](experiments.md#<date>--<slug>)" --outcome "..."
+uv run lab roadmap suggest <slug> --hypothesis "..." --source "..."
+uv run lab roadmap promote <slug>                  # human only
+
+# Ideas
+uv run lab idea append <id> --theme Runtime --motivation "..." --sketch "..."
+uv run lab idea move <id> trying --cross-ref "..."
+uv run lab idea auto-propose <id> --motivation "..." --sketch "..." --source "..."
+
+# DB I/O (DB is a derived cache; never the source of truth)
+uv run lab init                                    # create DB + apply migrations
+uv run lab ingest runs/experiments/<id>            # run dir → DB
+uv run lab ingest-critiques [<run_dir>...]         # critic files → DB
+uv run lab info
+uv run lab query "SELECT ..."
+
+# Critic outputs are FILES; critics write them via these helpers.
+uv run lab write-trial-critique     <trial_dir>            --json -
+uv run lab write-comparison         <run_dir> <task_name>  --json -
+uv run lab write-experiment-critique <run_dir>             --json -
+uv run lab write-task-features      <task_checksum>        --json -
+uv run lab write-cross-experiment   <spawn_id>             --json -
+
+uv run lab dashboard                               # Streamlit, opens DB read-only
+```
+
+The CLI refuses unsafe edits (unknown slug, duplicate id, missing
+journal entry, kind mismatch on `graduate confirm`) — surface the
+error to the user instead of trying to "fix" the file by hand.
 
 ## Other Useful Reads
 
-- [`lab/README.md`](../../../lab/README.md) — the human-facing
-  workflow + current state snapshot.
-- [`docs/runs.md`](../../../docs/runs.md) — how `runs/experiments/`
-  is laid out (each `lab/experiments.md` entry should link a
-  matching directory there).
-- [`experiments/tb2-baseline.yaml`](../../../experiments/tb2-baseline.yaml)
-  — the canonical experiment spec used by `uv run exec`.
-- [`scripts/exp/README.md`](../../../scripts/exp/README.md) — a
-  `tmux`-backed background job manager. One of two equally-valid
-  ways to background an experiment, alongside the agent's own
-  `Shell` background mode. `lab-run-experiment` documents when to
-  pick which (short-form: tmux when the human wants
-  attach/list/stop or when the run should outlive the agent loop;
-  `Shell` background otherwise). Either way, never block on `uv run
-  exec` in the foreground.
+-   [`lab/README.md`](../../../lab/README.md) — the human-facing
+    mental model.
+-   [`lab/OPERATIONS.md`](../../../lab/OPERATIONS.md) — the
+    operating guide for the daemon (tick, file-ownership matrix,
+    codex auth, model profiles, troubleshooting).
+-   [`docs/runs.md`](../../../docs/runs.md) — how
+    `runs/experiments/` is laid out (each journal entry should link
+    a matching directory there).
+-   [`scripts/exp/README.md`](../../../scripts/exp/README.md) — the
+    `tmux`-backed background job manager. `lab-run-experiment`
+    documents when to pick `tmux` vs `Shell` background mode.

@@ -1,77 +1,118 @@
 # Lab
 
-The lab is the audit trail for agent improvements. Four short markdown
-files cover the full lifecycle from "what if we…" to "this is now a
-default building block".
+The lab is a tiny audit surface in front of an autonomous research
+loop. Three artifacts have completely different lifetimes:
 
-## Files
+| Artifact | What it is | Lifetime |
+|----------|------------|----------|
+| [`configs.md`](configs.md) | **The configuration tree** — trunk + branches + rejected + proposed *agent configs* (composed harnesses we've actually run). Current best knowledge of which compositions work. | Persistent state, mutated by `lab tree apply`. |
+| [`components.md`](components.md) | **The catalog of atoms** — every architectural / runtime / tools / prompt / model building block we've experimented with, plus its current status (proposed / experimental / branch / validated / rejected / superseded). The vocabulary we compose from. | Persistent state, auto-bumped (forward only) by `lab tree apply` as a side-effect of verdicts; explicit edits via `lab components`. |
+| [`experiments.md`](experiments.md) | **The journal** — append-only log of dated events; each entry records one experiment that proposed one diff to the tree. | Append-only, never edited. |
+
+`configs.md` and `components.md` describe the same evidence at two
+levels: configs.md records *which compositions* are validated
+together, components.md records *which atoms* are validated, where
+they're used, and why they were rejected. Verdicts are computed from
+agent-config legs; component statuses are derived (forward only —
+never demoted by automation). This split is descriptive today and
+gives us the vocabulary for runtime composition later, without
+constraining how we run experiments now.
+
+Two human-curated planning surfaces feed the loop:
 
 | File | Contents |
 |------|----------|
-| [`ideas.md`](ideas.md) | Themed backlog of agent improvements we might try, plus the trying/graduated/rejected piles. |
-| [`roadmap.md`](roadmap.md) | What's queued to run next, in priority order. Completed runs move to `## Done` with a link to the experiment. |
-| [`experiments.md`](experiments.md) | Append-only log of concrete runs (newest at top): hypothesis, results, decision. |
-| [`components.md`](components.md) | Validated building blocks — ideas that earned a measured impact and now show up as `components: [...]` in agent YAMLs. |
+| [`ideas.md`](ideas.md) | Themed backlog of agent improvements; humans own `## Proposed / Trying / Graduated / Rejected`, daemon owns `## Auto-proposed`. |
+| [`roadmap.md`](roadmap.md) | Priority queue. Humans own `## Up next`, daemon writes follow-ups under `## Up next > ### Suggested` (humans promote). |
 
-Tier-1 changes (bug fixes, small prompt tweaks we'd never revert) go
-into [`../CHANGELOG.md`](../CHANGELOG.md), not here.
+> **Audit-only files.** The five files above contain *only*
+> high-signal content. They do not document themselves. The
+> mental model lives here ([`README.md`](README.md)); the
+> operations runbook lives in [`OPERATIONS.md`](OPERATIONS.md);
+> per-skill instructions live under
+> [`.agents/skills/`](../.agents/skills/).
 
-## Workflow
+## How experiments mutate the tree
 
 ```
-ideas.md "Proposed"
-   │  promote to the queue
-   ▼
-roadmap.md "Up next"
-   │  run it
-   ▼
-experiments.md  (new dated entry)
-   │
-   ├──► roadmap.md "Done"        (link back to the experiment)
-   │
-   ├──► ideas.md "Graduated"  ──► components.md  (positive impact)
-   │
-   └──► ideas.md "Rejected"                     (no value, with reason)
+ideas.md                                                   roadmap.md
+   │                                                          │
+   │ human curates                                            │ human queues
+   ▼                                                          ▼
+   ├──────────────────────────────────────────────►   ## Up next
+                                                              │
+                                                              │ daemon picks the top entry
+                                                              ▼
+                                          lab-run-experiment
+                                                              │
+                                                              ▼
+                                          runs/experiments/<id>/...
+                                                              │
+                                                              ▼
+                                          experiment-critic + tree_ops.evaluate
+                                                              │
+                                                              ▼
+                                                      TreeDiff
+                                                  /     |     |     \
+                                            graduate  add_branch  reject  no_op
+                                              │           │         │       │
+                                              │ STAGED    │ AUTO    │ AUTO  │ AUTO
+                                              │           ▼         ▼       │
+                                              │      configs.md mutated     │
+                                              │           │                 │
+                                              │           │ side-effect     │
+                                              │           ▼ (forward bump)  │
+                                              │      components.md statuses │
+                                              ▼                             ▼
+                                         (human runs                experiments.md
+                                       `lab graduate                appends one
+                                        confirm <slug>`)            ### Tree effect
 ```
 
-1.  An idea is captured in [`ideas.md`](ideas.md) under one of four
-    themes (Architecture / Runtime / Tools / Memory). Two bullets:
-    motivation and sketch.
-2.  When the idea is worth committing to run, an entry is appended
-    to [`roadmap.md`](roadmap.md) under `## Up next` with a
-    hypothesis, plan, and rough cost. The idea entry moves to
-    `## Trying`.
-3.  When the experiment runs, a dated entry is appended to the top
-    of [`experiments.md`](experiments.md). The roadmap entry moves
-    to `## Done` with a link to the experiment.
-4.  If the experiment shows positive impact, the idea moves to
-    `## Graduated`, a new section appears in
-    [`components.md`](components.md) citing the experiment, and the
-    component id is added to the relevant agent YAML's
-    `components: [...]` list.
-5.  If the experiment shows no value, the idea moves to
-    `## Rejected` with a one-line reason and a link to the
-    experiment.
+Key invariants:
 
-`ideas.md`, `experiments.md`, and `components.md` are append-only —
-entries change state by moving sections and gaining cross-reference
-bullets, never by being rewritten. `roadmap.md` is mutable —
-`## Up next` can be reordered freely.
+1.  Configs are the state. The journal is the log. Components are
+    the derived view of which atoms have evidence. An experiment
+    proposes exactly one TreeDiff over agent configs (Graduate /
+    AddBranch / Reject / NoOp); configs.md may absorb it, the
+    journal always records it, and components.md statuses bump
+    forward as a side-effect.
+2.  One trunk at a time.
+    [`src/openharness/agents/configs/trunk.yaml`](../src/openharness/agents/configs/trunk.yaml)
+    is the source of truth for the current best agent; everything else
+    is "trunk + delta".
+3.  Asymmetric autonomy. Daemon auto-applies AddBranch / Reject /
+    NoOp. Trunk swaps require `uv run lab graduate confirm <slug>`
+    (or the [`lab-graduate-component`](../.agents/skills/lab-graduate-component/SKILL.md)
+    skill in Cursor).
+4.  The default experiment is a paired ablation (trunk leg + 1
+    mutation leg). Multi-leg broad-sweeps are opt-in and used for
+    re-baselining.
 
-## Current state
+See [`OPERATIONS.md`](OPERATIONS.md) for the daemon's tick, the
+file-ownership matrix, the codex auth rules, the per-skill model
+profiles, and the operating commands. Per-skill instructions live
+in [`.agents/skills/`](../.agents/skills/).
 
--   **Baseline:** [`experiments/tb2-baseline.yaml`](../experiments/tb2-baseline.yaml)
-    -   Agents: `basic`, `planner_executor`, `react`
-    -   Model: `gemini-3.1-flash-lite-preview`
-    -   Worker budget: 30 turns / 8192 tokens
-    -   Sandbox: Harbor + Docker
-    -   Trial concurrency: `n_concurrent=4` (smoke / demo: 2)
-    -   Excluded: `reflection` — context-blowup, see
-        [`ideas.md#reflection-context-compaction`](ideas.md#reflection-context-compaction)
--   **Completed experiments:** none. The lab was reset on 2026-04-17.
--   **Validated components:** none. The baseline ships with no opt-in
-    components.
--   **Next experiment:**
-    [`tb2-baseline-full-sweep`](roadmap.md#tb2-baseline-full-sweep) —
-    full sweep on `terminal-bench@2.0` to anchor every future
-    ablation.
+
+## How the skills compose into one closed loop
+
+human → lab-propose-idea           (capture)
+      ↘ 
+        lab-plan-next               (queue / promote / Done)
+          ↘
+            lab-run-experiment      ← daemon picks top of `## Up next`
+              ↘ scripts/exp/start.sh exec → runs/experiments/<id>/
+                ↘ ingest
+                  ↘ task-features × N           (parallel, cached)
+                  ↘ trial-critic   × M          (one per trial)
+                    ↘ experiment-critic          (multi-agent fan-out across tasks)
+                      ↘ ingest-critiques
+                        ↘ lab experiments synthesize    (narrative subsections)
+                        ↘ lab tree apply                (### Tree effect, auto-apply or stage)
+                          ↘ lab-reflect-and-plan        (### Suggested + ## Auto-proposed)
+                          ↘ lab-plan-next               (move entry to ## Done)
+                          ↘ every Mth: cross-experiment-critic  (components_perf + apex snapshot)
+                          ↘ if Graduate → STAGED for human → lab-graduate-component
+
+ agents only ever write JSON files and call uv run lab CLI commands. They never touch the markdown directly, never touch the DB directly. 

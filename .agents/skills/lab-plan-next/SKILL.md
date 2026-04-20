@@ -45,15 +45,25 @@ Do **not** use this skill when:
 
 ## Roadmap structure
 
-Two sections only:
-
 ```
-## Up next     ← priority order, top = next to run. Mutable; reorder freely.
-## Done        ← newest at top. Entries land here when their experiment runs (regardless of outcome).
+## Up next            ← priority order, top = next to run. Mutable; reorder freely.
+  ### Suggested       ← daemon-only sub-section (lab-reflect-and-plan). Humans promote.
+## Done               ← newest at top. Entries land here when their experiment runs (regardless of outcome).
 ```
 
 There is no `## Later` section. If something isn't worth queueing
 yet, leave it as an idea in `lab/ideas.md` and queue it when ready.
+
+The `### Suggested` substream lives **inside** `## Up next` because
+it's a sibling priority queue the daemon writes to without
+touching the human queue. Humans:
+
+-   *promote* a suggestion into the main queue with
+    `uv run lab roadmap promote <slug>` (this skill); or
+-   ignore / drop it (just delete the section).
+
+**Never edit `### Suggested` to insert your own entries** — use
+`## Up next` directly for human-curated items.
 
 ## Entry shape
 
@@ -95,10 +105,12 @@ item they're referring to.
 
 One of:
 
-- **Add a new entry** to `## Up next`.
-- **Reorder** existing entries within `## Up next`.
-- **Move a completed entry to `## Done`** with a link to the
-  matching `experiments.md` section.
+-   **Add a new entry** to `## Up next` (human-driven).
+-   **Promote a suggestion** from `### Suggested` to the main `##
+    Up next` queue (`uv run lab roadmap promote <slug>`).
+-   **Reorder** existing entries within `## Up next`.
+-   **Move a completed entry to `## Done`** with a link to the
+    matching `experiments.md` section.
 
 Confirm with the user in one short sentence before mutating.
 
@@ -108,20 +120,41 @@ If the entry corresponds to an existing idea (the common case), the
 **idea id must already exist** in `lab/ideas.md`. If it doesn't,
 run `lab-propose-idea` first.
 
-After picking the slug:
+After picking the slug, **use the CLI for the mechanical edits** —
+it appends in the right shape, refuses duplicate slugs, and only
+touches the file you ask it to:
 
-1. Insert the entry under `## Up next` at the right position (top =
-   highest priority, or below items that have a `Depends on:`
-   chain). Use the entry shape above. Omit optional fields if not
-   applicable.
-2. **Promote the idea**: in `lab/ideas.md`, move the
-   `#### <idea-id>` entry from its theme subsection under
-   `## Proposed` to `## Trying`. Append one bullet to the entry:
-   `-   **Trying in:** [<roadmap-slug>](roadmap.md#<roadmap-slug>)`.
-   Don't rewrite the existing Motivation / Sketch bullets.
+```bash
+# 1. Append the entry to ## Up next (at the bottom of that section).
+#    If you need it higher in priority, do the reorder by editing
+#    the file by hand after — the CLI doesn't currently insert at a
+#    specific position because reorders are inherently judgment-heavy.
+uv run lab roadmap add <slug> \
+  --idea <idea-id> \
+  --hypothesis "<one sentence>" \
+  --plan "<one paragraph>" \
+  [--depends-on <other-slug>] \
+  [--cost "~\$X, ~Y hours wall-clock"]
 
-For meta-experiments (`baseline snapshot` / `infrastructure`), skip
-the idea-promotion step.
+# 2. Promote the idea to ## Trying with a back-reference.
+uv run lab idea move <idea-id> trying \
+  --cross-ref "**Trying in:** [<slug>](roadmap.md#<slug>)"
+```
+
+For meta-experiments (`baseline snapshot` / `infrastructure`), pass
+no `--idea` flag and skip step 2 entirely.
+
+### 4a. Promoting a suggestion
+
+```bash
+# Move the named slug from `## Up next > ### Suggested` into the
+# main `## Up next` queue, preserving its bullets.
+uv run lab roadmap promote <slug>
+```
+
+The CLI errors if `<slug>` isn't in `### Suggested` or already in
+the main queue. Use this whenever the daemon's
+`lab-reflect-and-plan` proposed something worth committing to.
 
 ### 4. Reordering
 
@@ -133,14 +166,19 @@ the chat reply, not in the file.
 ### 5. Moving a completed entry to `## Done`
 
 When an experiment that was queued in the roadmap lands an entry in
-`experiments.md`:
+`experiments.md`, use:
 
-1. Cut the entry from `## Up next`.
-2. Paste it at the **top** of `## Done` (newest first).
-3. Append the two `**Ran:**` and `**Outcome:**` bullets.
-4. Move to `## Done` regardless of whether the experiment succeeded.
-   The roadmap records the *plan*; the experiment records the
-   *evidence*; both belong in the audit trail.
+```bash
+uv run lab roadmap done <slug> \
+  --ran "[<experiment-slug>](experiments.md#YYYY-MM-DD--<slug>)" \
+  --outcome "<one sentence — headline pass rates + decision>"
+```
+
+This cuts the entry from `## Up next`, prepends it to `## Done`
+(newest first), and appends the `**Ran:**` and `**Outcome:**`
+bullets. Move to `## Done` regardless of whether the experiment
+succeeded — the roadmap records the *plan*; the experiment records
+the *evidence*.
 
 ### 6. Confirm and report
 
@@ -153,7 +191,7 @@ After saving, report:
 
 Do **not**:
 
-- Edit `lab/experiments.md` or `lab/components.md`.
+- Edit `lab/experiments.md`, `lab/configs.md`, or `lab/components.md`.
 - Touch any agent YAML or experiment spec.
 - Run any experiment.
 - Create a git worktree, commit, or push.

@@ -1,0 +1,346 @@
+name: Gemini Auto-Fix
+
+# Listens for failed `CI` runs on pull requests and asks the Gemini CLI to
+# patch the code until every CI job goes green. Each fix attempt is committed
+# back to the PR branch, which re-triggers `CI`; this workflow then re-fires
+# on the next failure, forming a closed loop bounded by `MAX_ATTEMPTS`.
+#
+# Required configuration:
+#   - secrets.GEMINI_API_KEY  : Gemini API key for the CLI (required)
+#   - secrets.AUTOFIX_TOKEN   : PAT or GitHub App token with `contents:write`
+#                               and `pull_requests:write` on this repo. The
+#                               default GITHUB_TOKEN cannot be used to push
+#                               commits that re-trigger workflows, so without
+#                               this secret the loop will stall after one push.
+#   - PR label `gemini-autofix` must be present for the workflow to act
+#     (opt-in safety gate; remove + re-add the label to reset the budget).
+#
+# Forks are intentionally not supported: pushing fixes back into a fork
+# requires credentials we cannot safely inject from the base repo.
+
+on:
+  workflow_run:
+    workflows: ["CI"]
+    types: [completed]
+
+permissions:
+  contents: read
+  pull-requests: read
+  actions: read
+
+jobs:
+  auto-fix:
+    name: Auto-fix with Gemini
+    if: >-
+      github.event.workflow_run.conclusion == 'failure' &&
+      github.event.workflow_run.event == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: write
+      pull-requests: write
+      issues: write
+      actions: read
+    concurrency:
+      group: gemini-autofix-${{ github.event.workflow_run.head_branch }}
+      cancel-in-progress: true
+    env:
+      MAX_ATTEMPTS: "5"
+      AUTOFIX_LABEL: gemini-autofix
+      AUTOFIX_PREFIX: "chore(gemini-autofix):"
+      AUTOFIX_BOT_NAME: "gemini-autofix[bot]"
+      AUTOFIX_BOT_EMAIL: "gemini-autofix[bot]@users.noreply.github.com"
+
+    steps:
+      - name: Resolve PR metadata
+        id: pr
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const run = context.payload.workflow_run;
+            const branch = run.head_branch;
+
+            let pr = (run.pull_requests || [])[0];
+            if (!pr) {
+              const { data: prs } = await github.rest.pulls.list({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                state: 'open',
+                head: `${context.repo.owner}:${branch}`,
+                per_page: 1,
+              });
+              pr = prs[0];
+            }
+            if (!pr) {
+              core.notice(`No open PR found for branch ${branch}; skipping.`);
+              core.setOutput('skip', 'true');
+              return;
+            }
+
+            const { data: full } = await github.rest.pulls.get({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: pr.number,
+            });
+
+            const sameRepo = full.head.repo &&
+              full.head.repo.full_name === full.base.repo.full_name;
+            if (!sameRepo) {
+              core.notice('PR comes from a fork; auto-fix is disabled for forks.');
+              core.setOutput('skip', 'true');
+              return;
+            }
+
+            const labels = (full.labels || []).map(l => l.name);
+            if (!labels.includes(process.env.AUTOFIX_LABEL)) {
+              core.notice(
+                `PR #${pr.number} is not labeled "${process.env.AUTOFIX_LABEL}"; skipping.`,
+              );
+              core.setOutput('skip', 'true');
+              return;
+            }
+
+            core.setOutput('skip', 'false');
+            core.setOutput('number', String(pr.number));
+            core.setOutput('head_ref', full.head.ref);
+            core.setOutput('head_sha', full.head.sha);
+            core.setOutput('base_ref', full.base.ref);
+
+      - name: Checkout PR branch
+        if: steps.pr.outputs.skip == 'false'
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.pr.outputs.head_ref }}
+          fetch-depth: 0
+          persist-credentials: true
+          token: ${{ secrets.AUTOFIX_TOKEN || secrets.GITHUB_TOKEN }}
+
+      - name: Check attempt budget
+        id: budget
+        if: steps.pr.outputs.skip == 'false'
+        env:
+          BASE_REF: ${{ steps.pr.outputs.base_ref }}
+        run: |
+          set -euo pipefail
+          git fetch origin "$BASE_REF" --depth=200 || true
+          if git rev-parse --verify "origin/$BASE_REF" >/dev/null 2>&1; then
+            RANGE="origin/${BASE_REF}..HEAD"
+          else
+            RANGE="HEAD~50..HEAD"
+          fi
+          ATTEMPTS=$(git log "$RANGE" --pretty=%s | grep -c "^${AUTOFIX_PREFIX}" || true)
+          echo "attempts=$ATTEMPTS" >> "$GITHUB_OUTPUT"
+          if [ "$ATTEMPTS" -ge "$MAX_ATTEMPTS" ]; then
+            echo "exhausted=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "exhausted=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Notify exhausted budget
+        if: steps.pr.outputs.skip == 'false' && steps.budget.outputs.exhausted == 'true'
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.AUTOFIX_TOKEN || secrets.GITHUB_TOKEN }}
+          script: |
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: Number('${{ steps.pr.outputs.number }}'),
+              body: [
+                `Gemini auto-fix budget (${process.env.MAX_ATTEMPTS} attempts) exhausted on this branch.`,
+                '',
+                `Remove and re-add the \`${process.env.AUTOFIX_LABEL}\` label, or rebase onto the base branch, to reset the budget.`,
+              ].join('\n'),
+            });
+
+      - name: Stop after notifying exhaustion
+        if: steps.pr.outputs.skip == 'false' && steps.budget.outputs.exhausted == 'true'
+        run: |
+          echo "Auto-fix budget exhausted; stopping."
+          exit 0
+
+      - name: Download failing CI job logs
+        if: steps.pr.outputs.skip == 'false' && steps.budget.outputs.exhausted == 'false'
+        uses: actions/github-script@v7
+        env:
+          RUN_ID: ${{ github.event.workflow_run.id }}
+        with:
+          script: |
+            const fs = require('fs');
+            const path = require('path');
+            const runId = Number(process.env.RUN_ID);
+
+            const { data: jobs } = await github.rest.actions.listJobsForWorkflowRun({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              run_id: runId,
+              per_page: 100,
+            });
+
+            fs.mkdirSync('ci-logs', { recursive: true });
+            const summary = [];
+            for (const job of jobs.jobs) {
+              if (job.conclusion !== 'failure') continue;
+              const safe = job.name.replace(/[^a-zA-Z0-9._-]+/g, '_');
+              try {
+                const res = await github.rest.actions.downloadJobLogsForWorkflowRun({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  job_id: job.id,
+                });
+                const file = path.join('ci-logs', `${safe}.log`);
+                fs.writeFileSync(file, Buffer.from(res.data));
+                summary.push(`- ${job.name} (job ${job.id}) -> ${file}`);
+              } catch (err) {
+                core.warning(`Could not download logs for ${job.name}: ${err.message}`);
+              }
+            }
+            fs.writeFileSync(
+              'ci-logs/INDEX.md',
+              `# Failing CI jobs for run ${runId}\n\n${summary.join('\n')}\n`,
+            );
+
+      - name: Set up Python
+        if: steps.pr.outputs.skip == 'false' && steps.budget.outputs.exhausted == 'false'
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Set up uv
+        if: steps.pr.outputs.skip == 'false' && steps.budget.outputs.exhausted == 'false'
+        uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+
+      - name: Set up Node.js
+        if: steps.pr.outputs.skip == 'false' && steps.budget.outputs.exhausted == 'false'
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: frontend/terminal/package-lock.json
+
+      - name: Install Python dependencies
+        if: steps.pr.outputs.skip == 'false' && steps.budget.outputs.exhausted == 'false'
+        run: uv sync --extra dev --extra harbor
+
+      - name: Install frontend dependencies
+        if: steps.pr.outputs.skip == 'false' && steps.budget.outputs.exhausted == 'false'
+        working-directory: frontend/terminal
+        run: npm ci
+
+      - name: Install Gemini CLI
+        if: steps.pr.outputs.skip == 'false' && steps.budget.outputs.exhausted == 'false'
+        run: npm install -g @google/gemini-cli
+
+      - name: Run Gemini auto-fix
+        if: steps.pr.outputs.skip == 'false' && steps.budget.outputs.exhausted == 'false'
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          ATTEMPT_INDEX: ${{ steps.budget.outputs.attempts }}
+        run: |
+          set -euo pipefail
+          if [ -z "${GEMINI_API_KEY:-}" ]; then
+            echo "::error::GEMINI_API_KEY secret is not configured."
+            exit 1
+          fi
+          mkdir -p .gemini
+          NEXT_ATTEMPT=$((ATTEMPT_INDEX + 1))
+          cat > .gemini/autofix-prompt.md <<EOF
+          You are an automated code-fixer running inside the OpenHarness CI loop.
+          The "CI" workflow on the current pull request just failed. The full
+          logs of every failing job are in \`ci-logs/\` (see \`ci-logs/INDEX.md\`).
+
+          This is auto-fix attempt ${NEXT_ATTEMPT} of ${MAX_ATTEMPTS} for this branch.
+
+          Your task:
+            1. Read \`ci-logs/INDEX.md\` and each failing job's log to identify
+               the real root causes (test failures, ruff lint errors, contract
+               validation failures, TypeScript errors).
+            2. Make the smallest set of focused source/test edits required so
+               that ALL of the following commands exit 0 from the repo root:
+                 - uv run pytest -q
+                 - uv run ruff check examples src tests scripts
+                 - uv run python scripts/validate_contracts.py
+                 - (cd frontend/terminal && npx tsc --noEmit)
+            3. After editing, actually re-run the commands you touched and
+               iterate until they pass locally in this sandbox.
+            4. Do NOT skip, xfail, delete, or weaken tests just to make CI
+               green. If a test is correct and the implementation is wrong,
+               fix the implementation. If a test is genuinely wrong, fix it
+               narrowly and explain the change in the diff.
+            5. Honor the conventions in
+               \`.agents/skills/python-engineering/SKILL.md\` (fail fast, no
+               silent fallbacks, narrow exception handling, immutable data).
+            6. Do NOT touch \`.github/workflows/\`, \`ci-logs/\`, or
+               \`AUTOFIX_NOTES.md\` except to write the notes file described
+               below.
+            7. Do NOT commit or push: the surrounding workflow handles git.
+
+          If you cannot confidently fix something, leave it untouched and
+          append a short, structured note to \`AUTOFIX_NOTES.md\` describing
+          the blocker and the smallest reproducer you found. Empty diffs are
+          acceptable when nothing is safe to change.
+          EOF
+
+          gemini --yolo -p "$(cat .gemini/autofix-prompt.md)"
+
+      - name: Commit and push fixes
+        id: push
+        if: steps.pr.outputs.skip == 'false' && steps.budget.outputs.exhausted == 'false'
+        env:
+          ATTEMPT_INDEX: ${{ steps.budget.outputs.attempts }}
+          HEAD_REF: ${{ steps.pr.outputs.head_ref }}
+        run: |
+          set -euo pipefail
+          rm -rf ci-logs .gemini
+          git config user.name  "$AUTOFIX_BOT_NAME"
+          git config user.email "$AUTOFIX_BOT_EMAIL"
+          if [ -z "$(git status --porcelain)" ]; then
+            echo "Gemini produced no changes; nothing to push."
+            echo "pushed=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          NEXT_ATTEMPT=$((ATTEMPT_INDEX + 1))
+          git add -A
+          git commit -m "${AUTOFIX_PREFIX} attempt ${NEXT_ATTEMPT}/${MAX_ATTEMPTS}"
+          git push origin "HEAD:${HEAD_REF}"
+          echo "pushed=true" >> "$GITHUB_OUTPUT"
+          echo "attempt=${NEXT_ATTEMPT}" >> "$GITHUB_OUTPUT"
+
+      - name: Re-trigger CI when using GITHUB_TOKEN
+        if: >-
+          steps.pr.outputs.skip == 'false' &&
+          steps.budget.outputs.exhausted == 'false' &&
+          steps.push.outputs.pushed == 'true' &&
+          secrets.AUTOFIX_TOKEN == ''
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          HEAD_REF: ${{ steps.pr.outputs.head_ref }}
+        run: |
+          # GITHUB_TOKEN pushes do not re-run workflows, so kick `CI` manually.
+          # Requires `ci.yml` to declare `workflow_dispatch` for this to succeed.
+          gh workflow run ci.yml --ref "$HEAD_REF" || \
+            echo "::warning::Could not re-trigger CI; configure AUTOFIX_TOKEN or add workflow_dispatch to ci.yml."
+
+      - name: Comment on PR
+        if: steps.pr.outputs.skip == 'false' && steps.budget.outputs.exhausted == 'false'
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.AUTOFIX_TOKEN || secrets.GITHUB_TOKEN }}
+          script: |
+            const pushed = '${{ steps.push.outputs.pushed }}' === 'true';
+            const attempt = '${{ steps.push.outputs.attempt }}' || (
+              Number('${{ steps.budget.outputs.attempts }}') + 1
+            );
+            const max = process.env.MAX_ATTEMPTS;
+            const runUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
+            const body = pushed
+              ? `Gemini auto-fix attempt **${attempt}/${max}** pushed. CI will re-run; if it still fails, another auto-fix will trigger automatically. ([run details](${runUrl}))`
+              : `Gemini auto-fix attempt produced no changes for the current failures. Inspect the [run logs](${runUrl}) and consider intervening manually.`;
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: Number('${{ steps.pr.outputs.number }}'),
+              body,
+            });
