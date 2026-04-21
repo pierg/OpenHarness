@@ -1,0 +1,26 @@
+{# Body of /ideas. Loaded standalone via /_hx/ideas-body when a command
+   emits ``lab-ideas-changed``. #}
+{% set sections = ["Proposed", "Trying", "Graduated", "Rejected", "Auto-proposed"] %}
+{% for section in sections %}
+  {% set themed = grouped.get(section, {}) %}
+  {% if themed %}
+    <section class="bg-white border border-slate-200 rounded-lg p-5 mb-6">
+      <h2 class="font-semibold mb-3">{{ section }}</h2>
+      {% for theme, ideas in themed.items() %}
+        {% if theme %}<h3 class="font-medium mt-3 mb-1 text-slate-700">{{ theme }}</h3>{% endif %}
+        <ul class="space-y-3">
+          {% for i in ideas %}
+            <li id="{{ i.idea_id }}" class="border border-slate-100 rounded-md p-3">
+              <div class="font-mono text-xs text-slate-500">{{ i.idea_id }}</div>
+              {% if i.motivation %}<p class="text-sm mt-1"><strong>Motivation:</strong> {{ i.motivation }}</p>{% endif %}
+              {% if i.sketch %}<p class="text-sm mt-1 text-slate-600"><strong>Sketch:</strong> {{ i.sketch }}</p>{% endif %}
+              {% for ref in i.cross_refs %}
+                <p class="text-xs mt-1 text-slate-500">{{ ref }}</p>
+              {% endfor %}
+            </li>
+          {% endfor %}
+        </ul>
+      {% endfor %}
+    </section>
+  {% endif %}
+{% endfor %}

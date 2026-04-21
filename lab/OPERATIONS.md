@@ -319,6 +319,117 @@ each file under `runs/lab/logs/` is self-describing:
 #                      "reasoning_effort": "medium", ...}
 ```
 
+## Web UI
+
+Launch the operator console (FastAPI + HTMX, served on `127.0.0.1:8765` by default):
+
+```bash
+uv run lab webui
+```
+
+Pages: `/` (home), `/pending`, `/roadmap`, `/ideas`, `/tree`,
+`/components`, `/components-perf`, `/experiments`,
+`/experiments/<id>`, `/experiments/<id>/trials/<trial_id>`,
+`/tasks`, `/tasks/<checksum>`, `/spawns`, `/daemon`, `/audit`.
+
+All mutating buttons (Promote, Demote, Remove, Confirm trunk swap,
+Move idea, Start/Stop daemon, …) `POST /api/cmd`, which shells out
+to the same `uv run lab …` CLI you would run by hand. Successful
+runs emit `HX-Trigger` events (`lab-roadmap-changed`,
+`lab-ideas-changed`, `lab-pending-changed`, `lab-tree-changed`,
+`lab-daemon-changed`) so the affected list refreshes without a
+page reload.
+
+Daemon controls live on `/` and `/daemon`: a green Start button
+when stopped, a red Stop button when running. Start uses
+`daemon start --background` (tmux session if available, else
+detached nohup), Stop sends SIGTERM to the recorded pid. Both
+auto-refresh on a 5–10 s poll as a backstop for state changes
+that didn't originate from this browser tab (e.g. the daemon
+exited on its own after `--once`).
+
+### Auth
+
+The webui has **two operating modes**, picked by env vars at
+process start. All `GET` pages stay open in both modes (read-only
+state lives in markdown files anyway); the modes only gate
+`POST /api/cmd`. The startup banner prints which mode is active.
+
+#### 1. `open` — default, loopback / SSH-tunnel
+
+No env vars set. `/api/cmd` is unrestricted. The trust boundary is
+the network — uvicorn binds to `127.0.0.1` and you reach it either
+on the host directly or via `ssh -L 8765:127.0.0.1:8765 vm` from a
+laptop you alone use. Binding to a non-loopback interface
+(`--host 0.0.0.0`) in this mode prints a red warning at startup.
+
+#### 2. `proxy` — SSO via Cloudflare Access / Google IAP
+
+For sharing the lab with named collaborators. The webui delegates
+*authentication* to a reverse proxy that already knows who you are
+and then *authorises* the email against role allow-lists from env:
+
+```bash
+export LAB_TRUST_PROXY_AUTH=cloudflare-access     # or "iap"
+export LAB_ADMIN_EMAILS="you@gmail.com,cofounder@gmail.com"
+export LAB_VIEWER_EMAILS="prof@berkeley.edu"      # optional
+uv run lab webui --host 127.0.0.1 --port 8765
+```
+
+| Email is in… | Role | What they see |
+| --- | --- | --- |
+| `LAB_ADMIN_EMAILS` | **admin** | Every page + every write button. Their email is recorded as `actor` in the audit log. |
+| `LAB_VIEWER_EMAILS` | **viewer** | Every page renders, but write buttons are hidden and `/api/cmd` returns 403 with a "Read-only role" card. A blue banner names them. |
+| neither | **anonymous** (rejected) | Read-only with an amber "Sign in / not authorised" banner; `/api/cmd` returns 403. |
+
+The trusted header is `Cf-Access-Authenticated-User-Email` for
+Cloudflare Access; `X-Goog-Authenticated-User-Email` (with the
+`accounts.google.com:` prefix stripped) for IAP.
+
+**Threat-model note**: the webui *trusts the header*. Always bind
+to `127.0.0.1` (or a Unix socket) so only the local proxy can
+inject it — anyone with shell on the VM could otherwise spoof the
+header and bypass SSO. Misspellings of `LAB_TRUST_PROXY_AUTH` fall
+back to `open` mode (and the `--host 0.0.0.0` warning fires if
+applicable) rather than silently honouring the header.
+
+Concrete deployment for `lab.pierg.dev`:
+
+1. **cloudflared** runs as a system service (`sudo cloudflared
+   service install`) and forwards `lab.pierg.dev → http://127.0.0.1:8765`.
+2. **Cloudflare Access** policy on `lab.pierg.dev`: identity
+   providers = Google (added once under *Zero Trust → Settings →
+   Authentication → Login methods*); allow rule lists every email
+   in `LAB_ADMIN_EMAILS ∪ LAB_VIEWER_EMAILS`. Everyone else hits
+   Cloudflare's "you don't have access" page before the request
+   reaches the origin.
+3. **lab webui** runs as a `systemd --user` unit (see
+   `~/.config/systemd/user/openharness-lab.service`). The unit's
+   `Environment=` lines hold the three `LAB_*` env vars so the
+   admin/viewer lists survive restarts.
+
+To add a new collaborator:
+
+- **Read-only access (e.g. a co-author):** add their email to
+  `LAB_VIEWER_EMAILS` in the systemd unit + add an Include rule
+  for it in the Cloudflare Access policy. Restart the service.
+- **Admin access:** same, but `LAB_ADMIN_EMAILS`. Cloudflare's
+  policy is the *outer* gate (can they see anything at all);
+  `LAB_*_EMAILS` is the *inner* gate (what they can do). Both
+  must list the email.
+
+#### Audit trail
+
+Every `/api/cmd` call that gets past the auth gate (validation
+errors, exit-zero runs, exit-nonzero runs) appends a JSON row to
+`runs/lab/web_commands.jsonl`. In proxy mode the `actor` field
+is the authenticated email; in open mode it falls back to
+`"human:webui"` (or whatever the operator set as `_actor` /
+`X-Lab-Actor` / `LAB_USER`). The `/audit` page tails the latest
+200 rows. Pre-auth rejections (401 / 403) are not audited here —
+look at the uvicorn / `journalctl --user -u openharness-lab` log
+for those, where Cloudflare Access also records the SSO email.
+
 ## When something goes wrong
 
 | Symptom | First check | Fix |

@@ -1,0 +1,48 @@
+{% extends "base.html" %}
+{% block title %}Command audit log · OpenHarness lab{% endblock %}
+{% block crumbs %}<a href="/" class="hover:underline">Home</a> / Audit log{% endblock %}
+{% block content %}
+<h1 class="text-xl font-semibold mb-2">Command audit log</h1>
+<p class="text-sm text-slate-600 mb-4">
+  Every <code class="font-mono text-xs bg-slate-100 px-1 rounded">uv run lab …</code>
+  invocation triggered from the web UI is recorded here.
+  Source file: <code class="font-mono text-xs">{{ log_path }}</code>.
+</p>
+
+{% if rows %}
+  <div class="bg-white border border-slate-200 rounded-lg divide-y divide-slate-100">
+    {% for r in rows %}
+      <details class="p-3 text-sm">
+        <summary class="cursor-pointer flex items-baseline gap-3">
+          <span class="font-mono text-xs text-slate-500">{{ r.started_at }}</span>
+          <span class="font-mono text-sm">{{ r.cmd_id }}</span>
+          {% if r.exit_code == 0 %}
+            <span class="text-xs bg-emerald-100 text-emerald-800 px-2 py-px rounded">OK</span>
+          {% else %}
+            <span class="text-xs bg-rose-100 text-rose-800 px-2 py-px rounded">exit {{ r.exit_code }}</span>
+          {% endif %}
+          <span class="text-xs text-slate-500">{{ r.duration_ms }} ms</span>
+          <span class="text-xs text-slate-500">· {{ r.actor }}</span>
+        </summary>
+        <div class="mt-2 font-mono text-[11px] text-slate-700 break-all">{{ r.argv|join(' ') }}</div>
+        {% if r.params %}
+          <div class="mt-1 text-xs text-slate-600">
+            params:
+            {% for k, v in r.params.items() %}
+              <span class="font-mono bg-slate-50 border border-slate-200 rounded px-1.5 py-0.5 mr-1">{{ k }}={{ v }}</span>
+            {% endfor %}
+          </div>
+        {% endif %}
+        {% if r.stdout %}
+          <pre class="mt-2 bg-slate-50 border border-slate-200 rounded p-2 text-xs whitespace-pre-wrap max-h-48 overflow-auto">{{ r.stdout }}</pre>
+        {% endif %}
+        {% if r.stderr %}
+          <pre class="mt-2 bg-rose-50 border border-rose-200 rounded p-2 text-xs whitespace-pre-wrap max-h-48 overflow-auto text-rose-900">{{ r.stderr }}</pre>
+        {% endif %}
+      </details>
+    {% endfor %}
+  </div>
+{% else %}
+  <div class="text-sm text-slate-500 italic">No commands have been run from the web UI yet.</div>
+{% endif %}
+{% endblock %}

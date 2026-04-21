@@ -1,0 +1,91 @@
+{% extends "base.html" %}
+{% block title %}Component performance · OpenHarness lab{% endblock %}
+{% block crumbs %}<a href="/" class="hover:underline">Home</a> / <a href="/components" class="hover:underline">Components</a> / Performance{% endblock %}
+{% block content %}
+<h1 class="text-xl font-semibold mb-4">Component × task-cluster performance</h1>
+<p class="text-sm text-slate-600 mb-4">Cells show win-rate (% of A/B comparisons the component won) followed by Δcost%. Click any component for the per-experiment breakdown. Empty cells = no signal yet.</p>
+
+{% if components_axis and clusters_axis %}
+<div class="bg-white border border-slate-200 rounded-lg p-4 overflow-auto">
+  <table class="text-xs">
+    <thead>
+      <tr>
+        <th class="text-left py-2 pr-3 font-medium text-slate-500 sticky left-0 bg-white z-10">Component</th>
+        {% for cl in clusters_axis %}
+          <th class="px-3 py-2 font-medium text-slate-700 text-center">{{ cl }}</th>
+        {% endfor %}
+      </tr>
+    </thead>
+    <tbody>
+      {% for comp in components_axis %}
+        <tr class="border-t border-slate-100">
+          <td class="py-2 pr-3 sticky left-0 bg-white"><a href="/components/{{ comp }}" class="font-mono text-xs text-blue-600 hover:underline">{{ comp }}</a></td>
+          {% for cl in clusters_axis %}
+            {% set cell = cells.get((comp, cl)) %}
+            <td class="px-2 py-2 text-center align-top">
+              {% if cell %}
+                {% set wr = cell.win_rate %}
+                <div class="rounded p-2 inline-block min-w-[80px]
+                            {% if wr is none %}bg-slate-100
+                            {% elif wr >= 0.6 %}bg-emerald-100 text-emerald-900
+                            {% elif wr >= 0.4 %}bg-amber-100 text-amber-900
+                            {% else %}bg-rose-100 text-rose-900{% endif %}">
+                  <div class="font-semibold font-mono">{{ '{:.0%}'.format(wr) if wr is not none else '—' }}</div>
+                  <div class="text-[10px] font-mono opacity-70">
+                    Δ {{ fmt_delta(cell.cost_delta_pct) }}%
+                  </div>
+                  <div class="text-[10px] text-slate-500">n={{ cell.n_trials }}</div>
+                </div>
+              {% else %}
+                <span class="text-slate-300">·</span>
+              {% endif %}
+            </td>
+          {% endfor %}
+        </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% else %}
+<p class="text-sm text-slate-500">No components_perf rows yet. Run <span class="font-mono bg-slate-50 px-2 py-0.5 rounded">cross-experiment-critic</span> after a few experiments to populate this view.</p>
+{% endif %}
+
+<section class="bg-white border border-slate-200 rounded-lg p-5 mt-6">
+  <h2 class="font-semibold mb-3">All rows ({{ rows|length }})</h2>
+  {% if rows %}
+    <div class="-mx-5 px-5 overflow-x-auto">
+    <table class="w-full text-sm min-w-[820px]">
+      <thead>
+        <tr class="text-xs uppercase text-slate-500 border-b border-slate-200 text-left">
+          <th class="py-2">Component</th>
+          <th>Cluster</th>
+          <th class="text-right">n</th>
+          <th class="text-right">Win-rate</th>
+          <th class="text-right">Δcost</th>
+          <th>Supporting experiments</th>
+          <th>Notes</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for r in rows %}
+          <tr class="border-b border-slate-100">
+            <td class="py-1.5"><a href="/components/{{ r.component_id }}" class="font-mono text-xs text-blue-600 hover:underline">{{ r.component_id }}</a></td>
+            <td class="text-xs">{{ r.task_cluster }}</td>
+            <td class="text-right text-xs">{{ r.n_trials }}</td>
+            <td class="text-right text-xs font-mono">{{ '{:.0%}'.format(r.win_rate) if r.win_rate is not none else '—' }}</td>
+            <td class="text-right text-xs font-mono">{{ fmt_delta(r.cost_delta_pct) }}%</td>
+            <td class="text-xs">
+              {% for e in r.supporting_experiments[:4] %}<a href="/experiments/{{ e }}" class="font-mono bg-slate-100 hover:bg-slate-200 px-1 rounded mr-1">{{ e[:14] }}…</a>{% endfor %}
+              {% if r.supporting_experiments|length > 4 %}<span class="text-slate-400">+{{ r.supporting_experiments|length - 4 }}</span>{% endif %}
+            </td>
+            <td class="text-xs text-slate-600">{{ r.notes or "—" }}</td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    </div>
+  {% else %}
+    <p class="text-sm text-slate-500">No rows.</p>
+  {% endif %}
+</section>
+{% endblock %}

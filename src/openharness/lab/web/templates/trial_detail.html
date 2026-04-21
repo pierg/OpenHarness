@@ -1,0 +1,222 @@
+{% extends "base.html" %}
+{% block title %}{{ trial.task_name }} · {{ trial.leg_id }}{% endblock %}
+{% block crumbs %}<a href="/" class="hover:underline">Home</a> / <a href="/experiments" class="hover:underline">Experiments</a> / <a href="/experiments/{{ instance_id }}" class="hover:underline font-mono text-xs">{{ instance_id }}</a> / <span class="font-mono text-xs">{{ trial.task_name }}</span>{% endblock %}
+{% block content %}
+
+<header class="mb-5 flex flex-wrap items-baseline gap-3">
+  <h1 class="text-xl font-semibold">{{ trial.task_name }}</h1>
+  <span class="text-xs font-mono bg-slate-100 px-2 py-0.5 rounded">{{ trial.leg_id }}</span>
+  {% if trial.passed %}
+    <span class="px-2 py-0.5 rounded bg-emerald-100 text-emerald-800 text-xs font-semibold">PASSED</span>
+  {% elif trial.passed == false %}
+    <span class="px-2 py-0.5 rounded bg-rose-100 text-rose-800 text-xs font-semibold">FAILED{% if trial.error_phase %} · {{ trial.error_phase }}{% endif %}</span>
+  {% else %}
+    <span class="px-2 py-0.5 rounded bg-amber-100 text-amber-800 text-xs font-semibold">{{ trial.status or "?" }}</span>
+  {% endif %}
+  {% if trial.task_checksum %}
+    <a href="/tasks/{{ trial.task_checksum }}" class="ml-auto text-xs text-blue-600 hover:underline">cross-experiment view ›</a>
+  {% endif %}
+</header>
+
+<!-- Stat strip -->
+<section class="grid grid-cols-2 md:grid-cols-6 gap-3 mb-6 text-sm">
+  <div class="bg-white border border-slate-200 rounded p-3">
+    <div class="text-xs text-slate-500 uppercase">Score</div>
+    <div class="font-mono text-lg">{{ '{:.2f}'.format(trial.score) if trial.score is not none else '—' }}</div>
+  </div>
+  <div class="bg-white border border-slate-200 rounded p-3">
+    <div class="text-xs text-slate-500 uppercase">Cost</div>
+    <div class="font-mono text-lg">{{ fmt_money(trial.cost_usd) }}</div>
+  </div>
+  <div class="bg-white border border-slate-200 rounded p-3">
+    <div class="text-xs text-slate-500 uppercase">Duration</div>
+    <div class="font-mono text-lg">{{ '{:.1f}s'.format(trial.duration_sec) if trial.duration_sec is not none else '—' }}</div>
+  </div>
+  <div class="bg-white border border-slate-200 rounded p-3">
+    <div class="text-xs text-slate-500 uppercase">Turns</div>
+    <div class="font-mono text-lg">{{ trial.n_turns or '—' }}</div>
+  </div>
+  <div class="bg-white border border-slate-200 rounded p-3">
+    <div class="text-xs text-slate-500 uppercase">Agent</div>
+    <div class="font-mono text-xs truncate">{{ trial.agent_id or '—' }}</div>
+  </div>
+  <div class="bg-white border border-slate-200 rounded p-3">
+    <div class="text-xs text-slate-500 uppercase">Model</div>
+    <div class="font-mono text-xs truncate">{{ trial.model or '—' }}</div>
+  </div>
+</section>
+
+<!-- Components active -->
+{% if trial.components_active %}
+<section class="mb-6 text-sm">
+  <span class="text-xs uppercase text-slate-500 mr-2">Components active:</span>
+  {% for c in trial.components_active %}
+    <a href="/components/{{ c }}" class="font-mono bg-slate-100 hover:bg-slate-200 px-1.5 py-0.5 rounded mr-1 text-xs">{{ c }}</a>
+  {% endfor %}
+</section>
+{% endif %}
+
+<div class="grid grid-cols-1 xl:grid-cols-3 gap-6">
+
+  <!-- Critique (left, takes 2 cols) -->
+  <section class="xl:col-span-2 space-y-4">
+    {% if trial.critique %}
+      {% set c = trial.critique %}
+      <div class="bg-white border border-slate-200 rounded-lg p-5">
+        <div class="flex items-baseline justify-between mb-3">
+          <h2 class="font-semibold">Critic analysis</h2>
+          <span class="text-xs text-slate-500">{{ c.critic_model or "?" }} · {{ fmt_dt(c.created_at) }}{% if c.confidence is not none %} · confidence {{ '{:.0%}'.format(c.confidence) }}{% endif %}</span>
+        </div>
+        {% if c.task_summary %}
+          <h3 class="text-xs uppercase text-slate-500 mt-3">Task summary</h3>
+          <div class="prose prose-sm max-w-none">{{ render_md(c.task_summary) | safe }}</div>
+        {% endif %}
+        {% if c.agent_strategy %}
+          <h3 class="text-xs uppercase text-slate-500 mt-3">Agent strategy</h3>
+          <div class="prose prose-sm max-w-none">{{ render_md(c.agent_strategy) | safe }}</div>
+        {% endif %}
+        {% if c.outcome %}
+          <h3 class="text-xs uppercase text-slate-500 mt-3">Outcome</h3>
+          <div class="prose prose-sm max-w-none">{{ render_md(c.outcome) | safe }}</div>
+        {% endif %}
+        {% if c.root_cause %}
+          <h3 class="text-xs uppercase text-rose-700 mt-3">Root cause</h3>
+          <div class="prose prose-sm max-w-none">{{ render_md(c.root_cause) | safe }}</div>
+        {% endif %}
+        {% if c.success_factor %}
+          <h3 class="text-xs uppercase text-emerald-700 mt-3">Success factor</h3>
+          <div class="prose prose-sm max-w-none">{{ render_md(c.success_factor) | safe }}</div>
+        {% endif %}
+        {% if c.key_actions %}
+          <h3 class="text-xs uppercase text-slate-500 mt-3">Key actions</h3>
+          <ul class="list-disc pl-5 text-sm space-y-1">
+            {% for a in c.key_actions %}<li>{{ a }}</li>{% endfor %}
+          </ul>
+        {% endif %}
+        {% if c.anti_patterns %}
+          <h3 class="text-xs uppercase text-rose-700 mt-3">Anti-patterns</h3>
+          <ul class="list-disc pl-5 text-sm space-y-1">
+            {% for a in c.anti_patterns %}<li>{{ a }}</li>{% endfor %}
+          </ul>
+        {% endif %}
+        {% if c.surprising_observations %}
+          <h3 class="text-xs uppercase text-amber-700 mt-3">Surprising observations</h3>
+          <ul class="list-disc pl-5 text-sm space-y-1">
+            {% for a in c.surprising_observations %}<li>{{ a }}</li>{% endfor %}
+          </ul>
+        {% endif %}
+      </div>
+    {% else %}
+      <div class="bg-white border border-dashed border-slate-300 rounded-lg p-5 text-sm text-slate-500">
+        No critic analysis yet for this trial.
+        <div class="mt-2 font-mono text-xs select-all bg-slate-50 px-2 py-1 rounded inline-block">uv run lab analyze {{ instance_id }}</div>
+      </div>
+    {% endif %}
+
+    <!-- User prompt -->
+    {% if trial.user_prompt %}
+      <details class="bg-white border border-slate-200 rounded-lg p-5">
+        <summary class="cursor-pointer font-semibold">User prompt</summary>
+        <pre class="mt-3 whitespace-pre-wrap text-xs text-slate-700 font-mono">{{ trial.user_prompt }}</pre>
+      </details>
+    {% endif %}
+
+    <!-- Turns -->
+    <div class="bg-white border border-slate-200 rounded-lg p-5">
+      <div class="flex items-baseline justify-between mb-3">
+        <h2 class="font-semibold">Trajectory · {{ trial.turns|length }} message(s)</h2>
+        <a href="#turn-1" class="text-xs text-slate-500 hover:underline">first turn ↓</a>
+      </div>
+      <div class="space-y-3">
+        {% for t in trial.turns %}
+          <div id="turn-{{ t.index }}" class="border-l-4 pl-3 py-1
+                      {% if t.role == 'user' %}border-blue-300{% elif t.role == 'assistant' %}border-emerald-300{% elif t.role == 'tool' %}border-amber-300{% else %}border-slate-300{% endif %}">
+            <div class="flex items-baseline justify-between mb-1">
+              <span class="text-xs font-semibold uppercase
+                          {% if t.role == 'user' %}text-blue-700{% elif t.role == 'assistant' %}text-emerald-700{% elif t.role == 'tool' %}text-amber-700{% else %}text-slate-600{% endif %}">
+                #{{ t.index }} · {{ t.role }}
+              </span>
+              <span class="text-[10px] text-slate-400 font-mono">{{ '{:,}'.format(t.n_chars) }} chars</span>
+            </div>
+            {% for text in t.texts %}
+              <pre class="whitespace-pre-wrap text-xs font-mono text-slate-700 mb-2">{{ text }}</pre>
+            {% endfor %}
+            {% for call in t.tool_calls %}
+              <details class="bg-slate-900 text-emerald-200 rounded-md p-2 mb-2 text-xs font-mono" open>
+                <summary class="cursor-pointer text-emerald-300">▶ {{ call.name }}</summary>
+                <pre class="mt-2 whitespace-pre-wrap text-xs">{{ call.input | tojson(indent=2) }}</pre>
+              </details>
+            {% endfor %}
+            {% for res in t.tool_results %}
+              <details class="bg-slate-50 border border-slate-200 rounded-md p-2 mb-2 text-xs">
+                <summary class="cursor-pointer {% if res.is_error %}text-rose-700 font-semibold{% else %}text-slate-600{% endif %}">
+                  {% if res.is_error %}✗ tool error{% else %}↳ tool output{% endif %}
+                </summary>
+                <pre class="mt-2 whitespace-pre-wrap font-mono text-xs text-slate-700">{{ res.content }}</pre>
+              </details>
+            {% endfor %}
+          </div>
+        {% else %}
+          <p class="text-sm text-slate-500">No messages.jsonl found at <code class="text-xs">{{ trial.trial_dir }}/messages.jsonl</code>.</p>
+        {% endfor %}
+      </div>
+    </div>
+  </section>
+
+  <!-- Right column -->
+  <section class="space-y-4">
+    {% if trial.verifier %}
+      {% set v = trial.verifier %}
+      <div class="bg-white border border-slate-200 rounded-lg p-5">
+        <div class="flex items-baseline justify-between mb-3">
+          <h2 class="font-semibold">Verifier</h2>
+          {% if v.tool_name %}<span class="text-xs font-mono text-slate-500">{{ v.tool_name }}</span>{% endif %}
+        </div>
+        {% if v.summary %}
+          <div class="grid grid-cols-3 gap-2 text-xs mb-3">
+            {% for k, n in v.summary.items() %}
+              <div class="bg-slate-50 rounded p-2 text-center">
+                <div class="text-slate-500 uppercase text-[10px]">{{ k }}</div>
+                <div class="font-mono font-semibold {% if k == 'failed' and n %}text-rose-700{% elif k == 'passed' and n %}text-emerald-700{% endif %}">{{ n }}</div>
+              </div>
+            {% endfor %}
+          </div>
+        {% endif %}
+        {% if v.tests %}
+          <ul class="text-xs space-y-1 max-h-60 overflow-auto">
+            {% for t in v.tests %}
+              <li class="flex items-baseline gap-2">
+                <span class="{% if t.status == 'passed' %}text-emerald-600{% elif t.status == 'failed' %}text-rose-600{% else %}text-slate-500{% endif %}">●</span>
+                <span class="font-mono truncate">{{ t.name }}</span>
+                {% if t.duration_sec is not none %}<span class="ml-auto text-slate-400">{{ '{:.2f}s'.format(t.duration_sec) }}</span>{% endif %}
+              </li>
+            {% endfor %}
+          </ul>
+        {% endif %}
+        {% if v.reward_text %}
+          <div class="mt-3">
+            <div class="text-xs text-slate-500 uppercase mb-1">Reward</div>
+            <pre class="text-xs font-mono bg-slate-50 p-2 rounded whitespace-pre-wrap">{{ v.reward_text }}</pre>
+          </div>
+        {% endif %}
+        {% if v.stdout_excerpt %}
+          <details class="mt-3">
+            <summary class="cursor-pointer text-xs text-slate-600">Test stdout excerpt</summary>
+            <pre class="text-[11px] font-mono bg-slate-900 text-slate-100 p-2 rounded mt-2 max-h-80 overflow-auto whitespace-pre-wrap">{{ v.stdout_excerpt }}</pre>
+          </details>
+        {% endif %}
+      </div>
+    {% endif %}
+
+    {% if trial.raw_files %}
+      <div class="bg-white border border-slate-200 rounded-lg p-5">
+        <h2 class="font-semibold mb-2">Trial directory</h2>
+        <p class="text-xs text-slate-500 font-mono break-all mb-2">{{ trial.trial_dir }}</p>
+        <ul class="text-xs font-mono text-slate-600 space-y-0.5">
+          {% for f in trial.raw_files %}<li>{{ f }}</li>{% endfor %}
+        </ul>
+      </div>
+    {% endif %}
+  </section>
+</div>
+{% endblock %}

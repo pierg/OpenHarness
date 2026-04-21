@@ -1,0 +1,60 @@
+{% extends "base.html" %}
+{% block title %}Components · OpenHarness lab{% endblock %}
+{% block crumbs %}<a href="/" class="hover:underline">Home</a> / Components{% endblock %}
+{% block content %}
+<h1 class="text-xl font-semibold mb-4">Components catalog</h1>
+
+{% for kind, entries in catalog.by_kind.items() %}
+<section class="bg-white border border-slate-200 rounded-lg p-5 mb-6">
+  <h2 class="font-semibold mb-3">{{ kind }} <span class="text-slate-400 text-sm">({{ entries|length }})</span></h2>
+  {% if entries %}
+    <div class="-mx-5 px-5 overflow-x-auto">
+    <table class="w-full text-sm min-w-[720px]">
+      <thead>
+        <tr class="text-xs uppercase text-slate-500 border-b border-slate-200 text-left">
+          <th class="py-2">ID</th>
+          <th>Status</th>
+          <th>Description</th>
+          <th>Used by</th>
+          <th>Win-rate / Δcost</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for e in entries %}
+          {% set perfs = perf_by_id.get(e.component_id, []) %}
+          <tr class="border-b border-slate-100 align-top">
+            <td class="py-2 font-mono text-xs">{{ e.component_id }}</td>
+            <td><span class="px-1.5 py-0.5 rounded text-xs {{ status_color(e.status) }}">{{ e.status }}</span></td>
+            <td>{{ e.description }}</td>
+            <td class="text-xs">
+              {% if e.used_by %}
+                {% for u in e.used_by %}<span class="font-mono bg-slate-100 px-1 py-0.5 rounded mr-1">{{ u }}</span>{% endfor %}
+              {% else %}—{% endif %}
+            </td>
+            <td class="text-xs">
+              {% if perfs %}
+                <ul class="space-y-0.5">
+                  {% for p in perfs %}
+                    <li>
+                      <span class="text-slate-600">{{ p.task_cluster }}</span>
+                      ·
+                      <span class="font-mono">{% if p.win_rate is not none %}{{ '{:.0%}'.format(p.win_rate) }}{% else %}—{% endif %}</span>
+                      ·
+                      <span class="font-mono text-slate-500">Δ${{ '{:+.0f}%'.format(p.cost_delta_pct) if p.cost_delta_pct is not none else '—' }}</span>
+                      <span class="text-slate-400">(n={{ p.n_trials }})</span>
+                    </li>
+                  {% endfor %}
+                </ul>
+              {% else %}—{% endif %}
+            </td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    </div>
+  {% else %}
+    <p class="text-sm text-slate-500">No {{ kind }} components yet.</p>
+  {% endif %}
+</section>
+{% endfor %}
+{% endblock %}

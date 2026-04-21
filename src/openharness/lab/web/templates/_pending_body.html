@@ -1,0 +1,133 @@
+{# Body of /pending. Loaded standalone via /_hx/pending-body when a
+   command emits ``lab-pending-changed``. #}
+<div class="space-y-6">
+  <section>
+    <h2 class="font-semibold mb-2">Staged trunk swaps ({{ pending.staged_graduates|length }})</h2>
+    {% if pending.staged_graduates %}
+      <ul class="space-y-3">
+        {% for d in pending.staged_graduates %}
+          <li class="border border-amber-300 bg-amber-50 rounded-md p-4">
+            <div class="flex items-baseline justify-between">
+              <div>
+                <div class="font-mono text-sm">{{ d.target_id }}</div>
+                <div class="text-xs text-amber-800">slug: <a href="/experiments/{{ d.instance_id }}" class="underline">{{ d.slug }}</a> · instance {{ d.instance_id }}</div>
+              </div>
+              <div class="text-xs text-slate-500">{{ fmt_dt(d.applied_at) }}</div>
+            </div>
+            <p class="text-sm text-amber-900 mt-2">{{ d.rationale or "—" }}</p>
+            {% if identity.can_write %}
+            <form class="mt-3 flex flex-wrap items-center gap-2"
+                  hx-post="/api/cmd" hx-target="#cmd-result" hx-swap="innerHTML"
+                  hx-confirm="Confirm trunk swap to {{ d.target_id }}? This rewrites trunk.yaml.">
+              <input type="hidden" name="cmd_id" value="graduate-confirm">
+              <input type="hidden" name="slug" value="{{ d.slug }}">
+              <label class="text-xs text-amber-900">Applied by</label>
+              <input type="text" name="applied_by" value="{{ identity.email or 'human:webui' }}"
+                     class="text-xs border border-amber-300 rounded px-2 py-1 font-mono w-48">
+              <button class="text-xs bg-amber-700 hover:bg-amber-800 text-white rounded px-3 py-1">
+                Confirm trunk swap
+              </button>
+              <span class="text-xs text-slate-500 font-mono">uv run lab graduate confirm {{ d.slug }} --applied-by …</span>
+            </form>
+            {% endif %}
+          </li>
+        {% endfor %}
+      </ul>
+    {% else %}
+      <p class="text-sm text-slate-500">No graduates waiting.</p>
+    {% endif %}
+  </section>
+
+  <section>
+    <h2 class="font-semibold mb-2">Suggested experiments ({{ pending.suggested|length }})</h2>
+    {% if pending.suggested %}
+      <ul class="space-y-3">
+        {% for s in pending.suggested %}
+          <li class="border border-slate-200 bg-white rounded-md p-4">
+            <div class="font-mono text-sm">{{ s.slug }}</div>
+            <p class="text-sm text-slate-700 mt-1">{{ s.hypothesis }}</p>
+            {% if s.cost %}<div class="text-xs text-slate-500 mt-1">cost: {{ s.cost }}</div>{% endif %}
+            {% if identity.can_write %}
+            <div class="mt-3 flex items-center gap-2">
+              <form hx-post="/api/cmd" hx-target="#cmd-result" hx-swap="innerHTML">
+                <input type="hidden" name="cmd_id" value="roadmap-promote">
+                <input type="hidden" name="slug" value="{{ s.slug }}">
+                <button class="text-xs bg-slate-800 hover:bg-slate-900 text-white rounded px-3 py-1">
+                  Promote to roadmap
+                </button>
+              </form>
+              <form hx-post="/api/cmd" hx-target="#cmd-result" hx-swap="innerHTML"
+                    hx-confirm="Discard suggested experiment {{ s.slug }}?">
+                <input type="hidden" name="cmd_id" value="roadmap-remove">
+                <input type="hidden" name="slug" value="{{ s.slug }}">
+                <input type="hidden" name="section" value="suggested">
+                <button class="text-xs bg-rose-700 hover:bg-rose-800 text-white rounded px-3 py-1">
+                  Discard
+                </button>
+              </form>
+              <span class="text-xs text-slate-500 font-mono">uv run lab roadmap promote / remove {{ s.slug }}</span>
+            </div>
+            {% endif %}
+          </li>
+        {% endfor %}
+      </ul>
+    {% else %}
+      <p class="text-sm text-slate-500">No suggestions waiting.</p>
+    {% endif %}
+  </section>
+
+  <section>
+    <h2 class="font-semibold mb-2">Auto-proposed ideas ({{ pending.auto_proposed|length }})</h2>
+    {% if pending.auto_proposed %}
+      <ul class="space-y-3">
+        {% for i in pending.auto_proposed %}
+          <li class="border border-slate-200 bg-white rounded-md p-4">
+            <div class="font-mono text-sm" id="{{ i.idea_id }}">{{ i.idea_id }}</div>
+            {% if i.motivation %}<p class="text-sm text-slate-700 mt-1"><strong>Motivation:</strong> {{ i.motivation }}</p>{% endif %}
+            {% if i.sketch %}<p class="text-sm text-slate-600 mt-1"><strong>Sketch:</strong> {{ i.sketch }}</p>{% endif %}
+            {% if identity.can_write %}
+            <div class="mt-3 flex items-center gap-2">
+              <form hx-post="/api/cmd" hx-target="#cmd-result" hx-swap="innerHTML">
+                <input type="hidden" name="cmd_id" value="idea-move">
+                <input type="hidden" name="idea_id" value="{{ i.idea_id }}">
+                <input type="hidden" name="target" value="proposed">
+                <button class="text-xs bg-emerald-700 hover:bg-emerald-800 text-white rounded px-3 py-1">
+                  Move to Proposed
+                </button>
+              </form>
+              <form hx-post="/api/cmd" hx-target="#cmd-result" hx-swap="innerHTML">
+                <input type="hidden" name="cmd_id" value="idea-move">
+                <input type="hidden" name="idea_id" value="{{ i.idea_id }}">
+                <input type="hidden" name="target" value="trying">
+                <button class="text-xs bg-sky-700 hover:bg-sky-800 text-white rounded px-3 py-1">
+                  Move to Trying
+                </button>
+              </form>
+              <form hx-post="/api/cmd" hx-target="#cmd-result" hx-swap="innerHTML"
+                    hx-confirm="Reject auto-proposed idea {{ i.idea_id }}?">
+                <input type="hidden" name="cmd_id" value="idea-move">
+                <input type="hidden" name="idea_id" value="{{ i.idea_id }}">
+                <input type="hidden" name="target" value="rejected">
+                <button class="text-xs bg-rose-700 hover:bg-rose-800 text-white rounded px-3 py-1">
+                  Reject
+                </button>
+              </form>
+              <span class="text-xs text-slate-500 font-mono">uv run lab idea move {{ i.idea_id }} {proposed|trying|rejected}</span>
+            </div>
+            {% endif %}
+          </li>
+        {% endfor %}
+      </ul>
+    {% else %}
+      <p class="text-sm text-slate-500">No auto-proposed ideas waiting.</p>
+    {% endif %}
+  </section>
+
+  <section>
+    <h2 class="font-semibold mb-2">Recent failures (24 h)</h2>
+    <ul class="space-y-2 text-sm">
+      <li>{{ pending.misconfig_recent }} misconfigurations recorded.</li>
+      <li>{{ pending.failed_spawns_recent }} skill spawns exited non-zero — <a href="/spawns" class="text-blue-600 hover:underline">open spawn log</a>.</li>
+    </ul>
+  </section>
+</div>

@@ -1,0 +1,162 @@
+{# /_hx/tree-preview?slug=<slug> partial.
+
+   Shows what ``uv run lab tree apply <slug>`` would do, given the
+   current trunk and the experiment's leg stats. Includes an "Apply"
+   button on the bottom that fires the ``tree-apply`` whitelisted
+   command (admins only — the form is gated by ``identity.can_write``
+   in the parent context, but we re-gate here so this fragment is
+   safe to swap into any container).
+
+   This template is intentionally robust to a missing ``diff`` (the
+   slug didn't resolve to any known experiment) so the rendered error
+   matches the operator's mental model. #}
+
+{% if diff is none %}
+  <div class="border border-amber-300 bg-amber-50 rounded-md p-3 text-sm text-amber-900">
+    <strong>No experiment found for slug</strong>
+    <code class="font-mono">{{ slug }}</code>.
+    Either the slug is mis-spelt or the experiment hasn't been ingested
+    into the lab DB yet.
+  </div>
+{% else %}
+  {% set kind = diff.kind %}
+  {% set color_class = verdict_color(kind, applied=False) %}
+  <article class="border rounded-md p-4 {{ color_class }}">
+    <header class="flex items-baseline justify-between gap-3 flex-wrap">
+      <div class="flex items-baseline gap-2">
+        <span class="text-[10px] uppercase tracking-wide font-semibold opacity-70">Verdict</span>
+        <h3 class="font-mono font-semibold text-base">{{ kind }}</h3>
+        {% if kind == "graduate" %}
+          <span class="text-[10px] uppercase font-semibold bg-amber-200 text-amber-900 px-1.5 py-0.5 rounded">staged</span>
+        {% endif %}
+      </div>
+      <div class="text-xs opacity-70 font-mono">
+        slug: <strong>{{ diff.slug }}</strong>
+        {% if diff.resolved_instance_id and diff.resolved_instance_id != diff.slug %}
+          · instance:
+          <a href="/experiments/{{ diff.resolved_instance_id }}" class="underline">{{ diff.resolved_instance_id }}</a>
+        {% endif %}
+      </div>
+    </header>
+
+    <dl class="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-1 mt-3 text-sm">
+      <div class="flex items-baseline gap-2">
+        <dt class="opacity-60 w-32">Target</dt>
+        <dd class="font-mono">{{ diff.target_id or "—" }}</dd>
+      </div>
+      <div class="flex items-baseline gap-2">
+        <dt class="opacity-60 w-32">Confidence</dt>
+        <dd class="font-mono">{{ '{:.0%}'.format(diff.confidence) if diff.confidence is not none else "—" }}</dd>
+      </div>
+      {% if diff.trunk_leg %}
+      <div class="flex items-baseline gap-2">
+        <dt class="opacity-60 w-32">Trunk leg</dt>
+        <dd class="font-mono text-xs">{{ diff.trunk_leg }}</dd>
+      </div>
+      {% endif %}
+      {% if diff.mutation_leg %}
+      <div class="flex items-baseline gap-2">
+        <dt class="opacity-60 w-32">Mutation leg</dt>
+        <dd class="font-mono text-xs">{{ diff.mutation_leg }}</dd>
+      </div>
+      {% endif %}
+      {% if diff.pass_rate_delta_pp is not none %}
+      <div class="flex items-baseline gap-2">
+        <dt class="opacity-60 w-32">Pass-rate Δ</dt>
+        <dd class="font-mono">{{ '{:+.1f} pp'.format(diff.pass_rate_delta_pp) }}</dd>
+      </div>
+      {% endif %}
+      {% if diff.cost_per_pass_delta_pct is not none %}
+      <div class="flex items-baseline gap-2">
+        <dt class="opacity-60 w-32">Cost/pass Δ</dt>
+        <dd class="font-mono">{{ '{:+.1f}%'.format(diff.cost_per_pass_delta_pct) }}</dd>
+      </div>
+      {% endif %}
+    </dl>
+
+    {% if diff.use_when %}
+      <div class="mt-3">
+        <div class="text-[10px] uppercase tracking-wide font-semibold opacity-60">Use-when predicate</div>
+        <pre class="mt-1 bg-white/60 border border-current/20 rounded p-2 text-xs font-mono overflow-x-auto">{{ diff.use_when | tojson(indent=2) }}</pre>
+      </div>
+    {% endif %}
+
+    {% if diff.rationale %}
+      <div class="mt-3">
+        <div class="text-[10px] uppercase tracking-wide font-semibold opacity-60">Rationale</div>
+        <div class="prose prose-sm max-w-none mt-1">{{ render_md(diff.rationale) | safe }}</div>
+      </div>
+    {% endif %}
+
+    {% if diff.cluster_evidence %}
+      <details class="mt-3">
+        <summary class="cursor-pointer text-xs opacity-70 hover:opacity-100">
+          Cluster evidence ({{ diff.cluster_evidence|length }})
+        </summary>
+        <div class="mt-2 overflow-x-auto">
+          <table class="text-xs border-collapse min-w-[480px]">
+            <thead>
+              <tr class="text-left border-b border-current/20">
+                <th class="py-1 pr-3">Cluster</th>
+                <th class="py-1 pr-3 text-right">n</th>
+                <th class="py-1 pr-3 text-right">Δ pp</th>
+                <th class="py-1 pr-3">Notes</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for c in diff.cluster_evidence %}
+                <tr class="border-b border-current/10">
+                  <td class="py-1 pr-3 font-mono">{{ c.cluster or c.task_cluster or "—" }}</td>
+                  <td class="py-1 pr-3 text-right font-mono">{{ c.n_trials or c.n or "—" }}</td>
+                  <td class="py-1 pr-3 text-right font-mono">
+                    {% if c.delta_pp is not none %}{{ '{:+.1f}'.format(c.delta_pp) }}
+                    {% elif c.pass_rate_delta_pp is not none %}{{ '{:+.1f}'.format(c.pass_rate_delta_pp) }}
+                    {% else %}—{% endif %}
+                  </td>
+                  <td class="py-1 pr-3">{{ c.notes or c.note or "—" }}</td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </details>
+    {% endif %}
+
+    {% if diff.evidence_paths %}
+      <details class="mt-3">
+        <summary class="cursor-pointer text-xs opacity-70 hover:opacity-100">
+          Evidence paths ({{ diff.evidence_paths|length }})
+        </summary>
+        <ul class="mt-1 text-xs font-mono opacity-80 space-y-0.5">
+          {% for p in diff.evidence_paths %}
+            <li>{{ p }}</li>
+          {% endfor %}
+        </ul>
+      </details>
+    {% endif %}
+
+    {% if identity.can_write %}
+      <div class="mt-4 border-t border-current/20 pt-3">
+        {% if kind == "no_op" %}
+          <p class="text-xs opacity-70 italic">
+            No-op: nothing to apply. Re-running <code>tree apply</code>
+            still records the verdict in the journal but doesn't mutate
+            the tree.
+          </p>
+        {% endif %}
+        <form hx-post="/api/cmd" hx-target="#cmd-result" hx-swap="innerHTML"
+              hx-confirm="{% if kind == 'graduate' %}Stage a Graduate verdict for {{ diff.slug }}? This writes a journal block and queues a trunk swap; you'll still need to run `graduate-confirm` separately.{% else %}Apply this {{ kind }} verdict to the lab? This edits configs.md.{% endif %}"
+              class="flex items-center gap-2">
+          <input type="hidden" name="cmd_id" value="tree-apply">
+          <input type="hidden" name="slug" value="{{ diff.slug }}">
+          <button class="text-xs bg-slate-900 hover:bg-black text-white rounded px-3 py-1.5 font-semibold">
+            Apply verdict
+          </button>
+          <span class="text-xs opacity-70">
+            CLI equivalent: <code class="font-mono">uv run lab tree apply {{ diff.slug }}</code>
+          </span>
+        </form>
+      </div>
+    {% endif %}
+  </article>
+{% endif %}
