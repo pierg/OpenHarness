@@ -42,6 +42,10 @@ dependencies = [
     "duckdb>=1.5.2",
     "streamlit>=1.56.0",
     "jsonschema>=4.26.0",
+    "fastapi>=0.115.0",
+    "uvicorn>=0.32.0",
+    "markdown-it-py>=3.0.0",
+    "pytz>=2024.1",
 ]
 
 [project.optional-dependencies]
@@ -92,6 +96,12 @@ exclude = [
 "frontend/terminal/package.json" = "openharness/_frontend/package.json"
 "frontend/terminal/tsconfig.json" = "openharness/_frontend/tsconfig.json"
 "frontend/terminal/src" = "openharness/_frontend/src"
+# Web UI assets — Jinja templates + static. They live under the
+# packaged `openharness/lab/web/` tree, so default packaging picks
+# them up; this entry keeps them ship-explicit if hatch's defaults
+# ever change.
+"src/openharness/lab/web/templates" = "openharness/lab/web/templates"
+"src/openharness/lab/web/static" = "openharness/lab/web/static"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

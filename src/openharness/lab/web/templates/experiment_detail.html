@@ -1,0 +1,272 @@
+{% extends "base.html" %}
+{% block title %}{{ instance_id }} · OpenHarness lab{% endblock %}
+{% block crumbs %}<a href="/" class="hover:underline">Home</a> / <a href="/experiments" class="hover:underline">Experiments</a> / <span class="font-mono text-xs">{{ instance_id }}</span>{% endblock %}
+{% block content %}
+
+<header class="mb-6 flex flex-wrap items-baseline gap-3">
+  <h1 class="text-xl font-semibold font-mono">{{ instance_id }}</h1>
+  {% if experiment %}
+    <span class="text-slate-500 text-sm">{{ experiment.experiment_id }} · {{ fmt_dt(experiment.created_at) }}</span>
+    {% if experiment.git_sha %}<span class="text-xs font-mono text-slate-400">git {{ experiment.git_sha[:8] }}</span>{% endif %}
+  {% endif %}
+  {% if verdict %}
+    <span class="ml-auto px-2 py-1 border rounded text-xs {{ verdict_color(verdict.kind, verdict.applied) }}">
+      Verdict: {{ verdict.kind }}{% if not verdict.applied %} · staged{% endif %}
+      {% if verdict.target_id %} · <span class="font-mono">{{ verdict.target_id }}</span>{% endif %}
+    </span>
+  {% endif %}
+</header>
+
+{% if verdict and verdict.kind == 'graduate' and not verdict.applied %}
+  <section class="border border-amber-300 bg-amber-50 rounded-lg p-4 mb-6">
+    <div class="font-semibold text-amber-900">Trunk swap awaiting confirmation</div>
+    <p class="text-sm text-amber-800 mt-1">{{ verdict.rationale or "—" }}</p>
+    {% if identity.can_write %}
+      <form hx-post="/api/cmd" hx-target="#cmd-result" hx-swap="innerHTML"
+            hx-confirm="Confirm trunk swap to {{ verdict.target_id }}? This swaps the active trunk yaml."
+            class="mt-2 flex items-center gap-2 flex-wrap">
+        <input type="hidden" name="cmd_id" value="graduate-confirm">
+        <input type="hidden" name="slug" value="{{ verdict.slug or instance_id }}">
+        <button class="text-xs bg-amber-700 hover:bg-amber-800 text-white rounded px-3 py-1.5 font-semibold">
+          Confirm trunk swap
+        </button>
+        <span class="text-xs text-amber-800">
+          CLI equivalent:
+          <code class="font-mono">uv run lab graduate-confirm {{ verdict.slug or instance_id }}</code>
+        </span>
+      </form>
+    {% else %}
+      <div class="mt-2 font-mono text-xs bg-white px-2 py-1 rounded border border-amber-200 inline-block select-all">uv run lab graduate-confirm {{ verdict.slug or instance_id }}</div>
+    {% endif %}
+  </section>
+{% endif %}
+
+{# Verdict preview / re-evaluation. Always present (even for already-
+   applied diffs and no-ops) so an operator can re-compute the verdict
+   after editing the journal / critic and decide whether to re-apply. #}
+<section id="experiment-verdict-panel" class="bg-white border border-slate-200 rounded-lg p-5 mb-6"
+         hx-get="/experiments/{{ instance_id }}" hx-trigger="lab-tree-changed from:body"
+         hx-select="#experiment-verdict-panel" hx-swap="outerHTML">
+  <div class="flex items-baseline justify-between gap-3 flex-wrap mb-2">
+    <h2 class="font-semibold">Verdict workflow</h2>
+    <button hx-get="/_hx/tree-preview?slug={{ instance_id }}"
+            hx-target="#experiment-diff-preview" hx-swap="innerHTML"
+            class="text-xs bg-white border border-slate-300 hover:border-slate-500 rounded px-2.5 py-1">
+      {% if verdict %}Re-evaluate verdict{% else %}Preview verdict{% endif %}
+    </button>
+  </div>
+  <p class="text-xs text-slate-500 mb-2">
+    {% if verdict %}
+      A <code>tree apply</code> verdict has already been recorded for
+      this experiment. Re-evaluating is safe — it recomputes from the
+      current data without writing — and lets you re-apply if the
+      data has changed.
+    {% else %}
+      No verdict recorded for this experiment yet. Click <em>Preview</em>
+      to compute what <code>tree apply</code> would do.
+    {% endif %}
+  </p>
+  <div id="experiment-diff-preview" class="mt-3 empty:hidden"></div>
+</section>
+
+<div id="cmd-result" class="mb-4"></div>
+
+<div class="grid grid-cols-1 xl:grid-cols-2 gap-6">
+
+  <!-- Aggregate -->
+  {% if experiment %}
+    <section class="bg-white border border-slate-200 rounded-lg p-5">
+      <h2 class="font-semibold mb-3">Aggregate</h2>
+      <dl class="grid grid-cols-2 gap-y-2 text-sm">
+        <dt class="text-slate-500">Legs</dt><dd>{{ experiment.n_legs }}</dd>
+        <dt class="text-slate-500">Trials</dt><dd>{{ experiment.n_trials }}</dd>
+        <dt class="text-slate-500">Passed</dt><dd>{{ experiment.n_passed }} ({{ '{:.1f}%'.format(experiment.pass_rate_pct) if experiment.pass_rate_pct is not none else '—' }})</dd>
+        <dt class="text-slate-500">Cost</dt><dd>{{ fmt_money(experiment.cost_usd) }}</dd>
+      </dl>
+    </section>
+  {% endif %}
+
+  <!-- Journal -->
+  {% if journal %}
+    <section class="bg-white border border-slate-200 rounded-lg p-5">
+      <h2 class="font-semibold mb-3">Journal entry · {{ journal.slug }}</h2>
+      <dl class="grid grid-cols-3 gap-y-1 text-sm">
+        {% if journal.type_ %}<dt class="text-slate-500">Type</dt><dd class="col-span-2">{{ journal.type_ }}</dd>{% endif %}
+        {% if journal.trunk_at_runtime %}<dt class="text-slate-500">Trunk at run-time</dt><dd class="col-span-2 font-mono text-xs">{{ journal.trunk_at_runtime }}</dd>{% endif %}
+        {% if journal.mutation %}<dt class="text-slate-500">Mutation</dt><dd class="col-span-2">{{ journal.mutation }}</dd>{% endif %}
+        {% if journal.hypothesis %}<dt class="text-slate-500">Hypothesis</dt><dd class="col-span-2">{{ journal.hypothesis }}</dd>{% endif %}
+      </dl>
+    </section>
+  {% endif %}
+</div>
+
+<!-- Legs -->
+<section class="bg-white border border-slate-200 rounded-lg p-5 mt-6">
+  <h2 class="font-semibold mb-3">Legs ({{ legs|length }})</h2>
+  {% if legs %}
+    <div class="-mx-5 px-5 overflow-x-auto">
+    <table class="w-full text-sm min-w-[840px]">
+      <thead>
+        <tr class="text-xs uppercase text-slate-500 border-b border-slate-200 text-left">
+          <th class="py-2">Leg</th>
+          <th>Agent</th>
+          <th>Model</th>
+          <th>Components</th>
+          <th class="text-right">Trials</th>
+          <th class="text-right">Pass</th>
+          <th class="text-right">Errored</th>
+          <th class="text-right">Cost</th>
+          <th class="text-right">Median dur</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for l in legs %}
+          <tr class="border-b border-slate-100">
+            <td class="py-2 font-mono text-xs">{{ l.leg_id }}</td>
+            <td class="text-xs font-mono">{{ l.agent_id or "—" }}</td>
+            <td class="text-xs font-mono">{{ l.model or "—" }}</td>
+            <td class="text-xs">
+              {% for c in l.components_active %}
+                <span class="font-mono bg-slate-100 px-1 rounded mr-1">{{ c }}</span>
+              {% else %}—{% endfor %}
+            </td>
+            <td class="text-right">{{ l.n_trials }}</td>
+            <td class="text-right">
+              <span class="px-1.5 py-0.5 rounded {{ pct_color(l.pass_rate_pct) }} text-xs">
+                {{ l.n_passed }}/{{ l.n_trials }} · {{ '{:.0f}%'.format(l.pass_rate_pct) if l.pass_rate_pct is not none else '—' }}
+              </span>
+            </td>
+            <td class="text-right text-xs">{{ l.n_errored }}</td>
+            <td class="text-right text-xs font-mono">{{ fmt_money(l.cost_usd) }}</td>
+            <td class="text-right text-xs">{{ '{:.1f}s'.format(l.median_dur_sec) if l.median_dur_sec is not none else '—' }}</td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    </div>
+  {% else %}
+    <p class="text-sm text-slate-500">No legs recorded.</p>
+  {% endif %}
+</section>
+
+<!-- Per-task heatmap -->
+<section class="bg-white border border-slate-200 rounded-lg p-5 mt-6">
+  <h2 class="font-semibold mb-3">Per-task pass matrix</h2>
+  {% if tasks and leg_ids %}
+    <div class="overflow-auto">
+      <table class="text-xs">
+        <thead>
+          <tr>
+            <th class="text-left py-1 pr-4 font-medium text-slate-500">Task</th>
+            {% for leg in leg_ids %}<th class="px-2 py-1 font-mono text-slate-600">{{ leg }}</th>{% endfor %}
+          </tr>
+        </thead>
+        <tbody>
+          {% for task in tasks %}
+            <tr>
+              <td class="py-1 pr-4 font-mono text-slate-700">{{ task }}</td>
+              {% for leg in leg_ids %}
+                {% set cell = cells.get((task, leg)) %}
+                <td class="px-1 py-1">
+                  {% if cell is none %}
+                    <span class="inline-block w-6 h-6 bg-slate-100 rounded text-center leading-6">·</span>
+                  {% else %}
+                    <a href="/experiments/{{ instance_id }}/trials/{{ cell.trial_id }}"
+                       class="inline-block w-6 h-6 rounded text-center leading-6 font-semibold
+                              {% if cell.passed %}bg-emerald-200 text-emerald-900 hover:bg-emerald-300
+                              {% elif cell.passed == false %}bg-rose-200 text-rose-900 hover:bg-rose-300
+                              {% else %}bg-amber-100 text-amber-800 hover:bg-amber-200{% endif %}"
+                       title="{% if cell.passed %}passed{% elif cell.passed == false %}failed · {{ cell.error_phase or '' }}{% else %}status: {{ cell.status }}{% endif %} · {{ '{:.1f}s'.format(cell.duration_sec) if cell.duration_sec is not none else '?' }}">
+                      {% if cell.passed %}✓{% elif cell.passed == false %}✗{% else %}?{% endif %}
+                    </a>
+                  {% endif %}
+                </td>
+              {% endfor %}
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  {% else %}
+    <p class="text-sm text-slate-500">No trial data for this experiment.</p>
+  {% endif %}
+</section>
+
+<!-- Task clusters -->
+{% if clusters %}
+<section class="bg-white border border-slate-200 rounded-lg p-5 mt-6">
+  <h2 class="font-semibold mb-3">Task clusters</h2>
+  <div class="-mx-5 px-5 overflow-x-auto">
+  <table class="w-full text-sm min-w-[480px]">
+    <thead>
+      <tr class="text-xs uppercase text-slate-500 border-b border-slate-200 text-left">
+        <th class="py-2">Cluster</th>
+        <th class="text-right">Trials</th>
+        <th class="text-right">Pass</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for c in clusters %}
+        <tr class="border-b border-slate-100">
+          <td class="py-1.5">{{ c.cluster }}</td>
+          <td class="text-right">{{ c.n_trials }}</td>
+          <td class="text-right">
+            <span class="px-1.5 py-0.5 rounded {{ pct_color(c.pass_rate_pct) }} text-xs">
+              {{ '{:.0f}%'.format(c.pass_rate_pct) }}
+            </span>
+          </td>
+        </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  </div>
+</section>
+{% endif %}
+
+<!-- A/B comparisons -->
+{% if comparisons %}
+<section class="bg-white border border-slate-200 rounded-lg p-5 mt-6">
+  <h2 class="font-semibold mb-3">A/B comparisons ({{ comparisons|length }})</h2>
+  <p class="text-xs text-slate-500 mb-3">From <code>experiment-critic</code>: per-task explanation of why the winning leg won.</p>
+  <ul class="space-y-3">
+    {% for c in comparisons %}
+      <li class="border border-slate-100 rounded-md p-3">
+        <div class="flex items-baseline gap-2 mb-1 flex-wrap">
+          <span class="font-mono text-sm font-semibold">{{ c.task_name }}</span>
+          <span class="text-xs text-slate-500">· winner: <span class="font-mono bg-emerald-100 text-emerald-900 px-1.5 py-0.5 rounded">{{ c.winning_leg }}</span></span>
+          {% if c.runner_up_leg %}
+            <span class="text-xs text-slate-500">vs <span class="font-mono bg-slate-100 px-1.5 py-0.5 rounded">{{ c.runner_up_leg }}</span></span>
+          {% endif %}
+          {% if c.delta_score is not none %}
+            <span class="text-xs font-mono ml-auto {% if c.delta_score > 0 %}text-emerald-700{% else %}text-rose-700{% endif %}">Δ {{ fmt_delta(c.delta_score) }}</span>
+          {% endif %}
+        </div>
+        {% if c.why %}<div class="prose prose-sm max-w-none">{{ render_md(c.why) | safe }}</div>{% endif %}
+      </li>
+    {% endfor %}
+  </ul>
+</section>
+{% endif %}
+
+<!-- Critic summary / summary md -->
+{% if critic_md %}
+<section class="bg-white border border-slate-200 rounded-lg p-5 mt-6">
+  <h2 class="font-semibold mb-3">Critic summary</h2>
+  <div class="prose prose-sm">{{ render_md(critic_md) | safe }}</div>
+</section>
+{% endif %}
+
+{% if summary_md %}
+<section class="bg-white border border-slate-200 rounded-lg p-5 mt-6">
+  <h2 class="font-semibold mb-3">results/summary.md</h2>
+  <div class="prose prose-sm">{{ render_md(summary_md) | safe }}</div>
+</section>
+{% endif %}
+
+{% if journal and journal.body_md %}
+<section class="bg-white border border-slate-200 rounded-lg p-5 mt-6">
+  <h2 class="font-semibold mb-3">Full journal entry</h2>
+  <div class="prose prose-sm">{{ render_md(journal.body_md) | safe }}</div>
+</section>
+{% endif %}
+{% endblock %}

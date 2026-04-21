@@ -1,0 +1,55 @@
+{# Sidebar.
+
+   Layout strategy:
+   - On md+ widths the sidebar is a permanent left rail
+     (``md:static md:flex md:flex-col``) that participates in the flex
+     layout of <body>.
+   - Below md it becomes a fixed slide-in drawer. The
+     ``#nav-toggle`` checkbox in base.html controls visibility via
+     ``peer-checked:`` modifiers on ``body`` (see base.html for the
+     wiring); we don't need any JS. The drawer always exists in the
+     DOM so HTMX swaps that target it still work.
+
+   Width: w-56 (224px) is comfortable on mobile; the slide-in pattern
+   leaves a thin sliver of content visible to the right. #}
+<nav class="w-56 border-r border-slate-200 bg-white shrink-0 flex flex-col
+            fixed inset-y-0 left-0 z-30 -translate-x-full transition-transform
+            peer-checked:translate-x-0
+            md:static md:translate-x-0">
+  <a href="/" class="px-4 py-4 border-b border-slate-200">
+    <div class="font-semibold tracking-tight">OpenHarness</div>
+    <div class="text-xs text-slate-500">lab console</div>
+  </a>
+  <ul class="py-3 text-sm">
+    {% set items = [
+      ("home",        "/",                 "Home"),
+      ("pending",     "/pending",          "Pending actions"),
+      ("tree",        "/tree",             "Tree"),
+      ("components",  "/components",       "Components"),
+      ("components",  "/components-perf",  "  ↳ Performance matrix"),
+      ("experiments", "/experiments",      "Experiments"),
+      ("tasks",       "/tasks",            "Tasks"),
+      ("ideas",       "/ideas",            "Ideas"),
+      ("roadmap",     "/roadmap",          "Roadmap"),
+      ("spawns",      "/spawns",           "Spawns"),
+      ("daemon",      "/daemon",           "Daemon"),
+      ("audit",       "/audit",            "Audit log"),
+    ] %}
+    {% for key, href, label in items %}
+      <li>
+        {# Clicking a nav item closes the drawer on mobile by toggling
+           the controller checkbox via its label. On md+ the drawer is
+           always open so this is a no-op. #}
+        <a href="{{ href }}"
+           onclick="var t=document.getElementById('nav-toggle'); if(t)t.checked=false;"
+           class="block px-4 py-1.5 hover:bg-slate-100
+                  {% if nav_active == key %}bg-slate-100 font-medium border-l-2 border-emerald-500{% endif %}">
+          {{ label }}
+        </a>
+      </li>
+    {% endfor %}
+  </ul>
+  <div class="mt-auto px-4 py-3 text-xs text-slate-400 border-t border-slate-200">
+    Phase 3 · live commands · daemon controls
+  </div>
+</nav>

@@ -1,0 +1,78 @@
+{% extends "base.html" %}
+{% block title %}Experiments · OpenHarness lab{% endblock %}
+{% block crumbs %}<a href="/" class="hover:underline">Home</a> / Experiments{% endblock %}
+{% block content %}
+<h1 class="text-xl font-semibold mb-4">Experiments</h1>
+
+<section class="bg-white border border-slate-200 rounded-lg overflow-x-auto mb-6">
+  <table class="w-full text-sm min-w-[640px]">
+    <thead>
+      <tr class="text-xs uppercase text-slate-500 border-b border-slate-200 text-left">
+        <th class="py-2 px-4">Instance</th>
+        <th>Experiment</th>
+        <th>Created</th>
+        <th class="text-right">Legs</th>
+        <th class="text-right">Trials</th>
+        <th class="text-right">Pass</th>
+        <th class="text-right">Cost</th>
+        <th>Verdict</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for e in experiments %}
+        <tr class="border-b border-slate-100 hover:bg-slate-50">
+          <td class="py-2 px-4 font-mono text-xs"><a href="/experiments/{{ e.instance_id }}" class="text-blue-600 hover:underline">{{ e.instance_id }}</a></td>
+          <td class="text-xs">{{ e.experiment_id }}</td>
+          <td class="text-xs text-slate-500">{{ fmt_dt(e.created_at) }}</td>
+          <td class="text-right">{{ e.n_legs }}</td>
+          <td class="text-right">{{ e.n_trials }}</td>
+          <td class="text-right">
+            <span class="px-1.5 py-0.5 rounded {{ pct_color(e.pass_rate_pct) }} text-xs">
+              {{ '{:.0f}%'.format(e.pass_rate_pct) if e.pass_rate_pct is not none else '—' }}
+            </span>
+          </td>
+          <td class="text-right text-xs font-mono">{{ fmt_money(e.cost_usd) }}</td>
+          <td class="text-xs">
+            {% if e.verdict %}
+              <span class="px-1.5 py-0.5 border rounded {{ verdict_color(e.verdict.kind, e.verdict.applied) }}">
+                {{ e.verdict.kind }}{% if not e.verdict.applied %} · staged{% endif %}
+              </span>
+            {% else %}—{% endif %}
+          </td>
+        </tr>
+      {% else %}
+        <tr><td colspan="8" class="px-4 py-6 text-center text-slate-500">No experiments yet.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</section>
+
+<section class="bg-white border border-slate-200 rounded-lg p-5">
+  <h2 class="font-semibold mb-3">Journal · lab/experiments.md ({{ journal|length }} entries)</h2>
+  {% if journal %}
+    <ul class="space-y-3 text-sm">
+      {% for j in journal[:30] %}
+        <li class="border-b border-slate-100 pb-3 last:border-b-0">
+          <div class="flex items-baseline gap-2">
+            <span class="text-xs text-slate-500 font-mono">{{ j.date }}</span>
+            {% if j.instance_id %}
+              <a href="/experiments/{{ j.instance_id }}" class="font-mono font-semibold text-blue-700 hover:underline">{{ j.slug }}</a>
+            {% else %}
+              <span class="font-mono font-semibold text-slate-800">{{ j.slug }}</span>
+            {% endif %}
+            {% if j.type_ %}<span class="text-xs text-slate-500">· {{ j.type_ }}</span>{% endif %}
+          </div>
+          {% if j.hypothesis %}<p class="text-slate-700 text-xs mt-1">{{ j.hypothesis }}</p>{% endif %}
+          {% if j.instance_id %}
+            <a href="/experiments/{{ j.instance_id }}" class="text-xs text-blue-600 hover:underline font-mono">runs/experiments/{{ j.instance_id }}</a>
+          {% elif j.run_link %}
+            <span class="text-xs text-slate-500 font-mono">{{ j.run_link }}</span>
+          {% endif %}
+        </li>
+      {% endfor %}
+    </ul>
+  {% else %}
+    <p class="text-sm text-slate-500">No journal entries.</p>
+  {% endif %}
+</section>
+{% endblock %}

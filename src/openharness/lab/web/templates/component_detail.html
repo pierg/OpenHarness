@@ -1,0 +1,93 @@
+{% extends "base.html" %}
+{% block title %}{{ detail.component_id }} · OpenHarness lab{% endblock %}
+{% block crumbs %}<a href="/" class="hover:underline">Home</a> / <a href="/components" class="hover:underline">Components</a> / <span class="font-mono text-xs">{{ detail.component_id }}</span>{% endblock %}
+{% block content %}
+
+<header class="mb-5 flex flex-wrap items-baseline gap-3">
+  <h1 class="text-xl font-semibold font-mono">{{ detail.component_id }}</h1>
+  {% if detail.kind %}<span class="text-xs bg-slate-100 px-2 py-0.5 rounded">{{ detail.kind }}</span>{% endif %}
+  {% if detail.status %}<span class="text-xs px-2 py-0.5 rounded {{ status_color(detail.status) }}">{{ detail.status }}</span>{% endif %}
+  <a href="/components-perf" class="ml-auto text-xs text-blue-600 hover:underline">perf matrix ›</a>
+</header>
+
+{% if detail.description %}
+<section class="bg-white border border-slate-200 rounded-lg p-5 mb-6">
+  <h2 class="font-semibold mb-2">Description</h2>
+  <p class="text-sm text-slate-700">{{ detail.description }}</p>
+</section>
+{% endif %}
+
+<div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+  <section class="bg-white border border-slate-200 rounded-lg p-5">
+    <h2 class="font-semibold mb-2">Used by ({{ detail.used_by|length }})</h2>
+    {% if detail.used_by %}
+      <ul class="text-sm space-y-1">
+        {% for u in detail.used_by %}<li class="font-mono text-xs">{{ u }}</li>{% endfor %}
+      </ul>
+    {% else %}
+      <p class="text-sm text-slate-500">Not yet referenced by a config.</p>
+    {% endif %}
+  </section>
+
+  <section class="bg-white border border-slate-200 rounded-lg p-5">
+    <h2 class="font-semibold mb-2">Evidence ({{ detail.evidence|length }})</h2>
+    {% if detail.evidence %}
+      <ul class="text-sm space-y-1 list-disc pl-5">
+        {% for e in detail.evidence %}<li class="text-xs">{{ e }}</li>{% endfor %}
+      </ul>
+    {% else %}
+      <p class="text-sm text-slate-500">No evidence linked.</p>
+    {% endif %}
+  </section>
+</div>
+
+<section class="bg-white border border-slate-200 rounded-lg p-5 mt-6">
+  <h2 class="font-semibold mb-3">Per-cluster performance</h2>
+  {% if detail.perf_rows %}
+    <div class="-mx-5 px-5 overflow-x-auto">
+    <table class="w-full text-sm min-w-[720px]">
+      <thead>
+        <tr class="text-xs uppercase text-slate-500 border-b border-slate-200 text-left">
+          <th class="py-2">Cluster</th>
+          <th class="text-right">n</th>
+          <th class="text-right">Win-rate</th>
+          <th class="text-right">Δcost</th>
+          <th>Supporting experiments</th>
+          <th>Notes</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for p in detail.perf_rows %}
+          <tr class="border-b border-slate-100">
+            <td class="py-1.5">{{ p.task_cluster }}</td>
+            <td class="text-right text-xs">{{ p.n_trials }}</td>
+            <td class="text-right text-xs font-mono">{{ '{:.0%}'.format(p.win_rate) if p.win_rate is not none else '—' }}</td>
+            <td class="text-right text-xs font-mono">{{ fmt_delta(p.cost_delta_pct) }}%</td>
+            <td class="text-xs">
+              {% for e in p.supporting_experiments[:4] %}<a href="/experiments/{{ e }}" class="font-mono bg-slate-100 hover:bg-slate-200 px-1 rounded mr-1">{{ e[:14] }}…</a>{% endfor %}
+              {% if p.supporting_experiments|length > 4 %}<span class="text-slate-400">+{{ p.supporting_experiments|length - 4 }}</span>{% endif %}
+            </td>
+            <td class="text-xs text-slate-600">{{ p.notes or "—" }}</td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    </div>
+  {% else %}
+    <p class="text-sm text-slate-500">No cross-experiment rows yet for this component.</p>
+  {% endif %}
+</section>
+
+<section class="bg-white border border-slate-200 rounded-lg p-5 mt-6">
+  <h2 class="font-semibold mb-3">Active in ({{ detail.experiments_count }} experiment{{ 's' if detail.experiments_count != 1 else '' }})</h2>
+  {% if detail.experiments_active_in %}
+    <ul class="text-xs space-y-1">
+      {% for e in detail.experiments_active_in %}
+        <li><a href="/experiments/{{ e }}" class="font-mono text-blue-600 hover:underline">{{ e }}</a></li>
+      {% endfor %}
+    </ul>
+  {% else %}
+    <p class="text-sm text-slate-500">Never active in any leg yet.</p>
+  {% endif %}
+</section>
+{% endblock %}

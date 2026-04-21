@@ -1,0 +1,171 @@
+{% extends "base.html" %}
+{% block title %}Lab home · OpenHarness{% endblock %}
+{% block crumbs %}Home{% endblock %}
+{% block content %}
+<div id="cmd-result" class="mb-4"></div>
+
+<div class="grid grid-cols-1 xl:grid-cols-3 gap-6">
+
+  <!-- Daemon -->
+  <section class="xl:col-span-2 bg-white border border-slate-200 rounded-lg p-5">
+    <div class="flex items-baseline justify-between">
+      <h2 class="font-semibold">Daemon</h2>
+      <a href="/daemon" class="text-xs text-slate-500 hover:underline">open ›</a>
+    </div>
+    <div id="home-daemon-card"
+         hx-get="/_hx/home-daemon" hx-trigger="lab-daemon-changed from:body, every 10s" hx-swap="innerHTML">
+      {% include "_home_daemon.html" %}
+    </div>
+  </section>
+
+  <!-- DB info -->
+  <section class="bg-white border border-slate-200 rounded-lg p-5">
+    <h2 class="font-semibold">Lab DB</h2>
+    {% if db_info %}
+      <table class="mt-3 text-sm w-full">
+        <tbody>
+          {% for tbl, n in db_info.items() %}
+            <tr class="border-t border-slate-100">
+              <td class="py-1 text-slate-600">{{ tbl }}</td>
+              <td class="py-1 text-right font-mono">{{ '{:,}'.format(n) if n >= 0 else '—' }}</td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    {% else %}
+      <p class="text-sm text-slate-500 mt-3">DB not initialised. <span class="font-mono">uv run lab init</span></p>
+    {% endif %}
+  </section>
+
+  <!-- Up next -->
+  <section class="bg-white border border-slate-200 rounded-lg p-5">
+    <div class="flex items-baseline justify-between">
+      <h2 class="font-semibold">Up next</h2>
+      <a href="/roadmap" class="text-xs text-slate-500 hover:underline">open ›</a>
+    </div>
+    {% if up_next %}
+      <ul class="mt-3 text-sm space-y-2">
+        {% for r in up_next %}
+          <li class="flex items-start gap-2">
+            {% if r.deps_satisfied %}<span class="text-emerald-600 mt-0.5">●</span>{% else %}<span class="text-amber-500 mt-0.5">●</span>{% endif %}
+            <div class="min-w-0">
+              <div class="font-mono text-xs text-slate-700">{{ r.slug }}</div>
+              <div class="text-slate-600 text-xs truncate">{{ r.hypothesis }}</div>
+            </div>
+          </li>
+        {% endfor %}
+      </ul>
+    {% else %}
+      <p class="text-sm text-slate-500 mt-3">Roadmap empty.</p>
+    {% endif %}
+  </section>
+
+  <!-- Suggested -->
+  <section class="bg-white border border-slate-200 rounded-lg p-5">
+    <div class="flex items-baseline justify-between">
+      <h2 class="font-semibold">Daemon suggestions</h2>
+      <a href="/roadmap" class="text-xs text-slate-500 hover:underline">open ›</a>
+    </div>
+    {% if suggested %}
+      <ul class="mt-3 text-sm space-y-2">
+        {% for s in suggested %}
+          <li>
+            <div class="font-mono text-xs text-slate-700">{{ s.slug }}</div>
+            <div class="text-slate-600 text-xs">{{ s.hypothesis }}</div>
+          </li>
+        {% endfor %}
+      </ul>
+    {% else %}
+      <p class="text-sm text-slate-500 mt-3">No suggestions waiting.</p>
+    {% endif %}
+  </section>
+
+  <!-- Recent experiments -->
+  <section class="xl:col-span-3 bg-white border border-slate-200 rounded-lg p-5">
+    <div class="flex items-baseline justify-between">
+      <h2 class="font-semibold">Recent experiments</h2>
+      <a href="/experiments" class="text-xs text-slate-500 hover:underline">all ›</a>
+    </div>
+    {% if recent_experiments %}
+      <div class="-mx-5 px-5 overflow-x-auto">
+      <table class="mt-3 w-full text-sm min-w-[700px]">
+        <thead>
+          <tr class="text-left text-xs uppercase text-slate-500 border-b border-slate-200">
+            <th class="py-2">Instance</th>
+            <th>Experiment</th>
+            <th>Created</th>
+            <th class="text-right">Legs</th>
+            <th class="text-right">Trials</th>
+            <th class="text-right">Pass</th>
+            <th class="text-right">Cost</th>
+            <th>Verdict</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for e in recent_experiments %}
+            <tr class="border-b border-slate-100 hover:bg-slate-50">
+              <td class="py-2"><a href="/experiments/{{ e.instance_id }}" class="font-mono text-xs text-blue-600 hover:underline">{{ e.instance_id[:24] }}…</a></td>
+              <td class="text-xs">{{ e.experiment_id }}</td>
+              <td class="text-xs text-slate-500">{{ fmt_dt(e.created_at) }}</td>
+              <td class="text-right">{{ e.n_legs }}</td>
+              <td class="text-right">{{ e.n_trials }}</td>
+              <td class="text-right">
+                <span class="px-1.5 py-0.5 rounded {{ pct_color(e.pass_rate_pct) }} text-xs">
+                  {{ '{:.0f}%'.format(e.pass_rate_pct) if e.pass_rate_pct is not none else '—' }}
+                </span>
+              </td>
+              <td class="text-right text-xs font-mono">{{ fmt_money(e.cost_usd) }}</td>
+              <td class="text-xs">
+                {% if e.verdict %}
+                  <span class="px-1.5 py-0.5 border rounded {{ verdict_color(e.verdict.kind, e.verdict.applied) }}">
+                    {{ e.verdict.kind }}{% if not e.verdict.applied %} · staged{% endif %}
+                  </span>
+                {% else %}—{% endif %}
+              </td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      </div>
+    {% else %}
+      <p class="text-sm text-slate-500 mt-3">No experiments yet.</p>
+    {% endif %}
+  </section>
+
+  <!-- Recent spawns -->
+  <section class="xl:col-span-3 bg-white border border-slate-200 rounded-lg p-5">
+    <div class="flex items-baseline justify-between">
+      <h2 class="font-semibold">Recent skill spawns</h2>
+      <a href="/spawns" class="text-xs text-slate-500 hover:underline">all ›</a>
+    </div>
+    {% if recent_spawns %}
+      <div class="-mx-5 px-5 overflow-x-auto">
+      <table class="mt-3 w-full text-sm min-w-[560px]">
+        <thead>
+          <tr class="text-left text-xs uppercase text-slate-500 border-b border-slate-200">
+            <th class="py-2">Skill</th>
+            <th>Started</th>
+            <th class="text-right">Duration</th>
+            <th class="text-right">Exit</th>
+            <th class="text-right">Cost</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for s in recent_spawns %}
+            <tr class="border-b border-slate-100 {% if s.exit_code and s.exit_code != 0 %}bg-rose-50{% endif %}">
+              <td class="py-2 font-mono text-xs">{{ s.skill }}</td>
+              <td class="text-xs text-slate-500">{{ fmt_dt(s.started_at) }}</td>
+              <td class="text-right text-xs">{{ '{:.1f}s'.format(s.duration_sec) if s.duration_sec is not none else '—' }}</td>
+              <td class="text-right text-xs font-mono {% if s.exit_code == 0 %}text-emerald-700{% elif s.exit_code is not none %}text-rose-700{% endif %}">{{ s.exit_code if s.exit_code is not none else '—' }}</td>
+              <td class="text-right text-xs font-mono">{{ fmt_money(s.cost_usd_estimate) }}</td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      </div>
+    {% else %}
+      <p class="text-sm text-slate-500 mt-3">No spawn records yet.</p>
+    {% endif %}
+  </section>
+</div>
+{% endblock %}

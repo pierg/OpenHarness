@@ -1,0 +1,23 @@
+{% extends "base.html" %}
+{% block title %}Pending actions · OpenHarness lab{% endblock %}
+{% block crumbs %}<a href="/" class="hover:underline">Home</a> / Pending{% endblock %}
+{% block content %}
+<div class="flex items-baseline gap-3 mb-2">
+  <h1 class="text-xl font-semibold">Pending actions</h1>
+  <a href="/audit" class="text-xs text-blue-600 hover:underline">View command audit log →</a>
+</div>
+<p class="text-sm text-slate-600 mb-4">
+  Everything the daemon staged for human approval. Each card invokes the
+  same <code class="font-mono text-xs bg-slate-100 px-1 rounded">uv run lab …</code>
+  helper that human operators and skills use.
+</p>
+
+<div id="cmd-result" class="mb-6"></div>
+
+<div id="pending-body"
+     hx-get="/_hx/pending-body"
+     hx-trigger="lab-pending-changed from:body"
+     hx-swap="innerHTML">
+  {% include "_pending_body.html" %}
+</div>
+{% endblock %}

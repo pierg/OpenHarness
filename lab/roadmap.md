@@ -26,13 +26,6 @@
 -   **Depends on:** `tb2-baseline-full-sweep`
 -   **Cost:** smoke ~$0.50.
 
-### stronger-model-baseline
-
--   **Idea:** baseline snapshot
--   **Hypothesis:** running the same baseline on a stronger Gemini SKU on a small slice tells us how much of the current pass-rate gap is "agent too weak" vs "model too weak".
--   **Plan:** custom small experiment YAML, same agents, stronger model (e.g. `gemini-2.5-pro`), 5–10 task slice biased toward tasks the baseline failed.
--   **Depends on:** `tb2-baseline-full-sweep`
--   **Cost:** ~$5-10.
 
 ### Suggested
 

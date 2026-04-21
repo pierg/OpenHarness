@@ -1,0 +1,40 @@
+{# Renders one CommandResult or an error string. Designed to be swapped
+   into ``#cmd-result`` by HTMX. #}
+{% if error %}
+  {% set kind = error_kind|default('Validation error') %}
+  <div class="border border-rose-300 bg-rose-50 rounded-md p-3 text-sm text-rose-900">
+    <div class="flex items-start gap-2">
+      <span class="font-semibold">{{ kind }}</span>
+      <button class="ml-auto text-rose-700 hover:underline text-xs"
+              hx-get="/_hx/cmd-clear" hx-target="#cmd-result" hx-swap="innerHTML">dismiss</button>
+    </div>
+    <pre class="mt-1 whitespace-pre-wrap font-mono text-xs">{{ error }}</pre>
+  </div>
+{% elif result %}
+  {% set ok = result.ok %}
+  <div class="rounded-md p-3 text-sm border
+              {{ 'border-emerald-300 bg-emerald-50' if ok else 'border-rose-300 bg-rose-50' }}">
+    <div class="flex items-baseline gap-2">
+      <span class="font-semibold {{ 'text-emerald-900' if ok else 'text-rose-900' }}">
+        {{ 'OK' if ok else 'exit ' ~ result.exit_code }}
+      </span>
+      <span class="font-mono text-xs text-slate-700 truncate">{{ result.cmd_id }}</span>
+      <span class="ml-auto text-xs text-slate-500">{{ result.duration_ms }} ms · {{ result.actor }}</span>
+      <button class="text-slate-500 hover:underline text-xs"
+              hx-get="/_hx/cmd-clear" hx-target="#cmd-result" hx-swap="innerHTML">dismiss</button>
+    </div>
+    <div class="mt-1 font-mono text-[11px] text-slate-600 break-all">{{ result.display_argv }}</div>
+    {% if result.stdout %}
+      <details class="mt-2" {% if ok %}{% else %}open{% endif %}>
+        <summary class="text-xs cursor-pointer text-slate-700">stdout ({{ result.stdout|length }} chars)</summary>
+        <pre class="mt-1 bg-white border border-slate-200 rounded p-2 text-xs whitespace-pre-wrap max-h-64 overflow-auto">{{ result.stdout }}</pre>
+      </details>
+    {% endif %}
+    {% if result.stderr %}
+      <details class="mt-2" {% if ok %}{% else %}open{% endif %}>
+        <summary class="text-xs cursor-pointer text-slate-700">stderr ({{ result.stderr|length }} chars)</summary>
+        <pre class="mt-1 bg-white border border-slate-200 rounded p-2 text-xs whitespace-pre-wrap max-h-64 overflow-auto text-rose-900">{{ result.stderr }}</pre>
+      </details>
+    {% endif %}
+  </div>
+{% endif %}
