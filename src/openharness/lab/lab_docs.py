@@ -92,7 +92,10 @@ def _split_top_sections(text: str, level: int = 2) -> list[tuple[str | None, str
     """Split a markdown doc into [(heading_or_none, body), ...].
 
     The first chunk's heading is None — it's everything before the first
-    heading at `level` (preamble / reset notes etc.).
+    heading at `level` (preamble / reset notes etc.). Bodies are
+    stripped of leading and trailing blank lines so callers that
+    rebuild via ``f"## {h}\n\n{body}"`` don't accumulate blank lines on
+    every round-trip.
     """
     prefix = "#" * level + " "
     parts: list[tuple[str | None, str]] = []
@@ -100,12 +103,12 @@ def _split_top_sections(text: str, level: int = 2) -> list[tuple[str | None, str
     cur_lines: list[str] = []
     for line in text.splitlines():
         if line.startswith(prefix) and not line.startswith(prefix + "#"):
-            parts.append((cur_heading, "\n".join(cur_lines).rstrip("\n")))
+            parts.append((cur_heading, "\n".join(cur_lines).strip("\n")))
             cur_heading = line[len(prefix):].strip()
             cur_lines = []
         else:
             cur_lines.append(line)
-    parts.append((cur_heading, "\n".join(cur_lines).rstrip("\n")))
+    parts.append((cur_heading, "\n".join(cur_lines).strip("\n")))
     return parts
 
 
@@ -1118,6 +1121,190 @@ def promote_suggested(*, slug: str, lab_root: Path = LAB_ROOT) -> str:
     new_text = "\n\n".join(c for c in rebuilt if c.strip()).rstrip() + "\n"
     _write(path, new_text)
     return new_text
+
+
+def demote_to_suggested(*, slug: str, lab_root: Path = LAB_ROOT) -> str:
+    """Move `## Up next > ### <slug>` back into `### Suggested > #### <slug>`.
+
+    The inverse of :func:`promote_suggested`. The original bullets are
+    preserved verbatim under the new ``#### <slug>`` header so any
+    Hypothesis / Plan / Depends on / Cost / Source rows survive the
+    round-trip. If no Suggested subsection exists yet it is created.
+    Raises :class:`LabDocError` if the slug isn't currently in
+    ``## Up next`` (or only exists inside Suggested already).
+    """
+    path = _roadmap_path(lab_root)
+    text = _read(path)
+    parts = _split_top_sections(text, level=2)
+    rebuilt: list[str] = []
+    found = False
+    for h, b in parts:
+        if h is None:
+            if b.strip():
+                rebuilt.append(b.rstrip())
+            continue
+        if h == "Up next":
+            new_body, demoted = _demote_to_suggested_inplace(b, slug)
+            if not demoted:
+                raise LabDocError(
+                    f"No `## Up next > ### {slug}` entry to demote in roadmap.md."
+                )
+            found = True
+            rebuilt.append(f"## Up next\n\n{new_body.rstrip()}")
+        else:
+            rebuilt.append(f"## {h}\n\n{b.rstrip()}")
+    if not found:
+        raise LabDocError("No `## Up next` section in roadmap.md")
+    new_text = "\n\n".join(c for c in rebuilt if c.strip()).rstrip() + "\n"
+    _write(path, new_text)
+    return new_text
+
+
+def _demote_to_suggested_inplace(up_next_body: str, slug: str) -> tuple[str, bool]:
+    # Locate the top-level entry (### <slug>) inside Up next, but not the
+    # Suggested subsection itself or any of its #### children.
+    pattern = re.compile(
+        r"^### " + re.escape(slug) + r"\b(?P<entry>.*?)(?=\n### |\Z)",
+        re.DOTALL | re.MULTILINE,
+    )
+    m = pattern.search(up_next_body)
+    if not m:
+        return up_next_body, False
+    entry_body = m.group("entry").strip()
+    suggested_block = f"#### {slug}\n\n{entry_body}".rstrip()
+
+    # Cut the matched ### block out.
+    body_without = (up_next_body[: m.start()] + up_next_body[m.end():]).strip()
+
+    # Find or insert the Suggested subsection.
+    suggested_re = re.compile(
+        r"^### Suggested\s*\n(?P<body>.*?)(?=\n### (?!Suggested)|\Z)",
+        re.DOTALL | re.MULTILINE,
+    )
+    sm = suggested_re.search(body_without)
+    if sm:
+        sug_body = sm.group("body").strip()
+        if sug_body == "_(none)_":
+            sug_body = ""
+        new_sug_body = (sug_body + "\n\n" + suggested_block).strip() if sug_body else suggested_block
+        replaced = f"### Suggested\n\n{new_sug_body}"
+        new_up = body_without[: sm.start()].rstrip() + (
+            "\n\n" if body_without[: sm.start()].strip() else ""
+        ) + replaced + body_without[sm.end():]
+    else:
+        # No Suggested section yet — append one at the bottom of Up next.
+        sep = "\n\n" if body_without.strip() else ""
+        new_up = body_without.rstrip() + sep + f"### Suggested\n\n{suggested_block}"
+    return new_up.strip(), True
+
+
+def remove_roadmap_entry(
+    *,
+    slug: str,
+    sections: tuple[str, ...] = ("Up next", "Suggested", "Done"),
+    lab_root: Path = LAB_ROOT,
+) -> str:
+    """Delete a roadmap entry by slug from any of the three sections.
+
+    Scans ``## Up next > ### <slug>``, ``## Up next > ### Suggested >
+    #### <slug>``, and ``## Done > ### <slug>`` (constrained by
+    ``sections`` if you want to limit the scope). Removes the first
+    match. Raises :class:`LabDocError` if the slug isn't found in any
+    of the searched sections.
+    """
+    path = _roadmap_path(lab_root)
+    text = _read(path)
+    parts = _split_top_sections(text, level=2)
+    rebuilt: list[str] = []
+    removed = False
+    for h, b in parts:
+        if h is None:
+            if b.strip():
+                rebuilt.append(b.rstrip())
+            continue
+        if h == "Up next" and not removed:
+            new_body, did = _remove_from_up_next(b, slug, sections=sections)
+            removed = removed or did
+            new_body = new_body.strip() or "_(none)_"
+            rebuilt.append(f"## Up next\n\n{new_body}")
+        elif h == "Done" and "Done" in sections and not removed:
+            new_body, did = _strip_level3_block(b, slug)
+            removed = removed or did
+            new_body = new_body.strip() or "_(none)_"
+            rebuilt.append(f"## Done\n\n{new_body}")
+        else:
+            rebuilt.append(f"## {h}\n\n{b.rstrip()}")
+    if not removed:
+        raise LabDocError(
+            f"No roadmap entry matching slug {slug!r} in sections {sections!r}."
+        )
+    new_text = "\n\n".join(c for c in rebuilt if c.strip()).rstrip() + "\n"
+    _write(path, new_text)
+    return new_text
+
+
+def _strip_level3_block(body: str, slug: str) -> tuple[str, bool]:
+    """Remove `### <slug>` and its body from a section's body."""
+    pattern = re.compile(
+        r"(?:^|\n)### " + re.escape(slug) + r"\b.*?(?=\n### |\Z)", re.DOTALL,
+    )
+    m = pattern.search(body)
+    if not m:
+        return body, False
+    return (body[: m.start()] + body[m.end():]).strip(), True
+
+
+def _strip_level4_block(body: str, slug: str) -> tuple[str, bool]:
+    """Remove `#### <slug>` and its body from a Suggested section's body."""
+    pattern = re.compile(
+        r"(?:^|\n)#### " + re.escape(slug) + r"\b.*?(?=\n#### |\Z)", re.DOTALL,
+    )
+    m = pattern.search(body)
+    if not m:
+        return body, False
+    return (body[: m.start()] + body[m.end():]).strip(), True
+
+
+def _remove_from_up_next(
+    up_next_body: str,
+    slug: str,
+    *,
+    sections: tuple[str, ...],
+) -> tuple[str, bool]:
+    # Try the Suggested subsection first when caller asked for it; this
+    # avoids accidentally matching the Suggested heading via the
+    # level-3 stripper (which excludes the literal name "Suggested").
+    suggested_re = re.compile(
+        r"^### Suggested\s*\n(?P<body>.*?)(?=\n### (?!Suggested)|\Z)",
+        re.DOTALL | re.MULTILINE,
+    )
+    if "Suggested" in sections:
+        sm = suggested_re.search(up_next_body)
+        if sm:
+            sug_body, did = _strip_level4_block(sm.group("body"), slug)
+            if did:
+                sug_body_clean = sug_body.strip() or "_(none)_"
+                replaced = f"### Suggested\n\n{sug_body_clean}"
+                return (
+                    up_next_body[: sm.start()].rstrip()
+                    + ("\n\n" if up_next_body[: sm.start()].strip() else "")
+                    + replaced
+                    + up_next_body[sm.end():]
+                ).strip(), True
+
+    if "Up next" in sections:
+        # Match `### <slug>` at the top level (not Suggested).
+        if slug == "Suggested":
+            return up_next_body, False
+        pattern = re.compile(
+            r"^### " + re.escape(slug) + r"\b.*?(?=\n### |\Z)",
+            re.DOTALL | re.MULTILINE,
+        )
+        m = pattern.search(up_next_body)
+        if m:
+            return (up_next_body[: m.start()] + up_next_body[m.end():]).strip(), True
+
+    return up_next_body, False
 
 
 def _promote_suggested_inplace(up_next_body: str, slug: str) -> tuple[str, bool]:

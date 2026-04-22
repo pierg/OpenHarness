@@ -38,6 +38,7 @@ helper.
 from __future__ import annotations
 
 import json
+import os
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -680,6 +681,51 @@ def dashboard(
     raise typer.Exit(subprocess.call(cmd))
 
 
+@app.command()
+def webui(
+    port: int = typer.Option(8765, "--port", help="HTTP port to bind."),
+    host: str = typer.Option("127.0.0.1", "--host", help="Interface to bind."),
+    reload: bool = typer.Option(False, "--reload", help="Auto-reload on code changes (dev)."),
+    log_level: str = typer.Option("info", "--log-level"),
+) -> None:
+    """Launch the lab web UI (FastAPI + HTMX, operator console + live commands)."""
+    from openharness.lab.web import auth as labauth
+    from openharness.lab.web.server import run as run_webui
+
+    err_console.print(f"[green]Lab web UI →[/green] http://{host}:{port}")
+    mode = labauth.configured_mode()
+    if mode == "proxy":
+        kind = os.environ.get("LAB_TRUST_PROXY_AUTH", "?")
+        admins = os.environ.get("LAB_ADMIN_EMAILS", "")
+        viewers = os.environ.get("LAB_VIEWER_EMAILS", "")
+        err_console.print(
+            f"[green]Auth:[/green] proxy mode ({kind}) — identity from "
+            "trusted reverse-proxy header."
+        )
+        if not admins:
+            err_console.print(
+                "[red]WARNING:[/red] LAB_ADMIN_EMAILS is empty in proxy mode. "
+                "Nobody will be able to run /api/cmd. Set it to a comma-"
+                "separated list of admin emails."
+            )
+        else:
+            err_console.print(f"  admins:  {admins}")
+            if viewers:
+                err_console.print(f"  viewers: {viewers}")
+    else:
+        err_console.print(
+            "[yellow]Auth:[/yellow] open mode — /api/cmd is unrestricted. "
+            "Use loopback / SSH tunnel only, or set LAB_TRUST_PROXY_AUTH "
+            "(SSO via reverse proxy) to share."
+        )
+    if host not in ("127.0.0.1", "localhost", "::1") and mode == "open":
+        err_console.print(
+            "[red]WARNING:[/red] binding to a non-loopback host with no auth. "
+            "Anyone who can reach this port can mutate the lab."
+        )
+    run_webui(host=host, port=port, reload=reload, log_level=log_level)
+
+
 # ===== analyze (manual backfill) ============================================
 
 
@@ -1214,6 +1260,51 @@ def cmd_roadmap_promote(slug: str) -> None:
         err_console.print(f"[red]{exc}[/red]")
         raise typer.Exit(2) from exc
     typer.echo(f"promoted {slug!r} to ## Up next")
+
+
+@roadmap_app.command("demote")
+def cmd_roadmap_demote(slug: str) -> None:
+    """Move `## Up next > ### <slug>` back into `### Suggested > #### <slug>`."""
+    try:
+        lab_docs.demote_to_suggested(slug=slug)
+    except lab_docs.LabDocError as exc:
+        err_console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(2) from exc
+    typer.echo(f"demoted {slug!r} to ### Suggested")
+
+
+@roadmap_app.command("remove")
+def cmd_roadmap_remove(
+    slug: str,
+    section: Optional[str] = typer.Option(
+        None, "--section",
+        help="Restrict to one of: 'up-next' | 'suggested' | 'done'. "
+             "Default scans all three.",
+    ),
+) -> None:
+    """Delete a roadmap entry by slug from any section.
+
+    Use ``--section`` to be explicit when the same slug might appear in
+    more than one place (rare).
+    """
+    sections: tuple[str, ...]
+    if section is None:
+        sections = ("Up next", "Suggested", "Done")
+    else:
+        mapping = {"up-next": "Up next", "suggested": "Suggested", "done": "Done"}
+        key = section.strip().lower()
+        if key not in mapping:
+            err_console.print(
+                f"[red]--section must be one of {sorted(mapping)}, got {section!r}[/red]"
+            )
+            raise typer.Exit(2)
+        sections = (mapping[key],)
+    try:
+        lab_docs.remove_roadmap_entry(slug=slug, sections=sections)
+    except lab_docs.LabDocError as exc:
+        err_console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(2) from exc
+    typer.echo(f"removed roadmap entry {slug!r}")
 
 
 # ===== idea auto-propose (cross-experiment-critic write-zone) ==============

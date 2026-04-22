@@ -1,0 +1,18 @@
+{% extends "base.html" %}
+{% block title %}Roadmap · OpenHarness lab{% endblock %}
+{% block crumbs %}<a href="/" class="hover:underline">Home</a> / Roadmap{% endblock %}
+{% block content %}
+<h1 class="text-xl font-semibold mb-4">Roadmap</h1>
+
+<div id="cmd-result" class="mb-4"></div>
+
+{# Auto-refreshes when /api/cmd dispatches ``lab-roadmap-changed``
+   (promote / demote / remove). The partial endpoint re-renders all
+   three sections in one round-trip so the layout stays stable. #}
+<div id="roadmap-body"
+     hx-get="/_hx/roadmap-body"
+     hx-trigger="lab-roadmap-changed from:body"
+     hx-swap="innerHTML">
+  {% include "_roadmap_body.html" %}
+</div>
+{% endblock %}

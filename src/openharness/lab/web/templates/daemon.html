@@ -1,0 +1,30 @@
+{% extends "base.html" %}
+{% block title %}Daemon · OpenHarness lab{% endblock %}
+{% block crumbs %}<a href="/" class="hover:underline">Home</a> / Daemon{% endblock %}
+{% block content %}
+<h1 class="text-xl font-semibold mb-4">Orchestrator daemon</h1>
+
+<div id="cmd-result" class="mb-4"></div>
+
+{# Status card auto-refreshes when /api/cmd dispatches
+   ``lab-daemon-changed`` (start / stop) AND on a 5s poll so the UI
+   reflects external state changes (e.g. the daemon exited on its own
+   after ``--once``, or the operator killed it from another shell). #}
+<section class="bg-white border border-slate-200 rounded-lg p-5 mb-6"
+         id="daemon-status"
+         hx-get="/_hx/daemon-status"
+         hx-trigger="lab-daemon-changed from:body, every 5s"
+         hx-swap="innerHTML">
+  {% include "_daemon_status.html" %}
+</section>
+
+<section class="bg-white border border-slate-200 rounded-lg p-5">
+  <div class="flex items-baseline gap-3 mb-3">
+    <h2 class="font-semibold">Log tail</h2>
+    <span class="text-xs text-slate-500">last 300 lines · refreshes every 5 s</span>
+  </div>
+  <div hx-get="/_hx/daemon-tail" hx-trigger="every 5s, lab-daemon-changed from:body" hx-target="this" hx-swap="innerHTML">
+    {% include "_log_tail.html" %}
+  </div>
+</section>
+{% endblock %}

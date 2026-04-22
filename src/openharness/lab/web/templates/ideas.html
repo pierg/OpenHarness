@@ -1,0 +1,15 @@
+{% extends "base.html" %}
+{% block title %}Ideas · OpenHarness lab{% endblock %}
+{% block crumbs %}<a href="/" class="hover:underline">Home</a> / Ideas{% endblock %}
+{% block content %}
+<h1 class="text-xl font-semibold mb-4">Ideas</h1>
+
+<div id="cmd-result" class="mb-4"></div>
+
+<div id="ideas-body"
+     hx-get="/_hx/ideas-body"
+     hx-trigger="lab-ideas-changed from:body"
+     hx-swap="innerHTML">
+  {% include "_ideas_body.html" %}
+</div>
+{% endblock %}

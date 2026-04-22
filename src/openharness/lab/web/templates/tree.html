@@ -1,0 +1,233 @@
+{% extends "base.html" %}
+{% block title %}Tree · OpenHarness lab{% endblock %}
+{% block crumbs %}<a href="/" class="hover:underline">Home</a> / Tree{% endblock %}
+{% block content %}
+<h1 class="text-xl font-semibold mb-4">Configuration tree</h1>
+
+<section class="bg-white border border-emerald-300 rounded-lg p-5 mb-6">
+  <div class="text-xs text-emerald-700 font-semibold uppercase">Trunk</div>
+  <div class="font-mono text-lg mt-1">{{ snapshot.trunk_id }}</div>
+  {% if snapshot.trunk_anchor %}
+    <p class="text-sm text-slate-600 mt-2"><strong>Why:</strong> {{ snapshot.trunk_anchor }}</p>
+  {% endif %}
+</section>
+
+{# Verdict workflow surface: lets an admin preview + apply tree
+   diffs without dropping to the CLI. Re-fetches itself on
+   ``lab-tree-changed`` so applying a verdict immediately reflects in
+   the lists below. #}
+<section id="tree-verdict-panel"
+         class="bg-white border border-slate-200 rounded-lg p-5 mb-6"
+         hx-get="/tree" hx-trigger="lab-tree-changed from:body"
+         hx-select="#tree-verdict-panel" hx-swap="outerHTML">
+  <div class="flex items-baseline justify-between gap-3 flex-wrap mb-3">
+    <h2 class="font-semibold">Verdicts</h2>
+    <span class="text-xs text-slate-500">
+      {{ staged_graduates|length }} staged ·
+      {{ pending_eval|length }} unevaluated
+    </span>
+  </div>
+
+  {# Container the preview button swaps into. #}
+  <div id="tree-diff-preview" class="mb-4 empty:hidden"></div>
+
+  {% if staged_graduates %}
+    <div class="mb-4">
+      <h3 class="text-sm font-semibold text-amber-800 mb-2">Staged (awaiting graduate-confirm)</h3>
+      <ul class="space-y-2">
+        {% for d in staged_graduates %}
+          <li class="border border-amber-200 bg-amber-50 rounded-md p-3 text-sm flex items-baseline gap-3 flex-wrap">
+            <div class="flex-1 min-w-0">
+              <div class="font-mono text-xs">
+                <a href="/experiments/{{ d.instance_id }}" class="text-blue-700 hover:underline">{{ d.slug or d.instance_id }}</a>
+                <span class="text-slate-500">→ {{ d.target_id }}</span>
+              </div>
+              {% if d.rationale %}<p class="text-xs text-slate-600 mt-1 line-clamp-2">{{ d.rationale }}</p>{% endif %}
+            </div>
+            <button hx-get="/_hx/tree-preview?slug={{ d.slug or d.instance_id }}"
+                    hx-target="#tree-diff-preview" hx-swap="innerHTML"
+                    class="text-xs bg-white border border-slate-300 hover:border-slate-500 rounded px-2.5 py-1">
+              Preview verdict
+            </button>
+            {% if identity.can_write %}
+            <form hx-post="/api/cmd" hx-target="#cmd-result" hx-swap="innerHTML"
+                  hx-confirm="Confirm trunk swap to {{ d.target_id }}? This swaps the active trunk yaml.">
+              <input type="hidden" name="cmd_id" value="graduate-confirm">
+              <input type="hidden" name="slug" value="{{ d.slug or d.instance_id }}">
+              <button class="text-xs bg-amber-700 hover:bg-amber-800 text-white rounded px-2.5 py-1 font-semibold">
+                Confirm trunk swap
+              </button>
+            </form>
+            {% endif %}
+          </li>
+        {% endfor %}
+      </ul>
+    </div>
+  {% endif %}
+
+  {% if pending_eval %}
+    <div class="mb-4">
+      <h3 class="text-sm font-semibold text-slate-700 mb-2">
+        Unevaluated experiments
+        <span class="font-normal text-slate-500 text-xs">— no <code>tree_diffs</code> row yet</span>
+      </h3>
+      <ul class="space-y-2">
+        {% for e in pending_eval %}
+          <li class="border border-slate-200 rounded-md p-3 text-sm flex items-baseline gap-3 flex-wrap">
+            <div class="flex-1 min-w-0">
+              <div class="font-mono text-xs">
+                <a href="/experiments/{{ e.instance_id }}" class="text-blue-700 hover:underline">{{ e.instance_id }}</a>
+              </div>
+              <p class="text-xs text-slate-500 mt-0.5">
+                {{ e.experiment_id }} · {{ e.n_legs }} legs · {{ e.n_trials }} trials
+                {% if e.pass_rate_pct is not none %}· {{ '{:.0f}%'.format(e.pass_rate_pct) }} pass{% endif %}
+              </p>
+            </div>
+            <button hx-get="/_hx/tree-preview?slug={{ e.instance_id }}"
+                    hx-target="#tree-diff-preview" hx-swap="innerHTML"
+                    class="text-xs bg-white border border-slate-300 hover:border-slate-500 rounded px-2.5 py-1">
+              Preview verdict
+            </button>
+          </li>
+        {% endfor %}
+      </ul>
+    </div>
+  {% endif %}
+
+  {% if recent_diffs %}
+    <details>
+      <summary class="cursor-pointer text-xs text-slate-500 hover:text-slate-700">
+        Recently applied verdicts ({{ recent_diffs|length }})
+      </summary>
+      <ul class="mt-2 space-y-1 text-xs">
+        {% for d in recent_diffs %}
+          <li class="border-b border-slate-100 pb-1 last:border-b-0 flex items-baseline gap-2 flex-wrap">
+            <span class="px-1.5 py-0.5 border rounded {{ verdict_color(d.kind, d.applied) }}">{{ d.kind }}{% if not d.applied %} · staged{% endif %}</span>
+            <a href="/experiments/{{ d.instance_id }}" class="font-mono text-blue-700 hover:underline">{{ d.slug or d.instance_id }}</a>
+            <span class="text-slate-500">→ {{ d.target_id }}</span>
+            {% if d.applied_at %}<span class="text-slate-400 ml-auto">{{ fmt_dt(d.applied_at) }}</span>{% endif %}
+            <button hx-get="/_hx/tree-preview?slug={{ d.slug or d.instance_id }}"
+                    hx-target="#tree-diff-preview" hx-swap="innerHTML"
+                    class="text-xs underline text-slate-500 hover:text-slate-800">re-evaluate</button>
+          </li>
+        {% endfor %}
+      </ul>
+    </details>
+  {% endif %}
+
+  {% if not staged_graduates and not pending_eval and not recent_diffs %}
+    <p class="text-sm text-slate-500 italic">
+      No verdicts yet. Run an experiment, then return here once it's
+      ingested to preview and apply its <code>tree apply</code> diff.
+    </p>
+  {% endif %}
+</section>
+
+<div id="cmd-result" class="mb-4"></div>
+
+<section class="bg-white border border-slate-200 rounded-lg p-5 mb-6">
+  <h2 class="font-semibold mb-3">Branches ({{ snapshot.branches|length }})</h2>
+  {% if snapshot.branches %}
+    <div class="-mx-5 px-5 overflow-x-auto">
+    <table class="w-full text-sm min-w-[640px]">
+      <thead>
+        <tr class="text-xs uppercase text-slate-500 border-b border-slate-200 text-left">
+          <th class="py-2">ID</th>
+          <th>Mutation</th>
+          <th>Use when</th>
+          <th>Last verified</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for b in snapshot.branches %}
+          <tr class="border-b border-slate-100">
+            <td class="py-2 font-mono text-xs">{{ b.branch_id }}</td>
+            <td>{{ b.mutation }}</td>
+            <td class="text-slate-600">{{ b.use_when }}</td>
+            <td class="text-xs text-slate-500">{{ b.last_verified or "—" }}</td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    </div>
+  {% else %}
+    <p class="text-sm text-slate-500">No branches yet.</p>
+  {% endif %}
+</section>
+
+<section class="bg-white border border-slate-200 rounded-lg p-5 mb-6">
+  <h2 class="font-semibold mb-3">Rejected ({{ snapshot.rejected|length }})</h2>
+  {% if snapshot.rejected %}
+    <div class="-mx-5 px-5 overflow-x-auto">
+    <table class="w-full text-sm min-w-[560px]">
+      <thead>
+        <tr class="text-xs uppercase text-slate-500 border-b border-slate-200 text-left">
+          <th class="py-2">ID</th>
+          <th>Reason</th>
+          <th>Evidence</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for r in snapshot.rejected %}
+          <tr class="border-b border-slate-100">
+            <td class="py-2 font-mono text-xs">{{ r.branch_id }}</td>
+            <td>{{ r.reason }}</td>
+            <td class="text-xs text-slate-500">{{ r.evidence or "—" }}</td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    </div>
+  {% else %}
+    <p class="text-sm text-slate-500">Nothing rejected yet.</p>
+  {% endif %}
+</section>
+
+<section class="bg-white border border-slate-200 rounded-lg p-5 mb-6">
+  <h2 class="font-semibold mb-3">Proposed ({{ snapshot.proposed|length }})</h2>
+  {% if snapshot.proposed %}
+    <div class="-mx-5 px-5 overflow-x-auto">
+    <table class="w-full text-sm min-w-[560px]">
+      <thead>
+        <tr class="text-xs uppercase text-slate-500 border-b border-slate-200 text-left">
+          <th class="py-2">ID</th>
+          <th>Sketch</th>
+          <th>Linked idea</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for p in snapshot.proposed %}
+          <tr class="border-b border-slate-100">
+            <td class="py-2 font-mono text-xs">{{ p.branch_id }}</td>
+            <td>{{ p.sketch }}</td>
+            <td class="text-xs text-slate-500">{{ p.linked_idea or "—" }}</td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    </div>
+  {% else %}
+    <p class="text-sm text-slate-500">Nothing proposed.</p>
+  {% endif %}
+</section>
+
+<section class="bg-white border border-slate-200 rounded-lg p-5">
+  <h2 class="font-semibold mb-3">Trunk swap history</h2>
+  {% if trunk_history %}
+    <ul class="text-sm space-y-3">
+      {% for h in trunk_history %}
+        <li class="flex items-start gap-3">
+          <div class="text-xs text-slate-500 font-mono w-32 shrink-0">{{ fmt_dt(h.at_ts) }}</div>
+          <div>
+            <div class="font-mono">{{ h.from_id or "—" }} → <strong>{{ h.to_id }}</strong></div>
+            <div class="text-xs text-slate-600">{{ h.reason or "—" }}</div>
+            <div class="text-xs text-slate-400">by {{ h.applied_by }}{% if h.instance_id %} · <a href="/experiments/{{ h.instance_id }}" class="text-blue-600 hover:underline font-mono">{{ h.instance_id[:16] }}…</a>{% endif %}</div>
+          </div>
+        </li>
+      {% endfor %}
+    </ul>
+  {% else %}
+    <p class="text-sm text-slate-500">No swaps recorded yet.</p>
+  {% endif %}
+</section>
+{% endblock %}

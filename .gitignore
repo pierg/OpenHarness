@@ -42,3 +42,7 @@ examples/.workspaces/
 .DS_Store
 Thumbs.db
 uv.lock
+
+# Local-only scratch (deployment notes, secrets, throwaway docs).
+# Anything inside _local/ stays on this machine.
+_local/
