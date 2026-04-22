@@ -1,0 +1,123 @@
+{# Service supervisor panel.
+
+   Shows every systemd --user unit we know about (see
+   ``openharness.lab.web.services.UNITS``) with its current state and
+   start/stop/restart buttons. Auto-refreshed by callers via
+   ``lab-services-changed`` events; kept stateless here. #}
+{% if not services_available %}
+  <div class="text-sm text-slate-600 italic">
+    No <code class="font-mono">systemctl --user</code> on this host —
+    services panel is informational only. The lab is presumably
+    running ad-hoc; use the daemon Stop / Start buttons below.
+  </div>
+{% else %}
+  <div class="overflow-x-auto">
+    <table class="min-w-full text-sm">
+      <thead class="text-left text-slate-500 border-b border-slate-200">
+        <tr>
+          <th class="py-1 pr-4 font-medium">Unit</th>
+          <th class="py-1 pr-4 font-medium">State</th>
+          <th class="py-1 pr-4 font-medium">PID</th>
+          <th class="py-1 pr-4 font-medium">Started</th>
+          {% if identity.can_write %}
+            <th class="py-1 pr-4 font-medium">Actions</th>
+          {% endif %}
+        </tr>
+      </thead>
+      <tbody>
+        {% for u in services %}
+          <tr class="border-b border-slate-100 last:border-0 align-top">
+            <td class="py-2 pr-4 font-mono text-xs">
+              {{ u.unit_id }}.service
+              <div class="text-slate-500 font-sans text-xs not-italic">
+                {{ u.description }}
+              </div>
+            </td>
+            <td class="py-2 pr-4">
+              {% if u.is_active and u.active_state == "active" %}
+                <span class="inline-flex items-center gap-1.5">
+                  <span class="text-emerald-600 text-lg leading-none">●</span>
+                  <span class="text-emerald-700 font-medium">running</span>
+                </span>
+                <div class="text-slate-500 text-xs">{{ u.sub_state or "" }}</div>
+              {% elif u.active_state == "failed" %}
+                <span class="inline-flex items-center gap-1.5">
+                  <span class="text-rose-600 text-lg leading-none">●</span>
+                  <span class="text-rose-700 font-medium">failed</span>
+                </span>
+                <div class="text-slate-500 text-xs">
+                  {{ u.sub_state or "" }} · check
+                  <code class="font-mono">journalctl --user -u {{ u.unit_id }}</code>
+                </div>
+              {% elif u.is_installed %}
+                <span class="inline-flex items-center gap-1.5">
+                  <span class="text-slate-400 text-lg leading-none">○</span>
+                  <span class="text-slate-600">{{ u.active_state or "stopped" }}</span>
+                </span>
+                <div class="text-slate-500 text-xs">{{ u.sub_state or "" }}</div>
+              {% else %}
+                <span class="inline-flex items-center gap-1.5">
+                  <span class="text-amber-500 text-lg leading-none">●</span>
+                  <span class="text-amber-700 font-medium">not installed</span>
+                </span>
+                <div class="text-slate-500 text-xs">
+                  Run <code class="font-mono">bash scripts/systemd/install.sh</code>
+                </div>
+              {% endif %}
+            </td>
+            <td class="py-2 pr-4 font-mono text-xs">
+              {{ u.main_pid or "—" }}
+            </td>
+            <td class="py-2 pr-4 text-xs text-slate-600">
+              {{ fmt_dt(u.started_at) if u.started_at else "—" }}
+            </td>
+            {% if identity.can_write %}
+              <td class="py-2 pr-4">
+                <div class="flex flex-wrap gap-1.5">
+                  {% if u.can_start %}
+                    <form hx-post="/api/cmd" hx-target="#cmd-result" hx-swap="innerHTML">
+                      <input type="hidden" name="cmd_id" value="service-restart">
+                      <input type="hidden" name="unit" value="{{ u.unit_id }}">
+                      <button class="text-xs bg-emerald-700 hover:bg-emerald-800 text-white rounded px-2.5 py-1">
+                        Start
+                      </button>
+                    </form>
+                  {% endif %}
+                  {% if u.can_restart %}
+                    <form hx-post="/api/cmd" hx-target="#cmd-result" hx-swap="innerHTML"
+                          {% if u.unit_id == "openharness-lab" %}
+                          hx-confirm="Restart the WEB UI? Your browser will see a brief network error before HTMX reconnects."
+                          {% else %}
+                          hx-confirm="Restart {{ u.unit_id }}.service?"
+                          {% endif %}>
+                      <input type="hidden" name="cmd_id" value="service-restart">
+                      <input type="hidden" name="unit" value="{{ u.unit_id }}">
+                      <button class="text-xs bg-amber-600 hover:bg-amber-700 text-white rounded px-2.5 py-1">
+                        Restart
+                      </button>
+                    </form>
+                  {% endif %}
+                  {% if u.can_stop and u.unit_id == "openharness-daemon" %}
+                    {# Only the daemon is safe to stop from the UI;
+                       stopping the web UI would orphan this very
+                       request. Use Restart instead for the webui. #}
+                    <form hx-post="/api/cmd" hx-target="#cmd-result" hx-swap="innerHTML"
+                          hx-confirm="Stop the orchestrator daemon? In-flight experiments continue but new roadmap entries will not be picked up.">
+                      <input type="hidden" name="cmd_id" value="daemon-stop">
+                      <button class="text-xs bg-rose-700 hover:bg-rose-800 text-white rounded px-2.5 py-1">
+                        Stop
+                      </button>
+                    </form>
+                  {% endif %}
+                </div>
+              </td>
+            {% endif %}
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <div class="mt-3 text-xs text-slate-500">
+    Logs: <code class="font-mono">journalctl --user -u openharness-daemon -f</code>
+  </div>
+{% endif %}

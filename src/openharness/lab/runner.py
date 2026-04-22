@@ -45,9 +45,11 @@ from pathlib import Path
 
 from openharness.lab import codex as codex_adapter
 from openharness.lab import critic_io
+from openharness.lab import daemon_state as ds
 from openharness.lab import db as labdb
 from openharness.lab import ingest as labingest
 from openharness.lab import journal_synth
+from openharness.lab import lab_docs
 from openharness.lab import tree as labtree
 from openharness.lab import tree_ops
 from openharness.lab.paths import (
@@ -267,8 +269,36 @@ def _completed_runs_count() -> int:
     return int(n)
 
 
-def _process_entry(entry: RoadmapEntry, cfg: OrchestratorConfig) -> bool:
-    """Run one full pipeline cycle for one roadmap entry. Returns success."""
+@dataclass(slots=True)
+class TickResult:
+    """Outcome of one full ``_process_entry`` call.
+
+    ``loop`` consults ``outcome`` to decide what to record in
+    history and whether to fire the auto-demote gate. The legacy
+    boolean return path is retained for callers (smoke tests) that
+    only care about success.
+    """
+
+    ok: bool
+    outcome: ds.TickOutcome
+    summary: str | None = None
+
+
+def _process_entry(entry: RoadmapEntry, cfg: OrchestratorConfig) -> TickResult:
+    """Run one full pipeline cycle for one roadmap entry.
+
+    Side-effects on ``daemon-state.json``:
+
+    - Calls :func:`daemon_state.update_tick` at every phase boundary
+      so the web UI's `Current tick` panel is always meaningful.
+    - Returns a :class:`TickResult` whose ``outcome`` field maps 1:1
+      to :data:`daemon_state.TickOutcome` so the caller can record
+      one history entry without re-deriving the outcome from logs.
+
+    Does NOT call :func:`daemon_state.begin_tick` /
+    :func:`end_tick` — that bracketing is the caller's job (so a
+    crash inside this function still leaves a clean history row).
+    """
     started_at = datetime.now(timezone.utc)
     cx = _codex_cfg(cfg)
     log = logger.bind(slug=entry.slug) if hasattr(logger, "bind") else logger
@@ -276,11 +306,12 @@ def _process_entry(entry: RoadmapEntry, cfg: OrchestratorConfig) -> bool:
 
     if cfg.dry_run:
         log.info("[dry-run] would invoke lab-run-experiment for %s", entry.slug)
-        return True
+        return TickResult(ok=True, outcome="ok", summary="dry-run")
 
     # 1. variant impl + run kickoff (the skill itself backgrounds harbor
     # via scripts/exp/start.sh, then the agent's final OK/REFUSE summary
     # is what we capture).
+    ds.update_tick(phase="spawning", note="lab-run-experiment")
     res = codex_adapter.run(
         "lab-run-experiment",
         [entry.slug, f"hypothesis={entry.hypothesis}",
@@ -292,19 +323,39 @@ def _process_entry(entry: RoadmapEntry, cfg: OrchestratorConfig) -> bool:
         "lab-run-experiment exit=%s last=%r log=%s",
         res.exit_code, (res.last_message or "")[:120], res.log_path,
     )
+    ds.update_tick(
+        phase="post-processing",
+        log_path=str(res.log_path) if res.log_path else None,
+        note=(res.last_message or "")[:200],
+    )
+
+    # Distinguish REFUSE from a hard skill failure. The codex skill
+    # returns exit 0 even on a deliberate REFUSE; only the message
+    # body tells us. We treat REFUSE as its own outcome class so the
+    # exit gate can demote-after-N rather than retrying forever.
+    last = (res.last_message or "").strip()
+    if last.upper().startswith("REFUSE"):
+        msg = f"skill refused: {last[:160]}"
+        log.warning("lab-run-experiment REFUSED for %s: %s", entry.slug, last[:160])
+        return TickResult(ok=False, outcome="refuse", summary=msg)
     if not res.ok:
+        msg = f"spawn exit={res.exit_code}: {last[:160]}"
         log.error("lab-run-experiment failed for %s; aborting cycle", entry.slug)
-        return False
+        return TickResult(ok=False, outcome="error", summary=msg)
 
     # 2. discover the run directory created by the run skill.
     run_dir = find_latest_run_dir(since=started_at)
     if run_dir is None:
+        msg = "skill returned OK but no new runs/experiments/* directory was created"
         log.error("no run directory created for %s; aborting", entry.slug)
-        return False
+        return TickResult(ok=False, outcome="no-run-dir", summary=msg)
     log.info("polling run dir %s", run_dir)
+    ds.update_tick(phase="running", note=f"polling {run_dir.name}/results/summary.md")
     if not wait_for_summary(run_dir, timeout=cfg.run_timeout_sec, poll=cfg.poll_interval_sec):
+        msg = f"results/summary.md never landed in {run_dir.name} within {cfg.run_timeout_sec}s"
         log.error("run %s did not produce results/summary.md within timeout", run_dir)
-        return False
+        return TickResult(ok=False, outcome="timeout", summary=msg)
+    ds.update_tick(phase="post-processing", note=f"ingesting {run_dir.name}")
 
     # 3. ingest into the lab DB.
     summary = labingest.ingest_run(run_dir)
@@ -419,30 +470,159 @@ def _process_entry(entry: RoadmapEntry, cfg: OrchestratorConfig) -> bool:
         cfg=cx, parent_run_dir=run_dir,
     )
     log.info("roadmap entry %s closed", entry.slug)
-    return True
+    ds.update_tick(phase="done", note=f"closed runs/experiments/{summary.instance_id}")
+    return TickResult(
+        ok=True, outcome="ok",
+        summary=f"runs/experiments/{summary.instance_id}",
+    )
+
+
+def _select_next_entry(
+    ready: list[RoadmapEntry], state: ds.DaemonState,
+) -> RoadmapEntry | None:
+    """Pick the next entry to process given current state.
+
+    - ``paused``      → never picks anything.
+    - ``manual``      → picks the highest-priority entry whose slug
+                        is in ``approved_slugs``. (Order = roadmap
+                        order, not approval order, so the operator
+                        can approve out of order without changing
+                        the queue.)
+    - ``autonomous``  → picks ``ready[0]`` (legacy behaviour).
+    """
+    if state.mode == "paused":
+        return None
+    if state.mode == "autonomous":
+        return ready[0] if ready else None
+    # manual mode
+    approved = set(state.approved_slugs)
+    for e in ready:
+        if e.slug in approved:
+            return e
+    return None
+
+
+def _idle_log(reason: str, sleep_sec: int) -> None:
+    """Log an idle reason at most once per minute to avoid journal spam."""
+    now = time.monotonic()
+    last = getattr(_idle_log, "_last_at", 0.0)
+    last_reason = getattr(_idle_log, "_last_reason", None)
+    if now - last > 60 or reason != last_reason:
+        logger.info("%s; sleeping %ds", reason, sleep_sec)
+        _idle_log._last_at = now            # type: ignore[attr-defined]
+        _idle_log._last_reason = reason     # type: ignore[attr-defined]
 
 
 def loop(cfg: OrchestratorConfig | None = None) -> None:
+    """Main daemon loop. Consults :mod:`daemon_state` every tick.
+
+    The loop never directly mutates the markdown roadmap (that's the
+    skills' job via deterministic ``lab roadmap …`` helpers). The
+    one exception is the auto-demote gate: when an entry has failed
+    too many times in a row, the loop calls
+    :func:`lab_docs.demote_to_suggested` directly so the daemon can
+    keep moving without waiting on a codex spawn.
+    """
     cfg = cfg or OrchestratorConfig()
     while True:
+        state = ds.load()
         entries = parse_up_next()
         ready = [e for e in entries if is_dependency_satisfied(e)]
-        if not ready:
+        entry = _select_next_entry(ready, state)
+        if entry is None:
             if cfg.once:
-                logger.info("dry pass: nothing ready, exiting (--once)")
+                logger.info("nothing ready, exiting (--once)")
                 return
-            logger.info(
-                "no ready roadmap entries; sleeping %ds", cfg.idle_sleep_sec
-            )
+            if state.mode == "paused":
+                _idle_log("daemon mode=paused", cfg.idle_sleep_sec)
+            elif state.mode == "manual" and ready and not state.approved_slugs:
+                _idle_log(
+                    f"daemon mode=manual; {len(ready)} ready entries but no approvals",
+                    cfg.idle_sleep_sec,
+                )
+            elif state.mode == "manual":
+                _idle_log(
+                    "daemon mode=manual; no approved+ready entry to run",
+                    cfg.idle_sleep_sec,
+                )
+            else:
+                _idle_log("no ready roadmap entries", cfg.idle_sleep_sec)
             time.sleep(cfg.idle_sleep_sec)
             continue
-        entry = ready[0]
+
+        # Manual mode: consume the approval up front. If anything
+        # explodes inside _process_entry, we'd rather force the
+        # operator to re-approve than have the daemon retry on its
+        # own — that's the whole point of "consumed" approvals.
+        if state.mode == "manual":
+            ds.consume_approval(entry.slug, actor="daemon")
+
+        ds.begin_tick(
+            ds.ActiveTick(
+                slug=entry.slug,
+                phase="spawning",
+                started_at=datetime.now(timezone.utc),
+            ),
+            actor="daemon",
+        )
+
+        result: TickResult
         try:
-            _process_entry(entry, cfg)
+            result = _process_entry(entry, cfg)
         except codex_adapter.CodexAdapterError as exc:
             logger.error("codex adapter error for %s: %s", entry.slug, exc)
-        except Exception:
+            result = TickResult(ok=False, outcome="error", summary=f"codex: {exc}")
+        except Exception as exc:
             logger.exception("unhandled error processing %s", entry.slug)
+            result = TickResult(ok=False, outcome="error", summary=f"unhandled: {exc}")
+
+        # End-of-tick bookkeeping (history + failure counter).
+        _, failure_rec = ds.end_tick(
+            outcome=result.outcome,
+            summary=result.summary,
+            actor="daemon",
+        )
+
+        # Exit gate: applies in BOTH modes. In manual mode the
+        # operator already paid attention by approving; we still
+        # don't want a busted entry to keep eating approvals if it
+        # keeps failing.
+        if failure_rec is not None and failure_rec.count >= state.max_failures_before_demote:
+            try:
+                lab_docs.demote_to_suggested(slug=entry.slug)
+                logger.warning(
+                    "auto-demoted %s to Suggested after %d consecutive %s failures: %s",
+                    entry.slug, failure_rec.count, failure_rec.last_outcome,
+                    failure_rec.last_error,
+                )
+                # Reset the counter so the next operator promotion
+                # of the same slug starts fresh.
+                ds.reset_failures(entry.slug, actor="daemon")
+                # And record the demotion as a synthetic history row
+                # so the UI shows what happened, not just "refuse"
+                # twice in a row.
+                with ds.mutate(actor="daemon") as st:
+                    st.history.append(
+                        ds.TickHistoryEntry(
+                            slug=entry.slug,
+                            started_at=datetime.now(timezone.utc),
+                            ended_at=datetime.now(timezone.utc),
+                            outcome="auto-demoted",
+                            phase_reached="done",
+                            duration_sec=0.0,
+                            summary=(
+                                f"auto-demoted to Suggested after "
+                                f"{failure_rec.count} {failure_rec.last_outcome} failures"
+                            ),
+                        )
+                    )
+            except Exception:
+                logger.exception(
+                    "auto-demote failed for %s; entry stays in Up next "
+                    "(operator should investigate)",
+                    entry.slug,
+                )
+
         if cfg.once:
             return
 
@@ -458,6 +638,32 @@ def _foreground_log_init(level: int = logging.INFO) -> None:
     )
 
 
+def _install_signal_cleanup() -> None:
+    """Convert SIGTERM/SIGINT into ``KeyboardInterrupt`` so the lock
+    context manager's ``finally`` block runs and unlinks the lock.
+
+    Without this, the default Python SIGTERM handler exits the
+    interpreter without running ``__exit__``, leaving a stale
+    ``runs/lab/orchestrator.lock`` behind and breaking
+    ``systemctl --user restart openharness-daemon`` with
+    "Orchestrator lock already held".
+
+    SIGTERM is what systemd (and ``daemon stop``) sends; SIGINT is
+    Ctrl-C in the foreground case.
+    """
+
+    def _raise(_signum: int, _frame: object) -> None:
+        # Raising KeyboardInterrupt here propagates out of ``loop``,
+        # unwinds through ``orchestrator_lock``'s finally, then
+        # bubbles up so the typer CLI exits with the conventional
+        # 130 (SIGINT) status. systemd sees that as a clean stop
+        # because we used ``Restart=on-failure`` (not always).
+        raise KeyboardInterrupt
+
+    signal.signal(signal.SIGTERM, _raise)
+    signal.signal(signal.SIGINT, _raise)
+
+
 def start(*, foreground: bool = True, once: bool = False, dry_run: bool = False) -> None:
     """Start the orchestrator in the current process.
 
@@ -467,11 +673,35 @@ def start(*, foreground: bool = True, once: bool = False, dry_run: bool = False)
     """
     ensure_lab_runs_dir()
     _foreground_log_init()
+    _install_signal_cleanup()
     cfg = OrchestratorConfig(once=once, dry_run=dry_run)
-    with codex_adapter.orchestrator_lock(owner="lab-runner"):
-        logger.info("orchestrator started (pid=%d, once=%s, dry_run=%s)",
-                    os.getpid(), once, dry_run)
-        loop(cfg)
+    try:
+        with codex_adapter.orchestrator_lock(owner="lab-runner"):
+            # Boot-time hygiene on daemon-state.json:
+            # - Clear any leftover active_tick from a previous crash;
+            #   the tick that was in flight is gone, no point pretending.
+            # - The mode survives restarts (it's the operator's
+            #   declared intent, not a runtime fact).
+            ds.clear_active_tick(actor="daemon-boot")
+            state = ds.load()
+            logger.info(
+                "orchestrator started (pid=%d, once=%s, dry_run=%s, mode=%s, "
+                "approvals=%d, max_failures_before_demote=%d)",
+                os.getpid(), once, dry_run, state.mode,
+                len(state.approved_slugs), state.max_failures_before_demote,
+            )
+            loop(cfg)
+    except KeyboardInterrupt:
+        # Caught here (rather than letting it propagate to the typer
+        # entry point) so we get one tidy log line + exit 0. The lock
+        # has already been released by orchestrator_lock's finally.
+        # Also drop any in-flight active_tick — the codex spawn under
+        # it (if any) was killed by systemd's SIGTERM cascade.
+        try:
+            ds.clear_active_tick(actor="daemon-shutdown")
+        except Exception:
+            logger.exception("failed to clear active_tick during shutdown")
+        logger.info("orchestrator received signal, exiting cleanly")
 
 
 def stop() -> None:

@@ -38,6 +38,7 @@ from openharness.lab.web.models import (
     JournalEntryView,
     LegSummary,
     PendingActions,
+    ProcessNode,
     RoadmapEntryView,
     SpawnRow,
     SuggestedEntryView,
@@ -54,6 +55,7 @@ from openharness.lab.web.models import (
     VerifierReport,
     VerifierTest,
 )
+from openharness.lab.web import services as labsvc
 
 log = logging.getLogger(__name__)
 
@@ -184,6 +186,23 @@ class LabReader:
             log_path=log_path,
         )
 
+    def daemon_state(self):
+        """Return the runtime :class:`daemon_state.DaemonState` snapshot.
+
+        Returns the live in-memory dataclass (not a serialized dict) so
+        templates can iterate fields by attribute. Reading is cheap
+        (single JSON file load) and idempotent; safe to call once per
+        page render.
+
+        Imported lazily to avoid pulling :mod:`daemon_state` into the
+        readonly path during module init (the import is also done in
+        :func:`runner.loop`, so loading it here would not actually
+        save anything in production — but lazy keeps the readonly
+        smoke-test surface narrower).
+        """
+        from openharness.lab import daemon_state as _ds
+        return _ds.load()
+
     def tail_log(self, path: Path, n: int = 200) -> list[str]:
         if not path.is_file():
             return []
@@ -193,6 +212,115 @@ class LabReader:
             raise PermissionError(f"refusing to tail outside {LAB_RUNS_ROOT}")
         with rp.open("r", encoding="utf-8", errors="replace") as fh:
             return fh.readlines()[-n:]
+
+    # ---- live process tree ---------------------------------------------
+
+    def process_tree(self, *, cmdline_max: int = 160) -> list[ProcessNode]:
+        """Return the live process tree rooted at the orchestrator.
+
+        Walks ``psutil.Process(daemon_pid).children(recursive=True)``
+        and rebuilds them as a tree. Returns an empty list if the
+        daemon isn't running (under either the systemd unit or the
+        legacy lock file). One root node — the daemon itself — sits
+        at the top so the operator sees the full picture.
+
+        Why include the daemon root: gives a single visual anchor
+        ("everything below this is yours to kill") and matches the
+        precheck: the daemon's main_pid is what determines whether
+        ``kill-process`` is allowed.
+        """
+        try:
+            import psutil
+        except ImportError:
+            return []
+
+        # Prefer systemd's view (it's authoritative when the unit is
+        # installed); fall back to the lock file for the legacy
+        # ad-hoc backgrounding path so this still works in dev.
+        unit_pid = labsvc.status("openharness-daemon").main_pid
+        legacy_pid = self.daemon_status().pid
+        daemon_pid = unit_pid or legacy_pid
+        if daemon_pid is None:
+            return []
+
+        try:
+            root = psutil.Process(daemon_pid)
+            descendants = root.children(recursive=True)
+        except (psutil.NoSuchProcess, psutil.AccessDenied):
+            return []
+
+        # Build a {pid: ProcessNode} map first, then thread the tree
+        # by linking each non-root node to its parent. Two-pass keeps
+        # the algorithm O(n) and avoids surprises if psutil reports
+        # children out of order.
+        all_procs = [root, *descendants]
+        nodes: dict[int, ProcessNode] = {}
+        for proc in all_procs:
+            try:
+                with proc.oneshot():
+                    info = proc.as_dict(attrs=[
+                        "pid", "ppid", "name", "username", "status",
+                        "create_time", "cpu_percent", "memory_info",
+                        "cmdline",
+                    ])
+            except (psutil.NoSuchProcess, psutil.AccessDenied):
+                # Process died between enumeration and inspection.
+                continue
+            cmd = info.get("cmdline") or [info.get("name") or ""]
+            full = " ".join(cmd) if cmd else (info.get("name") or "")
+            short = full if len(full) <= cmdline_max else full[:cmdline_max - 1] + "…"
+            mem = info.get("memory_info")
+            mem_mb = (mem.rss / (1024 * 1024)) if mem is not None else 0.0
+            ts = info.get("create_time")
+            started = (
+                datetime.fromtimestamp(ts, tz=timezone.utc) if ts else None
+            )
+            pid = int(info["pid"])
+            is_root = pid == daemon_pid
+            nodes[pid] = ProcessNode(
+                pid=pid,
+                ppid=int(info.get("ppid") or 0),
+                name=info.get("name") or "",
+                username=info.get("username"),
+                status=info.get("status") or "",
+                started_at=started,
+                cpu_percent=float(info.get("cpu_percent") or 0.0),
+                mem_rss_mb=round(mem_mb, 1),
+                cmdline_short=short,
+                cmdline_full=full,
+                is_daemon_root=is_root,
+                # Mirrors precheck in commands._precheck_kill_process:
+                # only descendants (not the root itself) are killable.
+                can_kill=not is_root,
+                children=[],
+            )
+
+        # Link children → parents. A node whose parent isn't in our
+        # map (race: psutil saw a great-grandchild before its parent
+        # exited) is attached to the root so it doesn't disappear.
+        roots: list[ProcessNode] = []
+        for pid, node in nodes.items():
+            if pid == daemon_pid:
+                roots.append(node)
+                continue
+            parent = nodes.get(node.ppid)
+            if parent is not None:
+                parent.children.append(node)
+            else:
+                # Orphan — pin to the daemon root so the operator
+                # still sees it.
+                if daemon_pid in nodes:
+                    nodes[daemon_pid].children.append(node)
+
+        # Stable order: oldest first, so a long-lived shell sits
+        # above a short-lived child. Nones (rare) sort last.
+        def _key(n: ProcessNode) -> float:
+            return n.started_at.timestamp() if n.started_at else float("inf")
+
+        for node in nodes.values():
+            node.children.sort(key=_key)
+        roots.sort(key=_key)
+        return roots
 
     # ---- spawns ----------------------------------------------------------
 

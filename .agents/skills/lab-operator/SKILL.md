@@ -34,7 +34,7 @@ six reads** so you know the current state before doing anything:
 
 ```bash
 codex login status                       # MUST say 'Logged in using ChatGPT'
-uv run lab daemon status
+uv run lab svc status                    # services + port + lock at a glance
 uv run lab info
 uv run lab tree show                     # current trunk + branches
 uv run lab query "SELECT slug, kind, applied, applied_by
@@ -42,6 +42,11 @@ uv run lab query "SELECT slug, kind, applied, applied_by
 uv run lab query "SELECT skill, exit_code, started_at
                   FROM spawns ORDER BY started_at DESC LIMIT 5"
 ```
+
+`lab svc status` shows both systemd units (web UI + orchestrator
+daemon), their PIDs, the listening port, and the orchestrator lock
+state in one call. If `systemctl --user` is unavailable (rare, e.g.
+CI), fall back to `uv run lab daemon status`.
 
 Then summarise to the user in two-to-four lines: is the daemon
 up, what's the trunk, are there any **staged Graduate verdicts
@@ -118,75 +123,96 @@ directly — `## Up next` is the daemon's worklist (top first),
 
 ### "Start the lab"
 
-Pick the right launch mode by asking yourself (and the user, if
-unclear):
+The orchestrator and the web UI both run as **systemd `--user`
+units**. The wrapper hides the verbose `systemctl --user` syntax:
 
 | Goal | Command |
 | --- | --- |
 | Confirm wiring with no spend | `uv run lab daemon start --foreground --once --dry-run` |
 | First real tick on a cheap entry, watch it live | `uv run lab daemon start --foreground --once` |
-| Long-running autonomous operation | `uv run lab daemon start --background` |
+| Long-running autonomous operation (canonical) | `uv run lab svc start daemon` |
+| Both web UI + daemon at once | `uv run lab svc start` |
 
 Always run the dry-run first if it's the start of a session or you
 just edited `runner.py` / a roadmap entry. Foreground+once is the
 right choice if the top of the roadmap costs <$1 and the user
-wants to see what happens. Background is for "I'm done babysitting,
-just chew through the queue".
+wants to see what happens. The systemd path is the canonical
+"long-running autonomous operation" — systemd owns the process
+tree, journald captures stdout/stderr, and `Restart=on-failure`
+recovers crashes.
 
-If `daemon status` already shows a running daemon, **stop and ask
-the user before starting another one** — the lock will refuse and
-that's the desired behaviour, but the user almost always wants to
-know "you're already running, did you mean restart?".
+If `lab status` shows the daemon is already running, **stop and
+ask the user before starting another one** — the lock will refuse
+(and systemd will refuse a duplicate start), and the user almost
+always wants to know "you're already running, did you mean restart?".
+
+`uv run lab daemon start --background` (the legacy tmux/nohup path)
+still works but should only be used on machines where the systemd
+units aren't installed; the `lab svc` Typer subcommand is the
+canonical operational path.
 
 ### "Stop the lab"
 
 ```bash
-uv run lab daemon stop
+uv run lab svc stop daemon            # canonical (systemd)
+# or, on machines without the systemd unit:
+uv run lab daemon stop                # SIGTERM to the recorded pid
 ```
 
-Sends SIGTERM to the recorded pid. The daemon finishes the
-current spawn (if any) before exiting. Then verify:
+The systemd path sends SIGTERM with a 60 s grace; the daemon
+catches it cleanly and releases the orchestrator lock. Verify:
 
 ```bash
-uv run lab daemon status
+uv run lab svc status                 # daemon should show ○ stopped
 ls runs/lab/orchestrator.lock 2>/dev/null  # should be gone
 ```
 
-If the lock file lingers and `status` still shows a pid that
-isn't actually running, see "Stuck or crashed".
+If the lock file lingers, see "Stuck or crashed".
 
 ### "Attach to it / show me what it's doing"
 
-If the daemon was started with `--background` and tmux exists:
-
 ```bash
-uv run lab daemon attach              # detach with Ctrl-b d
+uv run lab svc logs daemon -f         # follow live (journalctl)
+uv run lab svc logs daemon            # last 100 lines
 ```
 
-Otherwise tail the orchestrator log:
-
-```bash
-tail -f runs/lab/logs/orchestrator.out
-```
-
-For a live view of individual spawns:
+For a live view of individual spawns (the daemon's children):
 
 ```bash
 ls -1t runs/lab/logs/ | head -10      # newest first
 tail -f runs/lab/logs/<spawn-log>     # one specific spawn
 ```
 
+The `/daemon` page in the web UI also shows a live process tree of
+the daemon's descendants with per-PID kill buttons (descendants
+only — random VM PIDs are refused by the precheck).
+
 ### "Restart the lab"
+
+```bash
+uv run lab svc restart daemon
+```
+
+systemd handles the start-after-stop ordering for you. The orchestrator
+lock is released cleanly because the daemon installs a SIGTERM
+handler.
+
+If the systemd unit isn't installed on this machine:
 
 ```bash
 uv run lab daemon stop
 sleep 2
 uv run lab daemon status              # confirm it really stopped
-uv run lab daemon start --background  # or whichever launch mode
+uv run lab daemon start --background
 ```
 
-Don't skip the `status` check between stop and start — re-locking
-while the previous pid is still finalising will fail.
+### "Restart the web UI" (e.g. picked up a code change)
+
+```bash
+uv run lab svc restart web
+```
+
+The browser sees a brief network error before HTMX reconnects.
 
 ### "What's the tree look like right now?"
 
@@ -297,7 +323,9 @@ This skill does **not** edit the queue itself — the user owns
 
 | Symptom | Action |
 | --- | --- |
-| `daemon status` says running but no real pid | `rm runs/lab/orchestrator.lock`, then start fresh. |
+| `lab svc status` shows the orchestrator lock as stale | `rm runs/lab/orchestrator.lock`, then `uv run lab svc restart daemon`. |
+| `uv run lab webui` errors with "address already in use" | The systemd unit already has the port. `uv run lab svc status` shows it. Either visit the running instance, or `uv run lab svc restart web` to pick up code changes. The CLI now prints this hint itself. |
+| `lab svc status` shows daemon `failed` | `uv run lab svc logs daemon` for the traceback. Common cause: lock left behind by a previous crash — `rm runs/lab/orchestrator.lock` then `uv run lab svc restart daemon`. |
 | Daemon idles forever, log says "no ready roadmap entries" | Either `## Up next` is empty or every entry's `Depends on:` is unmet. Ask the user. |
 | One trial-critic keeps failing | Read the matching log under `runs/lab/logs/`; usually a JSON-shape mismatch fixable in the SKILL.md. Re-run by hand: `codex exec` against that one skill+args. |
 | `lab-run-experiment` never produces summary.md | Tail `runs/experiments/<id>/legs/<leg>/harbor/.../trial.log` — same failure modes as a hand-launched experiment. The orchestrator just times out and leaves the roadmap entry in place. |

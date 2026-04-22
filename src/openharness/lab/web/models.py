@@ -33,6 +33,36 @@ class DaemonStatus:
 
 
 @dataclass(eq=False, slots=True)
+class ProcessNode:
+    """One node in the live process tree under the orchestrator daemon.
+
+    Returned by ``LabReader.process_tree``. Children are nested
+    recursively so the template can render an indented tree without
+    flattening / sorting in Jinja. ``cmdline_short`` is a single-line
+    truncation of argv suitable for table cells; ``cmdline_full`` is
+    the untruncated version exposed via tooltip / detail pane.
+
+    ``can_kill`` mirrors the safety check in
+    ``commands._precheck_kill_process``: only descendants of the
+    daemon main_pid (and not the daemon itself) are eligible.
+    """
+
+    pid: int
+    ppid: int
+    name: str
+    username: str | None
+    status: str
+    started_at: datetime | None
+    cpu_percent: float
+    mem_rss_mb: float
+    cmdline_short: str
+    cmdline_full: str
+    is_daemon_root: bool
+    can_kill: bool
+    children: list["ProcessNode"]
+
+
+@dataclass(eq=False, slots=True)
 class SpawnRow:
     spawn_id: str
     skill: str

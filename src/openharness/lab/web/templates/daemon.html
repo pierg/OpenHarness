@@ -6,16 +6,127 @@
 
 <div id="cmd-result" class="mb-4"></div>
 
-{# Status card auto-refreshes when /api/cmd dispatches
-   ``lab-daemon-changed`` (start / stop) AND on a 5s poll so the UI
-   reflects external state changes (e.g. the daemon exited on its own
-   after ``--once``, or the operator killed it from another shell). #}
+{# ============================================================
+   COCKPIT — what is the daemon doing right now?
+
+   Top three panels (mode / active tick / approvals) form the
+   "what is happening" surface; failure counters and recent
+   history are the "what just happened" surface. Existing
+   service / process / log panels stay below as the
+   infrastructure layer.
+   ============================================================ #}
+
+{# Mode toggle — flips between paused/manual/autonomous. Refreshed
+   on `lab-daemon-state-changed` (any approve/revoke/mode/cancel/
+   reset-failures) so a CLI invocation from another shell shows up
+   here within one tick of the next state change. #}
+<section class="bg-white border border-slate-200 rounded-lg p-5 mb-6"
+         hx-get="/_hx/daemon-mode"
+         hx-trigger="lab-daemon-state-changed from:body, every 10s"
+         hx-target="this" hx-swap="innerHTML">
+  {% include "_daemon_mode.html" %}
+</section>
+
+{# Active tick — the "is the daemon doing anything right now" panel.
+   Polls every 3 s because the phase + elapsed numbers are the only
+   sub-tick visibility the operator gets. Read load is trivial. #}
+<section class="bg-white border border-slate-200 rounded-lg p-5 mb-6">
+  <div class="flex items-baseline gap-3 mb-3">
+    <h2 class="font-semibold">Current tick</h2>
+    <span class="text-xs text-slate-500">live · refreshes every 3 s</span>
+  </div>
+  <div hx-get="/_hx/daemon-active-tick"
+       hx-trigger="lab-daemon-state-changed from:body, every 3s"
+       hx-target="this" hx-swap="innerHTML">
+    {% include "_daemon_active_tick.html" %}
+  </div>
+</section>
+
+{# Approvals queue — only really useful in manual mode but always
+   shown so the operator can see why nothing is happening. #}
+<section class="bg-white border border-slate-200 rounded-lg p-5 mb-6">
+  <div class="flex items-baseline gap-3 mb-3">
+    <h2 class="font-semibold">Approval queue</h2>
+    <span class="text-xs text-slate-500">{{ daemon_state.approved_slugs|length }} pending · refreshes on change</span>
+  </div>
+  <div hx-get="/_hx/daemon-approvals"
+       hx-trigger="lab-daemon-state-changed from:body, every 10s"
+       hx-target="this" hx-swap="innerHTML">
+    {% include "_daemon_approvals.html" %}
+  </div>
+</section>
+
+{# Failure counters — hidden when there are none, so the panel is a
+   real signal when it appears. #}
+{% if daemon_state.entry_failures %}
+<section class="bg-white border border-amber-200 rounded-lg p-5 mb-6"
+         id="daemon-failures-section">
+  <div class="flex items-baseline gap-3 mb-3">
+    <h2 class="font-semibold">Recent failures</h2>
+    <span class="text-xs text-slate-500">auto-demote at {{ daemon_state.max_failures_before_demote }}</span>
+  </div>
+  <div hx-get="/_hx/daemon-failures"
+       hx-trigger="lab-daemon-state-changed from:body, every 10s"
+       hx-target="this" hx-swap="innerHTML">
+    {% include "_daemon_failures.html" %}
+  </div>
+</section>
+{% endif %}
+
+{# Recent ticks — last 20 outcomes. Refreshed on state change plus
+   a 30 s heartbeat to catch the case where a tick ends but the UI
+   wasn't open yet. #}
+<section class="bg-white border border-slate-200 rounded-lg p-5 mb-6">
+  <div class="flex items-baseline gap-3 mb-3">
+    <h2 class="font-semibold">Recent ticks</h2>
+    <span class="text-xs text-slate-500">last {{ [daemon_state.history|length, 20]|min }} of {{ daemon_state.history|length }} · refreshes on change</span>
+  </div>
+  <div hx-get="/_hx/daemon-history"
+       hx-trigger="lab-daemon-state-changed from:body, every 30s"
+       hx-target="this" hx-swap="innerHTML">
+    {% include "_daemon_history.html" %}
+  </div>
+</section>
+
+{# ============================================================
+   INFRASTRUCTURE LAYER — the systemd unit, raw process tree,
+   journalctl tail. These mostly serve "is the host healthy"
+   debugging rather than the "is the lab making progress"
+   question the cockpit answers.
+   ============================================================ #}
+
+<h2 class="text-lg font-semibold mb-3 mt-8">Process &amp; service health</h2>
+
 <section class="bg-white border border-slate-200 rounded-lg p-5 mb-6"
          id="daemon-status"
          hx-get="/_hx/daemon-status"
          hx-trigger="lab-daemon-changed from:body, every 5s"
          hx-swap="innerHTML">
   {% include "_daemon_status.html" %}
+</section>
+
+<section class="bg-white border border-slate-200 rounded-lg p-5 mb-6">
+  <div class="flex items-baseline gap-3 mb-3">
+    <h2 class="font-semibold">Services</h2>
+    <span class="text-xs text-slate-500">systemd --user units · refreshes on change</span>
+  </div>
+  <div hx-get="/_hx/services"
+       hx-trigger="lab-services-changed from:body, lab-daemon-changed from:body, every 10s"
+       hx-target="this" hx-swap="innerHTML">
+    {% include "_services_panel.html" %}
+  </div>
+</section>
+
+<section class="bg-white border border-slate-200 rounded-lg p-5 mb-6">
+  <div class="flex items-baseline gap-3 mb-3">
+    <h2 class="font-semibold">Process tree</h2>
+    <span class="text-xs text-slate-500">live psutil view of the daemon's descendants</span>
+  </div>
+  <div hx-get="/_hx/process-tree"
+       hx-trigger="lab-processes-changed from:body, lab-daemon-changed from:body, every 5s"
+       hx-target="this" hx-swap="innerHTML">
+    {% include "_process_tree.html" %}
+  </div>
 </section>
 
 <section class="bg-white border border-slate-200 rounded-lg p-5">

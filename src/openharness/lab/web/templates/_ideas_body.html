@@ -1,11 +1,22 @@
 {# Body of /ideas. Loaded standalone via /_hx/ideas-body when a command
    emits ``lab-ideas-changed``. #}
 {% set sections = ["Proposed", "Trying", "Graduated", "Rejected", "Auto-proposed"] %}
+{# Move targets per current section. ``rejected`` is always available as a
+   one-way exit; everything else respects the canonical lifecycle:
+   Proposed → Trying → Graduated. The CLI accepts moves in any direction
+   so we offer a Reset-to-Proposed option for accidental advances. #}
+{% set move_targets = {
+  "Proposed":      [("trying", "Try it"), ("rejected", "Reject")],
+  "Trying":        [("graduated", "Graduate"), ("proposed", "Reset"), ("rejected", "Reject")],
+  "Graduated":     [("trying", "Demote"), ("proposed", "Reset")],
+  "Rejected":      [("proposed", "Re-open"), ("trying", "Try anyway")],
+  "Auto-proposed": [("proposed", "Adopt"), ("rejected", "Discard")],
+} %}
 {% for section in sections %}
   {% set themed = grouped.get(section, {}) %}
   {% if themed %}
     <section class="bg-white border border-slate-200 rounded-lg p-5 mb-6">
-      <h2 class="font-semibold mb-3">{{ section }}</h2>
+      <h2 class="font-semibold mb-3">{{ section }} <span class="text-slate-400 text-sm">({{ themed.values()|map('length')|sum }})</span></h2>
       {% for theme, ideas in themed.items() %}
         {% if theme %}<h3 class="font-medium mt-3 mb-1 text-slate-700">{{ theme }}</h3>{% endif %}
         <ul class="space-y-3">
@@ -17,6 +28,21 @@
               {% for ref in i.cross_refs %}
                 <p class="text-xs mt-1 text-slate-500">{{ ref }}</p>
               {% endfor %}
+              {% if identity.can_write %}
+                <div class="mt-3 flex flex-wrap items-center gap-2">
+                  {% for target, label in move_targets.get(section, []) %}
+                    <form hx-post="/api/cmd" hx-target="#cmd-result" hx-swap="innerHTML"
+                          hx-confirm="Move {{ i.idea_id }} → {{ target }}?">
+                      <input type="hidden" name="cmd_id" value="idea-move">
+                      <input type="hidden" name="idea_id" value="{{ i.idea_id }}">
+                      <input type="hidden" name="target" value="{{ target }}">
+                      <button class="text-xs {% if target == 'rejected' %}bg-rose-700 hover:bg-rose-800{% else %}bg-slate-700 hover:bg-slate-800{% endif %} text-white rounded px-3 py-1">
+                        {{ label }}
+                      </button>
+                    </form>
+                  {% endfor %}
+                </div>
+              {% endif %}
             </li>
           {% endfor %}
         </ul>
