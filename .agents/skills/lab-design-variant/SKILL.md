@@ -37,18 +37,24 @@ Do **not** use this skill for:
 
 ## Inputs
 
-The orchestrator passes you (via the prompt):
+The orchestrator passes you via CLI arguments:
 
-- `slug` — the experiment slug, also the branch name and the
-  filename for the design doc.
-- `idea_id` — the idea entry in `lab/ideas.md` driving this work
-  (or the literal string ``baseline snapshot`` / ``infrastructure``
-  for entries that don't have one).
-- `worktree` — the path to the per-experiment worktree
+- `slug` (positional) — the experiment slug, also the branch name
+  and the output filename stem for the design doc.
+- `--idea=<id>` — the idea entry id in `lab/ideas.md` (or the
+  literal string ``baseline`` for entries that don't have one).
+- `--worktree=<path>` — the path to the per-experiment worktree
   (``../OpenHarness.worktrees/lab-<slug>/``). Read from it freely;
   do **not** write to it from this skill.
-- `roadmap_entry` — the markdown of the matching roadmap entry,
-  including its `**Hypothesis:**` and `**Plan:**` lines.
+- `--hypothesis=<text>` — the one-line hypothesis from the roadmap
+  entry.
+- `--roadmap-body=<markdown>` — the full body of the roadmap entry
+  (everything between the `### <slug>` header and the next entry),
+  including `**Plan:**`, `**Cost:**`, `**Depends on:**` etc. Use
+  this rather than re-reading `lab/roadmap.md` — the body here is
+  exactly what the entry says at the moment preflight ran.
+- `--design-path=<path>` — the absolute path to write the output
+  `design.md` to (pre-created by the orchestrator).
 
 ## Output
 

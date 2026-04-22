@@ -530,6 +530,11 @@ def _phase_design(
             f"--worktree={pre.get('worktree', '')}",
             f"--design-path={design_path}",
             f"--hypothesis={entry.hypothesis}",
+            # Pass the full roadmap entry body so the agent has the
+            # Plan + Cost + Depends-on context without needing to re-read
+            # the markdown file (the read-only sandbox can still read it;
+            # this is a convenience for clarity in the agent's context).
+            f"--roadmap-body={entry.body}",
         ],
         cfg=cx,
         expected_orchestrator_pid=os.getpid(),
