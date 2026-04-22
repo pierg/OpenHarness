@@ -966,6 +966,7 @@ def _phase_finalize(
              f"--ran=runs/experiments/{instance_id}" if instance_id else "",
              "--outcome=auto"],
             cfg=cx,
+            expected_orchestrator_pid=os.getpid(),
             parent_run_dir=Path(run_payload["run_dir"]) if run_payload.get("run_dir") else None,
         )
         _commit_lab_changes(
