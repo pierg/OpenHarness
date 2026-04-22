@@ -46,6 +46,7 @@ dependencies = [
     "uvicorn>=0.32.0",
     "markdown-it-py>=3.0.0",
     "pytz>=2024.1",
+    "psutil>=5.9.0",
 ]
 
 [project.optional-dependencies]

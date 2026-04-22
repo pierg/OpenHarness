@@ -75,6 +75,7 @@ tree_app = typer.Typer(no_args_is_help=True, help="Inspect / mutate the configur
 trunk_app = typer.Typer(no_args_is_help=True, help="Show / set the trunk pointer.")
 graduate_app = typer.Typer(no_args_is_help=True, help="Confirm or reject staged trunk swaps.")
 components_app = typer.Typer(no_args_is_help=True, help="Inspect / mutate the components catalog (lab/components.md).")
+from openharness.lab.svc_cli import svc_app  # noqa: E402  (sub-app, imported after `app`)
 app.add_typer(idea_app, name="idea")
 app.add_typer(exp_app, name="experiments")
 app.add_typer(roadmap_app, name="roadmap")
@@ -83,6 +84,7 @@ app.add_typer(tree_app, name="tree")
 app.add_typer(trunk_app, name="trunk")
 app.add_typer(graduate_app, name="graduate")
 app.add_typer(components_app, name="components")
+app.add_typer(svc_app, name="svc")
 
 
 # ===== infrastructure =======================================================
@@ -723,7 +725,93 @@ def webui(
             "[red]WARNING:[/red] binding to a non-loopback host with no auth. "
             "Anyone who can reach this port can mutate the lab."
         )
+
+    # Preflight: catch the most common operational mistake — running
+    # `lab webui` interactively while the systemd unit already has the
+    # port. uvicorn's bare "address already in use" trace is too easy
+    # to misread as a code bug; surface the real cause + the fix.
+    _webui_preflight_check(host=host, port=port)
+
     run_webui(host=host, port=port, reload=reload, log_level=log_level)
+
+
+def _webui_preflight_check(*, host: str, port: int) -> None:
+    """Refuse to start if something is already bound to ``host:port``.
+
+    Splits the diagnosis into two cases:
+
+    1. The systemd ``openharness-lab.service`` unit is active. Show
+       its pid / start time and recommend ``systemctl --user
+       restart`` (to pick up code changes) or pointing the browser
+       at the already-running instance.
+    2. Some other process holds the port — show the pid via the
+       socket inspection so the operator knows what to investigate.
+
+    On any introspection failure (no systemctl, no /proc, etc.) we
+    fall through silently; uvicorn will still produce its own error
+    a moment later. This is purely a UX layer.
+    """
+    import socket
+
+    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    # Match uvicorn's bind semantics: SO_REUSEADDR=1 so a TIME_WAIT
+    # socket from a just-stopped webui doesn't make us think the port
+    # is held by something live. Without this, `systemctl restart`
+    # fails ~5 s after stopping a previous instance because Python's
+    # default REUSEADDR is 0.
+    s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    try:
+        s.bind((host, port))
+    except OSError:
+        # Port is taken. Figure out by what.
+        from openharness.lab.web import services as labsvc
+
+        webui_unit = labsvc.status("openharness-lab")
+        # Treat any "loaded + not-stopped" state as ours so we still
+        # show the friendly hint during the brief `activating` window
+        # right after `systemctl restart`. Stopped units fall through
+        # to the generic message below.
+        unit_is_ours = (
+            webui_unit.load_state == "loaded"
+            and webui_unit.active_state in {"active", "activating", "reloading"}
+        )
+        if unit_is_ours:
+            pid_str = (
+                f" (pid {webui_unit.main_pid}"
+                + (f", since {webui_unit.started_at}" if webui_unit.started_at else "")
+                + ")"
+                if webui_unit.main_pid
+                else f" ({webui_unit.active_state})"
+            )
+            err_console.print()
+            err_console.print(
+                f"[red]ERROR:[/red] [bold]openharness-lab.service[/bold] is "
+                f"already running{pid_str}. Either:"
+            )
+            err_console.print(
+                f"  • visit the running instance:  [cyan]http://{host}:{port}/[/cyan]"
+            )
+            err_console.print(
+                "  • restart it to pick up code changes:  "
+                "[cyan]uv run lab svc restart web[/cyan]"
+            )
+            err_console.print(
+                "  • stop it and run interactively here:  "
+                "[cyan]uv run lab svc stop web && uv run lab webui[/cyan]"
+            )
+        else:
+            err_console.print()
+            err_console.print(
+                f"[red]ERROR:[/red] something else is already bound to "
+                f"{host}:{port}. Find it with:"
+            )
+            err_console.print(
+                f"  [cyan]ss -tlnp 'sport = :{port}'[/cyan]   "
+                f"# (then kill / reconfigure / pick a different --port)"
+            )
+        raise typer.Exit(1)
+    finally:
+        s.close()
 
 
 # ===== analyze (manual backfill) ============================================
@@ -1541,6 +1629,174 @@ def daemon_attach() -> None:
         err_console.print("[red]tmux not installed[/red]")
         raise typer.Exit(1)
     raise typer.Exit(_sub.call(["tmux", "attach", "-t", "openharness-lab"]))
+
+
+# ===== daemon control surface (mode / approve / cancel / state) =============
+#
+# These mutate `runs/lab/daemon-state.json` rather than the markdown
+# files. They're the CLI side of the same surface the web UI exposes
+# via `/api/cmd` whitelisted entries; both routes go through the
+# same `daemon_state` module so behaviour is identical.
+
+
+_VALID_MODES = ("paused", "manual", "autonomous")
+
+
+@daemon_app.command("mode")
+def daemon_mode(
+    new_mode: str = typer.Argument(
+        ...,
+        help="paused | manual | autonomous",
+    ),
+    actor: str = typer.Option(
+        "human:cli", "--actor",
+        help="Recorded as last_updated_by in daemon-state.json.",
+    ),
+) -> None:
+    """Set the daemon's operating mode.
+
+    - **paused**: daemon process keeps running but processes nothing.
+    - **manual**: only runs roadmap entries you explicitly approve
+      via `lab daemon approve <slug>`. Approvals are one-shot.
+    - **autonomous**: walks the queue automatically (legacy
+      behaviour). The exit gate (auto-demote after N consecutive
+      failures) is always on regardless of mode.
+    """
+    from openharness.lab import daemon_state as _ds
+
+    if new_mode not in _VALID_MODES:
+        err_console.print(
+            f"[red]invalid mode '{new_mode}' (use: {' | '.join(_VALID_MODES)})[/red]"
+        )
+        raise typer.Exit(2)
+    state = _ds.set_mode(new_mode, actor=actor)  # type: ignore[arg-type]
+    typer.echo(f"mode → {state.mode}")
+
+
+@daemon_app.command("approve")
+def daemon_approve(
+    slug: str = typer.Argument(..., help="Roadmap slug to approve for one tick."),
+    actor: str = typer.Option("human:cli", "--actor"),
+) -> None:
+    """Approve a roadmap slug for the next tick (manual mode).
+
+    The approval is *consumed* on the next pickup — the daemon will
+    process this slug exactly once and then return to waiting.
+    """
+    from openharness.lab import daemon_state as _ds
+
+    state = _ds.approve(slug, actor=actor)
+    typer.echo(f"approved {slug!r}; queue: {state.approved_slugs}")
+
+
+@daemon_app.command("revoke")
+def daemon_revoke(
+    slug: str = typer.Argument(..., help="Slug to remove from approvals."),
+    actor: str = typer.Option("human:cli", "--actor"),
+) -> None:
+    """Remove a slug from the approval list."""
+    from openharness.lab import daemon_state as _ds
+
+    state = _ds.revoke(slug, actor=actor)
+    typer.echo(f"revoked {slug!r}; queue: {state.approved_slugs}")
+
+
+@daemon_app.command("approvals")
+def daemon_approvals() -> None:
+    """List currently-approved slugs."""
+    from openharness.lab import daemon_state as _ds
+
+    state = _ds.load()
+    if not state.approved_slugs:
+        typer.echo("(no approvals)")
+        return
+    for s in state.approved_slugs:
+        typer.echo(s)
+
+
+@daemon_app.command("cancel")
+def daemon_cancel(
+    actor: str = typer.Option("human:cli", "--actor"),
+) -> None:
+    """SIGTERM the active codex spawn (if any) and clear the active tick.
+
+    The signal goes to the recorded ``active_tick.spawn_pid``. If no
+    tick is in flight, this is a no-op (exit 0). Safety: the pid is
+    only killed if it's still alive AND the daemon recorded it
+    itself; we don't trust an arbitrary pid from the state file.
+    """
+    import os as _os
+    import signal as _sig
+    from openharness.lab import daemon_state as _ds
+
+    state = _ds.load()
+    if state.active_tick is None:
+        typer.echo("(no active tick)")
+        return
+    at = state.active_tick
+    if at.spawn_pid:
+        try:
+            _os.kill(at.spawn_pid, _sig.SIGTERM)
+            typer.echo(f"sent SIGTERM to spawn pid {at.spawn_pid} ({at.slug})")
+        except ProcessLookupError:
+            typer.echo(f"spawn pid {at.spawn_pid} already gone")
+    else:
+        typer.echo(f"active tick has no spawn_pid yet (phase={at.phase})")
+    # Mark cancelled in history so the UI shows what happened. Don't
+    # increment the failure counter — operator override shouldn't
+    # count toward the auto-demote gate.
+    with _ds.mutate(actor=actor) as st:
+        if st.active_tick is not None:
+            from datetime import datetime as _dt, timezone as _tz
+            now = _dt.now(_tz.utc)
+            st.history.append(
+                _ds.TickHistoryEntry(
+                    slug=at.slug,
+                    started_at=at.started_at,
+                    ended_at=now,
+                    outcome="cancelled",
+                    phase_reached=at.phase,
+                    duration_sec=(now - at.started_at).total_seconds(),
+                    summary=f"cancelled by {actor}",
+                    log_path=at.log_path,
+                )
+            )
+            st.active_tick = None
+
+
+@daemon_app.command("reset-failures")
+def daemon_reset_failures(
+    slug: str = typer.Argument(..., help="Slug whose failure counter to reset."),
+    actor: str = typer.Option("human:cli", "--actor"),
+) -> None:
+    """Manually clear a slug's failure counter (operator override)."""
+    from openharness.lab import daemon_state as _ds
+
+    _ds.reset_failures(slug, actor=actor)
+    typer.echo(f"failure counter cleared for {slug!r}")
+
+
+@daemon_app.command("state")
+def daemon_state_show(
+    json_out: bool = typer.Option(False, "--json", help="Raw JSON instead of pretty print."),
+) -> None:
+    """Print the current daemon-state.json snapshot."""
+    from openharness.lab import daemon_state as _ds
+
+    state = _ds.load()
+    if json_out:
+        # Reuse the canonical serializer.
+        typer.echo(json.dumps(_ds._state_to_dict(state), indent=2, default=str))
+        return
+    typer.echo(f"mode:       {state.mode}")
+    typer.echo(f"approvals:  {state.approved_slugs or '(none)'}")
+    typer.echo(f"active:     {state.active_tick.slug + ' / ' + state.active_tick.phase if state.active_tick else '(idle)'}")
+    if state.entry_failures:
+        typer.echo("failures:")
+        for slug, rec in state.entry_failures.items():
+            typer.echo(f"  {slug}: count={rec.count} last={rec.last_outcome}")
+    if state.history:
+        typer.echo(f"history:    {len(state.history)} entries (newest: {state.history[-1].slug} / {state.history[-1].outcome})")
 
 
 def main() -> None:  # pragma: no cover - thin wrapper

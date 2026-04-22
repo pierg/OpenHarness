@@ -40,6 +40,7 @@ from openharness.lab.web import auth as labauth
 from openharness.lab.web import commands as labcmd
 from openharness.lab.web import data as labdata
 from openharness.lab.web import markdown as labmd
+from openharness.lab.web import services as labsvc
 
 log = logging.getLogger(__name__)
 
@@ -246,6 +247,11 @@ def create_app() -> FastAPI:
                 request, "roadmap.html",
                 _reader=reader, nav_active="roadmap",
                 up_next=up_next, suggested=suggested, done=done,
+                # daemon_state powers the per-row "queued / running"
+                # badges and the Approve/Revoke buttons. Cheap to
+                # load; pulled here so the body partial can render
+                # the same affordances on its standalone refresh.
+                daemon_state=reader.daemon_state(),
             )
         except Exception:
             _close_reader(request, reader)
@@ -385,6 +391,10 @@ def create_app() -> FastAPI:
                 request, "daemon.html",
                 _reader=reader, nav_active="daemon",
                 status=status, tail=tail,
+                services=labsvc.all_status(),
+                services_available=labsvc.available(),
+                process_tree=reader.process_tree(),
+                daemon_state=reader.daemon_state(),
             )
         except Exception:
             _close_reader(request, reader)
@@ -449,6 +459,110 @@ def create_app() -> FastAPI:
             _close_reader(request, reader)
             raise
 
+    @app.get("/_hx/services", response_class=HTMLResponse)
+    def hx_services(request: Request) -> HTMLResponse:
+        """Just the services panel — refreshed on `lab-services-changed`
+        (start/stop/restart) or every 10 s as a heartbeat."""
+        reader = _reader_ctx(request)
+        try:
+            return _render(
+                request, "_services_panel.html",
+                _reader=reader,
+                services=labsvc.all_status(),
+                services_available=labsvc.available(),
+            )
+        except Exception:
+            _close_reader(request, reader)
+            raise
+
+    @app.get("/_hx/process-tree", response_class=HTMLResponse)
+    def hx_process_tree(request: Request) -> HTMLResponse:
+        """Just the process-tree panel — refreshed every 5 s plus on
+        `lab-processes-changed` so a kill-process call updates the
+        view immediately."""
+        reader = _reader_ctx(request)
+        try:
+            return _render(
+                request, "_process_tree.html",
+                _reader=reader,
+                process_tree=reader.process_tree(),
+            )
+        except Exception:
+            _close_reader(request, reader)
+            raise
+
+    # ---- daemon cockpit partials --------------------------------
+    #
+    # Each one renders a single panel of /daemon by re-loading the
+    # daemon-state.json snapshot. Reads are cheap (one JSON read +
+    # tiny parse), so we don't bother caching. All four take exactly
+    # the same context shape: a single `daemon_state` keyword.
+
+    @app.get("/_hx/daemon-mode", response_class=HTMLResponse)
+    def hx_daemon_mode(request: Request) -> HTMLResponse:
+        reader = _reader_ctx(request)
+        try:
+            return _render(
+                request, "_daemon_mode.html",
+                _reader=reader,
+                daemon_state=reader.daemon_state(),
+            )
+        except Exception:
+            _close_reader(request, reader)
+            raise
+
+    @app.get("/_hx/daemon-active-tick", response_class=HTMLResponse)
+    def hx_daemon_active_tick(request: Request) -> HTMLResponse:
+        reader = _reader_ctx(request)
+        try:
+            return _render(
+                request, "_daemon_active_tick.html",
+                _reader=reader,
+                daemon_state=reader.daemon_state(),
+            )
+        except Exception:
+            _close_reader(request, reader)
+            raise
+
+    @app.get("/_hx/daemon-approvals", response_class=HTMLResponse)
+    def hx_daemon_approvals(request: Request) -> HTMLResponse:
+        reader = _reader_ctx(request)
+        try:
+            return _render(
+                request, "_daemon_approvals.html",
+                _reader=reader,
+                daemon_state=reader.daemon_state(),
+            )
+        except Exception:
+            _close_reader(request, reader)
+            raise
+
+    @app.get("/_hx/daemon-failures", response_class=HTMLResponse)
+    def hx_daemon_failures(request: Request) -> HTMLResponse:
+        reader = _reader_ctx(request)
+        try:
+            return _render(
+                request, "_daemon_failures.html",
+                _reader=reader,
+                daemon_state=reader.daemon_state(),
+            )
+        except Exception:
+            _close_reader(request, reader)
+            raise
+
+    @app.get("/_hx/daemon-history", response_class=HTMLResponse)
+    def hx_daemon_history(request: Request) -> HTMLResponse:
+        reader = _reader_ctx(request)
+        try:
+            return _render(
+                request, "_daemon_history.html",
+                _reader=reader,
+                daemon_state=reader.daemon_state(),
+            )
+        except Exception:
+            _close_reader(request, reader)
+            raise
+
     @app.get("/_hx/roadmap-body", response_class=HTMLResponse)
     def hx_roadmap_body(request: Request) -> HTMLResponse:
         reader = _reader_ctx(request)
@@ -458,6 +572,7 @@ def create_app() -> FastAPI:
                 request, "_roadmap_body.html",
                 _reader=reader,
                 up_next=up_next, suggested=suggested, done=done,
+                daemon_state=reader.daemon_state(),
             )
         except Exception:
             _close_reader(request, reader)
@@ -475,6 +590,24 @@ def create_app() -> FastAPI:
                 request, "_ideas_body.html",
                 _reader=reader,
                 grouped=grouped,
+            )
+        except Exception:
+            _close_reader(request, reader)
+            raise
+
+    @app.get("/_hx/components-body", response_class=HTMLResponse)
+    def hx_components_body(request: Request) -> HTMLResponse:
+        reader = _reader_ctx(request)
+        try:
+            cat = reader.components()
+            perf = reader.components_perf()
+            perf_by_id: dict[str, list[Any]] = {}
+            for row in perf:
+                perf_by_id.setdefault(row.component_id, []).append(row)
+            return _render(
+                request, "_components_body.html",
+                _reader=reader,
+                catalog=cat, perf_by_id=perf_by_id,
             )
         except Exception:
             _close_reader(request, reader)
@@ -618,14 +751,57 @@ def create_app() -> FastAPI:
         return HTMLResponse("")
 
     @app.get("/audit", response_class=HTMLResponse)
-    def audit_page(request: Request) -> HTMLResponse:
+    def audit_page(
+        request: Request,
+        cmd: str | None = None,
+        actor: str | None = None,
+        ok: str | None = None,
+        limit: int = 200,
+    ) -> HTMLResponse:
         reader = _reader_ctx(request)
         try:
+            # Pull a wider window than we'll render so the summary tally
+            # at the top reflects the recent history regardless of which
+            # filters are applied.
+            sample = labcmd.audit_tail(n=max(limit * 3, 500))
+            # Filter for the rendered list.
+            rows = sample
+            if cmd:
+                rows = [r for r in rows if r.get("cmd_id") == cmd]
+            if actor:
+                rows = [r for r in rows if r.get("actor") == actor]
+            if ok in {"yes", "no"}:
+                want_ok = ok == "yes"
+                rows = [r for r in rows if (r.get("exit_code") == 0) == want_ok]
+            rows = rows[:limit]
+            # Summary across the unfiltered sample so operators see the
+            # rate of failure even when narrowing the view.
+            cmd_counts: dict[str, int] = {}
+            actor_counts: dict[str, int] = {}
+            ok_count = fail_count = 0
+            for r in sample:
+                cid = str(r.get("cmd_id", "?"))
+                act = str(r.get("actor", "?"))
+                cmd_counts[cid] = cmd_counts.get(cid, 0) + 1
+                actor_counts[act] = actor_counts.get(act, 0) + 1
+                if r.get("exit_code") == 0:
+                    ok_count += 1
+                else:
+                    fail_count += 1
             return _render(
                 request, "audit.html",
                 _reader=reader, nav_active="audit",
-                rows=labcmd.audit_tail(n=200),
+                rows=rows,
                 log_path=str(labcmd.audit_log_path()),
+                total_in_sample=len(sample),
+                ok_count=ok_count,
+                fail_count=fail_count,
+                cmd_counts=sorted(cmd_counts.items(), key=lambda kv: -kv[1]),
+                actor_counts=sorted(actor_counts.items(), key=lambda kv: -kv[1]),
+                filter_cmd=cmd or "",
+                filter_actor=actor or "",
+                filter_ok=ok or "",
+                limit=limit,
             )
         except Exception:
             _close_reader(request, reader)

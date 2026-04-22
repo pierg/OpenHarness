@@ -1,5 +1,10 @@
 {# Status card for the orchestrator daemon. Loaded standalone via
-   /_hx/daemon-status when a command emits ``lab-daemon-changed``. #}
+   /_hx/daemon-status when a command emits ``lab-daemon-changed``.
+
+   The "running" / "stopped" determination uses the ``orchestrator.lock``
+   payload (so pre-systemd ad-hoc runs still show correctly). When the
+   daemon runs under the systemd ``openharness-daemon`` unit the lock
+   gets written too, so we render systemd unit info alongside it. #}
 <div class="flex flex-wrap items-center gap-4">
   {% if status.running %}
     <div class="text-emerald-600 text-3xl leading-none">●</div>
@@ -9,6 +14,13 @@
     </div>
     {% if identity.can_write %}
     <div class="ml-auto flex items-center gap-2">
+      <form hx-post="/api/cmd" hx-target="#cmd-result" hx-swap="innerHTML"
+            hx-confirm="Restart the orchestrator? Current tick is interrupted; in-flight experiments keep running in their own processes.">
+        <input type="hidden" name="cmd_id" value="daemon-restart">
+        <button class="text-xs bg-amber-600 hover:bg-amber-700 text-white rounded px-3 py-1.5">
+          Restart
+        </button>
+      </form>
       <form hx-post="/api/cmd" hx-target="#cmd-result" hx-swap="innerHTML"
             hx-confirm="Stop the orchestrator? In-flight experiments keep running but new roadmap entries will not be picked up until you restart it.">
         <input type="hidden" name="cmd_id" value="daemon-stop">
@@ -23,7 +35,11 @@
     <div>
       <div class="text-lg font-semibold">Lock corrupted</div>
       <div class="text-sm text-slate-600 font-mono">{{ status.lock_path }}</div>
-      <div class="text-xs text-slate-500 mt-1">Manually remove the lock file then click Start.</div>
+      <div class="text-xs text-slate-500 mt-1">
+        Manually remove the lock file then click Start.
+        If the daemon is supervised by systemd, prefer
+        <code class="font-mono">systemctl --user restart openharness-daemon</code>.
+      </div>
     </div>
     {% if identity.can_write %}
     <div class="ml-auto flex items-center gap-2">
@@ -59,5 +75,7 @@
 {% if status.log_path %}
   <div class="mt-3 text-xs text-slate-500">
     Log: <span class="font-mono select-all bg-slate-50 px-1.5 py-0.5 rounded">{{ status.log_path }}</span>
+    · or follow live with
+    <code class="font-mono select-all bg-slate-50 px-1.5 py-0.5 rounded">journalctl --user -u openharness-daemon -f</code>
   </div>
 {% endif %}

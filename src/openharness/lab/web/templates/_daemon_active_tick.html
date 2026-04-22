@@ -1,0 +1,83 @@
+{# "What is the daemon doing right now?"
+
+   Two-state widget: idle (most of the time) or showing the in-flight
+   tick. When showing, exposes a Cancel button that SIGTERMs the
+   recorded codex spawn pid (via the daemon-cancel whitelist entry,
+   which respects the orchestrator-descendant safety check).
+
+   Refreshed every 3 s. The phase + elapsed numbers are the operator's
+   only sub-tick visibility, so a fast cadence matters; the load is
+   trivial (single JSON file read). #}
+{% set at = daemon_state.active_tick %}
+{% if at %}
+  <div class="flex flex-wrap items-baseline gap-3 mb-3">
+    <div class="text-emerald-600 text-2xl leading-none">●</div>
+    <div>
+      <div class="text-base font-semibold">
+        Running: <span class="font-mono">{{ at.slug }}</span>
+      </div>
+      <div class="text-sm text-slate-600">
+        Phase: <span class="font-mono">{{ at.phase }}</span>
+        · started {{ fmt_dt(at.started_at) }} ({{ fmt_delta(at.started_at) }} ago)
+      </div>
+    </div>
+    {% if identity.can_write %}
+    <div class="ml-auto flex items-center gap-2">
+      <form hx-post="/api/cmd" hx-target="#cmd-result" hx-swap="innerHTML"
+            hx-confirm="Cancel the in-flight tick and SIGTERM the codex spawn? Operator override — does NOT count toward the auto-demote gate.">
+        <input type="hidden" name="cmd_id" value="daemon-cancel">
+        <button class="text-xs bg-rose-700 hover:bg-rose-800 text-white rounded px-3 py-1.5">
+          Cancel tick
+        </button>
+      </form>
+    </div>
+    {% endif %}
+  </div>
+  {% if at.note %}
+    <p class="text-sm text-slate-700 bg-slate-50 rounded px-3 py-2 my-2">
+      <span class="text-xs uppercase tracking-wide text-slate-500">latest:</span>
+      {{ at.note }}
+    </p>
+  {% endif %}
+  <div class="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs text-slate-600">
+    {% if at.spawn_pid %}
+      <div>
+        <strong>spawn pid:</strong>
+        <span class="font-mono">{{ at.spawn_pid }}</span>
+      </div>
+    {% endif %}
+    {% if at.log_path %}
+      <div class="truncate">
+        <strong>log:</strong>
+        <span class="font-mono select-all">{{ at.log_path }}</span>
+      </div>
+    {% endif %}
+    {% if at.worktree_path %}
+      <div class="truncate">
+        <strong>worktree:</strong>
+        <span class="font-mono select-all">{{ at.worktree_path }}</span>
+      </div>
+    {% endif %}
+  </div>
+{% else %}
+  <div class="flex items-baseline gap-3">
+    <div class="text-slate-400 text-2xl leading-none">○</div>
+    <div>
+      <div class="text-base font-semibold">Idle</div>
+      <div class="text-sm text-slate-600">
+        {% if daemon_state.mode == "paused" %}
+          Daemon is paused — flip the mode toggle above to start picking up work.
+        {% elif daemon_state.mode == "manual" %}
+          {% if daemon_state.approved_slugs %}
+            Waiting for the next loop tick to pick up
+            <span class="font-mono">{{ daemon_state.approved_slugs[0] }}</span>.
+          {% else %}
+            Waiting for an operator approval. Approve a roadmap entry below or on <a href="/roadmap" class="text-blue-600 hover:underline">/roadmap</a>.
+          {% endif %}
+        {% else %}
+          Walking the roadmap automatically; nothing to process at the moment.
+        {% endif %}
+      </div>
+    </div>
+  </div>
+{% endif %}

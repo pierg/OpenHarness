@@ -1,16 +1,55 @@
 {# Body of /roadmap. Loaded standalone via /_hx/roadmap-body when a
-   command emits ``lab-roadmap-changed``. #}
+   command emits ``lab-roadmap-changed`` or
+   ``lab-daemon-state-changed``.
+
+   Daemon-aware affordances:
+
+   - In manual mode, each Up next row gets an "Approve & run" button
+     that pushes the slug into the daemon's approval queue. Already-
+     approved rows render a passive "queued for next tick" badge
+     instead.
+   - In autonomous mode, the Approve button is hidden (approvals are
+     ignored); instead a banner at the top of Up next surfaces that
+     the daemon is on autopilot.
+   - In paused mode, both surfaces show the paused-banner so the user
+     understands why nothing happens after they click Approve.
+   #}
+
+{% set daemon_mode = daemon_state.mode if daemon_state else None %}
+{% set approved_set = (daemon_state.approved_slugs if daemon_state else [])|list %}
+{% set active_slug = daemon_state.active_tick.slug if daemon_state and daemon_state.active_tick else None %}
+
+{% if daemon_mode == "paused" %}
+  <div class="mb-4 px-3 py-2 rounded bg-slate-100 border border-slate-200 text-sm">
+    <strong>Daemon is paused.</strong> Approvals queued here will sit waiting until you switch to <em>manual</em> on the <a href="/daemon" class="text-blue-700 hover:underline">/daemon</a> page.
+  </div>
+{% elif daemon_mode == "autonomous" %}
+  <div class="mb-4 px-3 py-2 rounded bg-amber-50 border border-amber-200 text-sm">
+    <strong>Daemon is on autopilot.</strong> It will pick the top of Up next on its next tick. Approvals are ignored in this mode — switch to <em>manual</em> on <a href="/daemon" class="text-blue-700 hover:underline">/daemon</a> if you want to gate each pickup.
+  </div>
+{% endif %}
 
 <section class="bg-white border border-slate-200 rounded-lg p-5 mb-6">
   <h2 class="font-semibold mb-3">Up next ({{ up_next|length }})</h2>
   {% if up_next %}
     <ol class="space-y-4">
       {% for r in up_next %}
-        <li id="{{ r.slug }}" class="border border-slate-100 rounded-md p-3 {% if not r.deps_satisfied %}bg-slate-50{% endif %}">
-          <div class="flex items-baseline gap-2">
+        {% set is_approved = r.slug in approved_set %}
+        {% set is_active   = r.slug == active_slug %}
+        <li id="{{ r.slug }}" class="border rounded-md p-3
+                {% if is_active %}border-emerald-300 bg-emerald-50
+                {% elif is_approved %}border-blue-300 bg-blue-50
+                {% elif not r.deps_satisfied %}border-slate-100 bg-slate-50
+                {% else %}border-slate-100{% endif %}">
+          <div class="flex flex-wrap items-baseline gap-2">
             <span class="font-mono text-sm font-semibold">{{ loop.index }}. {{ r.slug }}</span>
             {% if r.idea_id %}<span class="text-xs text-slate-500">·</span>
             <a href="/ideas#{{ r.idea_id }}" class="text-xs font-mono text-blue-600 hover:underline">{{ r.idea_id }}</a>{% endif %}
+            {% if is_active %}
+              <span class="text-xs text-emerald-800 bg-emerald-200 px-2 py-0.5 rounded font-mono">running now</span>
+            {% elif is_approved %}
+              <span class="text-xs text-blue-800 bg-blue-200 px-2 py-0.5 rounded font-mono">queued for next tick</span>
+            {% endif %}
             {% if not r.deps_satisfied %}<span class="ml-auto text-xs text-amber-700 bg-amber-100 px-2 py-0.5 rounded">blocked</span>{% endif %}
           </div>
           {% if r.hypothesis %}<p class="text-sm mt-1"><strong>Hypothesis:</strong> {{ r.hypothesis }}</p>{% endif %}
@@ -21,8 +60,32 @@
             </p>
           {% endif %}
           {% if r.cost %}<p class="text-xs text-slate-500 mt-1"><strong>Cost:</strong> {{ r.cost }}</p>{% endif %}
+          {% set fr = (daemon_state.entry_failures.get(r.slug) if daemon_state else None) %}
+          {% if fr and fr.count %}
+            <p class="text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded px-2 py-1 mt-2">
+              <strong>{{ fr.count }}/{{ daemon_state.max_failures_before_demote }} failures</strong>
+              · {{ fr.last_outcome }}: {{ fr.last_error }}
+            </p>
+          {% endif %}
           {% if identity.can_write %}
-          <div class="mt-3 flex items-center gap-2">
+          <div class="mt-3 flex flex-wrap items-center gap-2">
+            {% if daemon_mode == "manual" and not is_approved and not is_active and r.deps_satisfied %}
+              <form hx-post="/api/cmd" hx-target="#cmd-result" hx-swap="innerHTML">
+                <input type="hidden" name="cmd_id" value="daemon-approve">
+                <input type="hidden" name="slug" value="{{ r.slug }}">
+                <button class="text-xs bg-emerald-700 hover:bg-emerald-800 text-white rounded px-3 py-1">
+                  Approve &amp; run
+                </button>
+              </form>
+            {% elif is_approved and not is_active %}
+              <form hx-post="/api/cmd" hx-target="#cmd-result" hx-swap="innerHTML">
+                <input type="hidden" name="cmd_id" value="daemon-revoke">
+                <input type="hidden" name="slug" value="{{ r.slug }}">
+                <button class="text-xs bg-blue-700 hover:bg-blue-800 text-white rounded px-3 py-1">
+                  Revoke approval
+                </button>
+              </form>
+            {% endif %}
             <form hx-post="/api/cmd" hx-target="#cmd-result" hx-swap="innerHTML"
                   hx-confirm="Demote {{ r.slug }} back to Suggested?">
               <input type="hidden" name="cmd_id" value="roadmap-demote">
