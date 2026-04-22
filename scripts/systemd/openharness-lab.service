@@ -1,0 +1,35 @@
+[Unit]
+Description=OpenHarness lab web UI
+Documentation=https://github.com/novix-science/openharness
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=%h/OpenHarness
+# `uv run` is on PATH for interactive shells but not necessarily for
+# systemd --user, so we hard-code its absolute install path.
+ExecStart=%h/.local/bin/uv run lab webui --host 127.0.0.1 --port 8765
+Restart=always
+RestartSec=5
+# Send stdout/stderr to journald so operators can read it via:
+#   journalctl --user -u openharness-lab -f
+StandardOutput=journal
+StandardError=journal
+# Set HOME explicitly for child processes that look it up via env
+# rather than getpwuid (Codex CLI does the latter, but uv reads env).
+Environment=HOME=%h
+# PATH so `subprocess.run(["uv", ...])` from /api/cmd resolves the
+# CLI without a hard-coded path. Order: user-local installs first
+# (uv lives in ~/.local/bin), then the NVM-managed node bin, then
+# the standard system locations. The node entry mirrors the daemon
+# unit's PATH — see openharness-daemon.service for the rationale
+# (codex is `#!/usr/bin/env node`).
+Environment=PATH=%h/.local/bin:%h/.nvm/versions/node/v24.14.0/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+# Mirror the daemon: load env vars from %h/OpenHarness/.env if present.
+# The web UI itself doesn't currently need provider keys, but keeping
+# the two units in sync avoids surprises when /api/cmd shells out.
+EnvironmentFile=-%h/OpenHarness/.env
+
+[Install]
+WantedBy=default.target

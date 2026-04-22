@@ -1,0 +1,50 @@
+{# Failure counters per slug.
+
+   Only renders if there's at least one row. The auto-demote gate
+   fires at `daemon_state.max_failures_before_demote`; this panel
+   makes that number visible so the operator can predict when an
+   approval is about to be lost. #}
+{% if daemon_state.entry_failures %}
+  <ul class="space-y-2">
+    {% for slug, rec in daemon_state.entry_failures.items() %}
+      <li class="flex items-baseline gap-3 border border-amber-100 bg-amber-50 rounded px-3 py-2">
+        <span class="text-xs px-2 py-0.5 rounded bg-amber-100 text-amber-800 font-mono">
+          {{ rec.count }}/{{ daemon_state.max_failures_before_demote }} failures
+        </span>
+        <a href="/roadmap#{{ slug }}" class="font-mono text-sm font-semibold hover:underline">
+          {{ slug }}
+        </a>
+        <span class="text-xs text-slate-500 truncate flex-1">
+          {{ rec.last_outcome }}: {{ rec.last_error }}
+        </span>
+        {% if identity.can_write %}
+        <form hx-post="/api/cmd" hx-target="#cmd-result" hx-swap="innerHTML"
+              hx-confirm="Reset the failure counter for {{ slug }}?">
+          <input type="hidden" name="cmd_id" value="daemon-reset-failures">
+          <input type="hidden" name="slug" value="{{ slug }}">
+          <button class="text-xs text-slate-700 hover:text-slate-900 underline">
+            reset
+          </button>
+        </form>
+        {% endif %}
+      </li>
+    {% endfor %}
+  </ul>
+  <div class="flex items-center justify-between mt-3 gap-3 flex-wrap">
+    <p class="text-xs text-slate-500">
+      The daemon auto-demotes a slug to <em>Suggested</em> after
+      {{ daemon_state.max_failures_before_demote }} consecutive non-success ticks.
+    </p>
+    {% if identity.can_write and daemon_state.entry_failures %}
+      {# Bulk reset — useful after fixing a host-level cause (PATH,
+         credentials) that broke a batch of slugs simultaneously. #}
+      <form hx-post="/api/cmd" hx-target="#cmd-result" hx-swap="innerHTML"
+            hx-confirm="Clear ALL {{ daemon_state.entry_failures|length }} failure counters?">
+        <input type="hidden" name="cmd_id" value="daemon-reset-all-failures">
+        <button class="text-xs px-2 py-1 rounded border border-amber-300 text-amber-800 hover:bg-amber-100">
+          reset all
+        </button>
+      </form>
+    {% endif %}
+  </div>
+{% endif %}

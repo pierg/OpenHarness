@@ -1,0 +1,59 @@
+[Unit]
+Description=OpenHarness lab orchestrator daemon
+Documentation=https://github.com/novix-science/openharness
+After=network-online.target
+Wants=network-online.target
+# The daemon writes runs/lab/orchestrator.lock — if the web UI is
+# down systemd will still happily run the daemon, but we list the
+# dependency so a `systemctl --user restart openharness-lab` doesn't
+# implicitly take down the daemon (Restart=always covers actual
+# crashes).
+After=openharness-lab.service
+
+[Service]
+# Daemon's --foreground mode doesn't fork; perfect for Type=simple.
+# We deliberately do NOT use --background here: backgrounding via
+# tmux/nohup is for ad-hoc shell use; under systemd we want the
+# supervisor to own the process directly so journald gets logs and
+# Restart= can recover crashes.
+Type=simple
+WorkingDirectory=%h/OpenHarness
+ExecStart=%h/.local/bin/uv run lab daemon start --foreground
+# SIGTERM lets the orchestrator finish its current tick before
+# exiting; runner.py releases the orchestrator.lock cleanly on
+# normal shutdown. Give it 60s before SIGKILL.
+KillSignal=SIGTERM
+TimeoutStopSec=60
+# Always restart on crash. RestartSec is generous because if the
+# daemon is in a crash loop we'd rather slow it down than burn
+# through retries.
+Restart=on-failure
+RestartSec=15
+# Send stdout/stderr to journald so operators can read it via:
+#   journalctl --user -u openharness-daemon -f
+StandardOutput=journal
+StandardError=journal
+Environment=HOME=%h
+# PATH so the runner's subprocesses (codex, scripts/exp/start.sh,
+# anything launched by the skills it spawns) can resolve `uv`,
+# `bash`, `git`, etc. by name. Order: user-local first, then system.
+#
+# We also include the NVM-managed node bin dir because the codex CLI
+# is a `#!/usr/bin/env node` script — without `node` on PATH it dies
+# with `/usr/bin/env: 'node': No such file or directory` and exits 127
+# *before any output reaches stdout*, which used to surface as
+# "spawn exit=127:" with no diagnostic in the UI. Belt + suspenders:
+# scripts/systemd/install.sh also creates ~/.local/bin/node as a
+# stable symlink to whatever NVM "default" points at, so PATH stays
+# valid across `nvm install` upgrades without re-editing this unit.
+Environment=PATH=%h/.local/bin:%h/.nvm/versions/node/v24.14.0/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+# Provider API keys + any other lab-relevant env vars come from
+# %h/OpenHarness/.env (KEY=VALUE per line, no `export`). The leading
+# `-` makes systemd tolerate a missing file (useful in CI / dev
+# containers). Without these, codex spawns under the daemon will
+# REFUSE every experiment (correctly — burning paid quota on
+# unconfigured provider creds is the failure mode we are avoiding).
+EnvironmentFile=-%h/OpenHarness/.env
+
+[Install]
+WantedBy=default.target

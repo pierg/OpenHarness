@@ -3,12 +3,76 @@
 {% block crumbs %}<a href="/" class="hover:underline">Home</a> / <a href="/components" class="hover:underline">Components</a> / <span class="font-mono text-xs">{{ detail.component_id }}</span>{% endblock %}
 {% block content %}
 
+<div id="cmd-result" class="mb-4"></div>
+
 <header class="mb-5 flex flex-wrap items-baseline gap-3">
   <h1 class="text-xl font-semibold font-mono">{{ detail.component_id }}</h1>
   {% if detail.kind %}<span class="text-xs bg-slate-100 px-2 py-0.5 rounded">{{ detail.kind }}</span>{% endif %}
   {% if detail.status %}<span class="text-xs px-2 py-0.5 rounded {{ status_color(detail.status) }}">{{ detail.status }}</span>{% endif %}
   <a href="/components-perf" class="ml-auto text-xs text-blue-600 hover:underline">perf matrix ›</a>
 </header>
+
+{% if identity.can_write %}
+{% set status_options = [
+  "proposed", "experimental", "branch", "validated", "rejected", "superseded"
+] %}
+<section class="bg-white border border-slate-200 rounded-lg p-4 mb-6">
+  <h2 class="text-sm font-semibold mb-2">Force-set status</h2>
+  <p class="text-xs text-slate-500 mb-3">Bypasses the forward-only bump lattice — humans only.</p>
+  <div class="flex flex-wrap gap-2">
+    {% for s in status_options if s != detail.status %}
+      <form hx-post="/api/cmd" hx-target="#cmd-result" hx-swap="innerHTML"
+            hx-confirm="Force {{ detail.component_id }} → {{ s }}? This bypasses the bump lattice.">
+        <input type="hidden" name="cmd_id" value="component-set-status">
+        <input type="hidden" name="component_id" value="{{ detail.component_id }}">
+        <input type="hidden" name="status" value="{{ s }}">
+        <button class="text-xs px-2.5 py-1 rounded {{ status_color(s) }} hover:brightness-95 border border-current/10">
+          → {{ s }}
+        </button>
+      </form>
+    {% endfor %}
+  </div>
+</section>
+
+<details class="mb-6 bg-white border border-slate-200 rounded-lg">
+  <summary class="cursor-pointer px-4 py-3 font-medium select-none flex items-baseline gap-2 text-sm">
+    <span class="text-emerald-700">✎</span>
+    <span>Update component (forward-only)</span>
+    <span class="text-xs text-slate-500 ml-auto">via <code class="font-mono">components upsert</code></span>
+  </summary>
+  <form hx-post="/api/cmd" hx-target="#cmd-result" hx-swap="innerHTML"
+        class="px-4 pb-4 space-y-3 text-sm">
+    <input type="hidden" name="cmd_id" value="component-upsert">
+    <input type="hidden" name="component_id" value="{{ detail.component_id }}">
+    <input type="hidden" name="kind" value="{{ detail.kind or 'Architecture' }}">
+    <label class="block">
+      <span class="block text-xs font-medium text-slate-700 mb-1">Description</span>
+      <input name="description" maxlength="512" value="{{ detail.description or '' }}"
+             class="w-full text-sm border border-slate-300 rounded px-2 py-1">
+    </label>
+    <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+      <label class="block">
+        <span class="block text-xs font-medium text-slate-700 mb-1">Used by (replace)</span>
+        <input name="used_by" pattern="[A-Za-z0-9][A-Za-z0-9_.\-]{0,127}(?:,[A-Za-z0-9][A-Za-z0-9_.\-]{0,127})*"
+               value="{{ detail.used_by|join(',') }}"
+               placeholder="agent-1,agent-2"
+               class="w-full font-mono text-sm border border-slate-300 rounded px-2 py-1">
+      </label>
+      <label class="block">
+        <span class="block text-xs font-medium text-slate-700 mb-1">Evidence (append)</span>
+        <input name="evidence" maxlength="512"
+               placeholder="[run](runs/experiments/<id>) or short note"
+               class="w-full text-sm border border-slate-300 rounded px-2 py-1">
+      </label>
+    </div>
+    <div class="flex items-center justify-end gap-3 pt-1">
+      <button class="text-sm bg-emerald-600 hover:bg-emerald-700 text-white rounded px-4 py-1.5">
+        Save
+      </button>
+    </div>
+  </form>
+</details>
+{% endif %}
 
 {% if detail.description %}
 <section class="bg-white border border-slate-200 rounded-lg p-5 mb-6">

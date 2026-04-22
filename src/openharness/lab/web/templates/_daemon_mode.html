@@ -1,0 +1,50 @@
+{# Mode toggle for the orchestrator daemon.
+
+   Three buttons (paused / manual / autonomous). The currently-active
+   mode is rendered "filled in" so the operator can see at a glance
+   what the daemon is going to do on its next tick.
+
+   Refreshed on `lab-daemon-state-changed`. We deliberately don't
+   poll on a timer — mode changes are infrequent and only happen via
+   POSTs that already broadcast the event. #}
+<div class="flex flex-wrap items-center gap-3">
+  <div class="text-sm">
+    <strong>Mode:</strong>
+    <span class="font-mono">{{ daemon_state.mode }}</span>
+    {% if daemon_state.mode == "manual" %}
+      <span class="text-xs text-slate-500">(only operator-approved entries run)</span>
+    {% elif daemon_state.mode == "autonomous" %}
+      <span class="text-xs text-slate-500">(walks the queue automatically)</span>
+    {% else %}
+      <span class="text-xs text-slate-500">(daemon idles; no work picked up)</span>
+    {% endif %}
+  </div>
+  {% if identity.can_write %}
+  <div class="ml-auto flex items-center gap-2">
+    {% for m in ["paused", "manual", "autonomous"] %}
+      {% set is_active = daemon_state.mode == m %}
+      <form hx-post="/api/cmd" hx-target="#cmd-result" hx-swap="innerHTML"
+            {% if m == "autonomous" %}hx-confirm="Switch to autonomous? Daemon will pick from the top of Up next without waiting for approval. Exit gate (auto-demote after {{ daemon_state.max_failures_before_demote }} failures) is still on."{% endif %}>
+        <input type="hidden" name="cmd_id" value="daemon-mode">
+        <input type="hidden" name="mode" value="{{ m }}">
+        <button class="text-xs rounded px-3 py-1.5 transition
+                       {% if is_active %}
+                         {% if m == 'paused' %}bg-slate-600 text-white{% endif %}
+                         {% if m == 'manual' %}bg-emerald-600 text-white{% endif %}
+                         {% if m == 'autonomous' %}bg-amber-600 text-white{% endif %}
+                       {% else %}
+                         bg-white border border-slate-300 text-slate-700 hover:bg-slate-50
+                       {% endif %}"
+                {% if is_active %}aria-current="true" disabled{% endif %}>
+          {{ m }}
+        </button>
+      </form>
+    {% endfor %}
+  </div>
+  {% endif %}
+</div>
+{% if daemon_state.last_updated_at %}
+<div class="mt-2 text-xs text-slate-500">
+  Last change: {{ fmt_dt(daemon_state.last_updated_at) }}{% if daemon_state.last_updated_by %} by <span class="font-mono">{{ daemon_state.last_updated_by }}</span>{% endif %}
+</div>
+{% endif %}

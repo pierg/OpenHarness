@@ -17,66 +17,125 @@ Two seams that keep the loop clean:
    `uv run lab ingest-critiques`. No critic spawn ever writes to
    the DB.
 
-## Inner loop (one tick)
+## Inner loop (one tick): the 6-phase pipeline
 
-`src/openharness/lab/runner.py`:
+`src/openharness/lab/runner.py` drives a deterministic
+**6-phase pipeline** per roadmap entry. Each phase has its own
+record under `runs/lab/state/<slug>/phases.json` (status:
+`pending` / `running` / `ok` / `failed` / `skipped`) so the daemon
+can be restarted at any time and **resume from the first
+unfinished phase** — no idempotency hacks bolted onto a monolithic
+spawn. Inspect with `uv run lab phases show [<slug>]`.
 
-1.  **Parse** `lab/roadmap.md > ## Up next`. Skip entries whose
-    `Depends on:` slugs aren't all in `## Done`. Pick the top.
-2.  **Lock** `runs/lab/orchestrator.lock` to refuse a second daemon.
-3.  **Spawn** `lab-run-experiment` (codex). The skill builds a
-    paired ablation off the current trunk
-    ([`src/openharness/agents/configs/trunk.yaml`](../src/openharness/agents/configs/trunk.yaml)),
-    writes the variant onto a worktree, kicks off
-    `scripts/exp/start.sh exec <slug>`, and reports the run id back.
-    Broad-sweep experiments are opt-in via `type: broad-sweep` in
-    the experiment YAML.
-4.  **Poll** `runs/experiments/<id>/results/summary.md` until it
-    exists or the per-run timeout fires (default 4 h).
-5.  **Ingest** the run dir into DuckDB. `_scan_misconfigurations`
-    runs per leg and emits one row per (trial × kind) into
-    `misconfigurations` for every detected `unknown_id`,
-    `architecture_mismatch`, `agent_mismatch`, or `conflicts_with`.
-6.  **Fan out** `trial-critic` for each trial whose
-    `<trial_dir>/critic/trial-critic.json` does NOT yet exist on disk.
-    Each spawn writes one such file (no DB writes).
-7.  **Fan out** `task-features` for each `task_checksum` whose
-    `runs/lab/task_features/<checksum>.json` does NOT yet exist.
-8.  Once every trial in this experiment has a critic file, **spawn**
-    `experiment-critic`. Writes one
-    `<run_dir>/critic/comparisons/<task>.json` per task plus
-    `<run_dir>/critic/experiment-critic.json` and a human-facing
-    `runs/experiments/<id>/results/critic_summary.md`. The skill
-    uses codex's `multi_agent` feature to fan its per-task
-    comparisons across subagents.
-9.  **Refresh the DB cache** by calling `uv run lab ingest-critiques`
-    so the tree-evaluation step below sees the new rows.
-10. **Close the loop on the tree**, four steps, all deterministic:
-    1.  `uv run lab experiments synthesize <slug>` — fills `###
-        Aggregate / Mutation impact / Failure modes / Linked follow-ups`
-        in the journal entry from the critic JSONs.
-    2.  `uv run lab tree apply <slug>` — runs `tree_ops.evaluate`,
-        writes the `### Tree effect` block, and either auto-applies
-        the diff (AddBranch / Reject / NoOp → mutate
-        [`configs.md`](configs.md), forward-bump unique-to-target
-        atoms in [`components.md`](components.md)) or stages it for
-        human confirmation (Graduate).
-    3.  **Spawn** `lab-reflect-and-plan` — tree-aware planner. Reads
-        the current tree (`uv run lab tree show --json`) plus the
-        latest journal entries; writes 0..N entries under
-        `roadmap.md > ## Up next > ### Suggested` and 0..N entries
-        under `ideas.md > ## Auto-proposed`. Humans promote /
-        accept; the daemon never edits the main `## Up next` queue.
-    4.  **Spawn** `lab-plan-next` — moves the just-finished entry
-        to `## Done` with a link to the journal entry.
-11. Every `xexp_every` completed experiments (default 1), **spawn**
-    `cross-experiment-critic`. Snapshots the apex view to
-    `runs/lab/cross_experiment/<ts>__<spawn_id>.json` and may
-    append follow-ups under `## Auto-proposed`. It does **not**
-    write to the tree; only `tree apply` does.
+For each tick the daemon picks the top ready entry from
+`lab/roadmap.md > ## Up next` (skipping any whose `Depends on:`
+slugs aren't all in `## Done`), holds `runs/lab/orchestrator.lock`,
+loads-or-initialises `phases.json`, then walks the phases:
 
-If anything fails, the entry is **left in `## Up next`** so the
-next tick retries; nothing in the lab markdowns silently rots.
+1.  **Phase 0 — preflight** (deterministic; `preflight.py`).
+    Asserts the parent repo is clean (modulo `lab/*.md`), captures
+    the current HEAD branch + SHA, optionally pushes if
+    `LAB_AUTO_PUSH=1`, then **creates a git worktree** at
+    `../OpenHarness.worktrees/lab-<slug>` on a fresh branch
+    `lab/<slug>` based off that exact SHA (idempotent — adopts an
+    existing worktree if the branch is already there). Writes the
+    worktree path + base SHA into `phases.preflight.payload`.
+    Phase 0 is **skipped for "baseline"-style entries** that don't
+    need a code change (see `_BASELINE_IDEA_IDS`).
+
+2.  **Phase 1 — design** (codex skill: `lab-design-variant`,
+    sandbox `read-only`). Reads the idea + roadmap entry +
+    relevant codebase context and produces
+    `runs/lab/state/<slug>/design.md`: a concise design doc with
+    the proposed change, files to touch, validation strategy, and
+    risks. **No code edits** — this phase exists so a cheap
+    read-only pass can catch "we shouldn't even build this" before
+    we spend implementation tokens. Skipped for baseline entries.
+
+3.  **Phase 2 — implement** (codex skill:
+    `lab-implement-variant`, sandbox `workspace-write` scoped to
+    the worktree). Reads `design.md`, **edits the worktree** to
+    realise the variant, runs the local validations the design
+    promised (typically `uv run pytest <focused>` and any
+    component-specific smoke), and **commits** the changes. Writes
+    `runs/lab/state/<slug>/implement.json` summarising the commits
+    landed, validations run, and files touched. Skipped for
+    baseline entries (worktree's HEAD is already the right code).
+
+4.  **Phase 3 — run** (deterministic; `phase_run.py`). Resolves the
+    experiment YAML from the worktree, appends the journal stub to
+    `lab/experiments.md` (`## YYYY-MM-DD — <slug>` with placeholder
+    Branch / Run bullets), then launches `uv run exec <spec>` as
+    a **detached subprocess** (`Popen(..., start_new_session=True)`)
+    so a daemon restart doesn't kill the in-flight run. Crucially
+    the spawn passes `--root <parent-repo>` so all artifacts land in
+    the parent repo's `runs/experiments/<id>/`, not scattered across
+    worktrees. The phase polls
+    `runs/experiments/<id>/results/summary.md` (4 h default) and
+    rewrites the journal entry's `**Run:**` bullet to point at the
+    real instance id via `lab experiments set-run-path`.
+
+5.  **Phase 4 — critique** (deterministic + critic spawns; same
+    sequence as before, just promoted to a phase boundary):
+    -   `uv run lab ingest runs/experiments/<id>` — DB cache.
+        `_scan_misconfigurations` emits one row per (trial × kind)
+        into `misconfigurations` for every `unknown_id`,
+        `architecture_mismatch`, `agent_mismatch`, or
+        `conflicts_with`.
+    -   Fan out **`trial-critic`** for each trial whose
+        `<trial_dir>/critic/trial-critic.json` doesn't yet exist
+        (one file per spawn; no DB writes).
+    -   Fan out **`task-features`** for each `task_checksum` whose
+        `runs/lab/task_features/<checksum>.json` doesn't yet exist.
+    -   Once every trial has a critic file, spawn
+        **`experiment-critic`** — writes one
+        `<run_dir>/critic/comparisons/<task>.json` per task plus
+        `<run_dir>/critic/experiment-critic.json` plus the
+        human-facing `runs/experiments/<id>/results/critic_summary.md`
+        (uses codex's `multi_agent` to fan per-task comparisons
+        across subagents).
+    -   `uv run lab ingest-critiques` — refresh the DB cache.
+    -   Close the journal: `uv run lab experiments synthesize <slug>`
+        fills `### Aggregate / Mutation impact / Failure modes /
+        Linked follow-ups`; `uv run lab tree apply <slug>` runs
+        `tree_ops.evaluate`, writes `### Tree effect`, and either
+        auto-applies (AddBranch / Reject / NoOp) or stages
+        (Graduate) the diff.
+    -   Spawn **`lab-reflect-and-plan`** (tree-aware planner) and
+        **`lab-plan-next`** (move the entry to `## Done` with a
+        link to the journal entry).
+    -   Every `xexp_every` completed experiments (default 1),
+        spawn **`cross-experiment-critic`** — snapshots the apex
+        view to `runs/lab/cross_experiment/<ts>__<spawn_id>.json`
+        and may append follow-ups under `## Auto-proposed`. It does
+        **not** write to the tree; only `tree apply` does.
+
+6.  **Phase 5 — finalize** (codex skill: `lab-finalize-pr`, sandbox
+    `workspace-write`). Reads the verdict (`AddBranch` / `Graduate`
+    / `Reject` / `NoOp`) and decides what to do with the worktree's
+    branch:
+    -   **AddBranch / Graduate** — pushes `lab/<slug>`, opens a PR
+        via `gh pr create`, then rewrites the journal entry's
+        `**Branch:**` bullet to `[lab/<slug>](<pr_url>)` via
+        `lab experiments set-branch`.
+    -   **Reject / NoOp** — leaves the branch unpushed, sets
+        `**Branch:**` to `lab/<slug> — not opened (<reason>)`,
+        and signals worktree cleanup.
+    Writes `runs/lab/state/<slug>/finalize.json`. The daemon then
+    removes the worktree (`preflight.remove_worktree`) for
+    cleanup-flagged finalisations.
+
+After every phase that mutates `lab/*.md`, the daemon stages and
+commits the change in the parent repo (`_commit_lab_changes`); set
+`LAB_AUTO_PUSH=1` to also push. This produces a granular audit
+trail in the parent repo's git history (one commit per phase, not
+one bag of changes per experiment).
+
+If any phase fails, the daemon marks it `failed`, **leaves the
+roadmap entry in `## Up next`**, and the next tick picks up at the
+first unfinished phase — reset just one phase with
+`uv run lab phases reset <slug> --phase <name>` if you need to
+force a redo. Nothing in the lab markdowns silently rots.
 
 ## Operating it
 
@@ -197,7 +256,7 @@ after a series of backfills, not after each one.
 | `lab/ideas.md > ## Auto-proposed` | read-only | yes | `lab idea auto-propose` (`cross-experiment-critic`, `lab-reflect-and-plan`) |
 | `lab/roadmap.md > ## Up next` (main queue) | yes | `## Done` move only | `lab roadmap add/done`, `lab-plan-next` |
 | `lab/roadmap.md > ## Up next > ### Suggested` | promote to main queue | yes | `lab roadmap suggest`, `lab roadmap promote` (`lab-reflect-and-plan`) |
-| `lab/experiments.md` entry header (Type / Trunk / Mutation / Hypothesis / Run) | no | yes | `lab-run-experiment` (= daemon) |
+| `lab/experiments.md` entry header (Type / Trunk / Mutation / Hypothesis / Branch / Run) | no | yes | daemon Phase 3 (`lab experiments append-entry --branch lab/<slug>` + `set-run-path` once instance id is known) + Phase 5 / `lab-finalize-pr` (rewrites Branch bullet via `lab experiments set-branch`) |
 | `lab/experiments.md > ### Aggregate / Mutation impact / Failure modes / Linked follow-ups` | no | yes | `lab experiments synthesize`, `lab-reflect-and-plan` |
 | `lab/experiments.md > ### Tree effect` (AddBranch / Reject / NoOp) | no | yes | `lab tree apply` (auto) |
 | `lab/experiments.md > ### Tree effect` (Graduate) | `graduate confirm` flips Applied → human | stages the proposal | `lab tree apply`, `lab graduate confirm` |
@@ -210,6 +269,11 @@ after a series of backfills, not after each one.
 | `runs/lab/trials.duckdb` | — | `lab ingest`, `lab ingest-critiques` | DERIVED CACHE |
 | `runs/lab/logs/<utc>__<skill>__<short>.log` | — | `codex.py` adapter | full prompt + events + exit code |
 | `runs/lab/orchestrator.lock` | — | `runner.py` | `{pid, owner, started_at}` json |
+| `runs/lab/state/<slug>/phases.json` | — | `phase_state.py` | per-slug pipeline state (one record per phase, status + payload + error). `uv run lab phases show/reset` operates on it. |
+| `runs/lab/state/<slug>/design.md` | — | `lab-design-variant` (Phase 1) | the design doc consumed by Phase 2 |
+| `runs/lab/state/<slug>/implement.json` | — | `lab-implement-variant` (Phase 2) | summary of commits / validations / files touched |
+| `runs/lab/state/<slug>/finalize.json` | — | `lab-finalize-pr` (Phase 5) | verdict-routing decision + cleanup flag |
+| `../OpenHarness.worktrees/lab-<slug>/` | — | `preflight.py` (Phase 0 + cleanup) | per-experiment git worktree on branch `lab/<slug>` |
 | `components/<id>.yaml` | yes | no | source-of-truth per component |
 
 `runs/` is gitignored end-to-end — the DB, logs, lock, and
@@ -340,13 +404,119 @@ runs emit `HX-Trigger` events (`lab-roadmap-changed`,
 `lab-daemon-changed`) so the affected list refreshes without a
 page reload.
 
-Daemon controls live on `/` and `/daemon`: a green Start button
-when stopped, a red Stop button when running. Start uses
-`daemon start --background` (tmux session if available, else
-detached nohup), Stop sends SIGTERM to the recorded pid. Both
-auto-refresh on a 5–10 s poll as a backstop for state changes
-that didn't originate from this browser tab (e.g. the daemon
-exited on its own after `--once`).
+Daemon controls live on `/` and `/daemon`: a green **Start** button
+when stopped, an amber **Restart** + a red **Stop** when running.
+Under the hood every button shells out to
+`systemctl --user start|restart|stop openharness-daemon.service` —
+systemd owns the process tree so journald gets stdout/stderr,
+`Restart=on-failure` recovers crashes, and the operator can read
+live logs with `journalctl --user -u openharness-daemon -f`.
+The status panel auto-refreshes every 5 s as a backstop for state
+changes that didn't originate from this browser tab.
+
+The `/daemon` page additionally exposes:
+
+- a **Services** panel — every supervised systemd unit
+  (`openharness-lab` for the web UI, `openharness-daemon` for the
+  orchestrator) with its current state and Start / Restart / Stop
+  buttons. Restarting the web UI tears down the current HTMX session
+  briefly, which the operator's browser handles transparently.
+- a **Process tree** panel — live `psutil` view of the daemon's
+  descendants (uv → python → codex → …), with per-row
+  `[kill]` buttons that route through `kill-process` in the
+  whitelist. The precheck refuses any PID that isn't a descendant
+  of the running daemon, so operators can safely reap a wedged
+  experiment subprocess without ever touching unrelated VM
+  processes.
+
+### Process supervision
+
+The two long-running services run as **systemd `--user` units**:
+
+| Unit | Purpose | Restart policy |
+| --- | --- | --- |
+| `openharness-lab.service` | FastAPI web UI | `Restart=always` |
+| `openharness-daemon.service` | Orchestrator daemon (walks the roadmap) | `Restart=on-failure`, 60 s SIGTERM grace |
+
+Install / refresh both from the repo:
+
+```bash
+bash scripts/systemd/install.sh         # install + start
+bash scripts/systemd/install.sh --no-start
+bash scripts/systemd/install.sh --uninstall
+```
+
+#### `lab svc` — canonical operator wrapper
+
+Day-to-day operation goes through one Typer subcommand that hides
+the verbose `systemctl --user` / `journalctl --user` syntax and adds
+an at-a-glance health check. It's a real subcommand of the existing
+`lab` CLI, so nothing extra to install or alias:
+
+```bash
+lab svc                       # = `lab svc status` (default)
+lab svc status                # services + port + lock + log shortcuts
+lab svc restart daemon        # restart the orchestrator
+lab svc restart web           # restart the web UI (browser sees a brief gap)
+lab svc restart               # both (defaults to "all")
+lab svc stop  daemon
+lab svc start daemon
+lab svc logs  daemon          # last 100 lines from journalctl
+lab svc logs  daemon -f       # follow live (Ctrl-C to detach)
+lab svc tail  daemon          # alias for `logs daemon -f`
+lab svc url                   # → http://127.0.0.1:8765/
+lab svc install               # one-shot install/refresh of the units
+```
+
+Short unit aliases: `web` / `webui` / `ui` ↔ `openharness-lab`,
+`daemon` / `d` / `orch` ↔ `openharness-daemon`, `all` / `both`
+(default) ↔ both. Any other word is rejected so a typo can't
+target an unrelated systemd unit.
+
+`scripts/lab-svc.sh` is the same surface as a standalone bash script,
+kept only for non-Python contexts (SSH ForceCommand, CI bootstrap,
+recovery from a broken venv).
+
+`lab svc status` example output:
+
+```
+Services
+  ● web UI                  running (running)
+    pid 2087351   since 2026-04-21 22:26:11 UTC
+  ● orchestrator daemon     running (running)
+    pid 2137756   since 2026-04-21 22:41:40 UTC
+
+Web UI
+  ● listening at http://127.0.0.1:8765/
+
+Orchestrator lock
+  ● held by pid 2137759 (since 2026-04-21T22:41:41+00:00)
+
+Tail logs
+  lab svc logs daemon -f   # orchestrator
+  lab svc logs web -f      # web UI
+```
+
+#### Raw `systemctl` (when you want it)
+
+```bash
+systemctl --user status   openharness-daemon
+systemctl --user restart  openharness-daemon
+journalctl  --user -u openharness-daemon -f
+```
+
+#### Don't run `uv run lab webui` while the unit is up
+
+The `lab webui` CLI refuses to bind if the systemd unit is already
+running and tells you what to do instead — so the canonical "oops
+port 8765 is in use" mistake is one error message, not a puzzling
+uvicorn traceback.
+
+#### Survive reboot when nobody is logged in
+
+```bash
+loginctl enable-linger $USER
+```
 
 ### Auth
 
@@ -434,9 +604,12 @@ for those, where Cloudflare Access also records the SSO email.
 
 | Symptom | First check | Fix |
 | --- | --- | --- |
-| `daemon start` complains "already running" | `uv run lab daemon status` | If the pid is gone, `rm runs/lab/orchestrator.lock`. |
+| `daemon start` complains "already running" | `systemctl --user status openharness-daemon` (preferred) or `uv run lab daemon status` | If the pid is gone, `rm runs/lab/orchestrator.lock`. Under systemd, `systemctl --user restart openharness-daemon` clears most of these. |
+| `Address already in use` on `lab webui` start | `systemctl --user status openharness-lab` | The unit is already running — connect to `127.0.0.1:8765` directly, or `systemctl --user restart openharness-lab` to pick up code changes. |
 | Daemon idles forever | `uv run lab daemon attach`; check the log line "no ready roadmap entries" | Either the queue is empty or every entry's `Depends on:` is unmet. |
-| `lab-run-experiment` never produces a summary.md | tail `runs/experiments/<id>/legs/<leg>/harbor/.../trial.log` | Same failure modes as a hand-launched experiment; the orchestrator just times out and leaves the roadmap entry unmoved. |
+| Phase `run` never produces a summary.md | tail `runs/experiments/<id>/legs/<leg>/harbor/.../trial.log`; `uv run lab phases show <slug>` to confirm `run: failed` | Same failure modes as a hand-launched experiment; the daemon timed out and left the slug pinned at `run: failed`. Fix the cause, then `uv run lab phases reset <slug> --phase run` (the next tick replays Phase 3 onwards). |
+| Phase `design` / `implement` / `finalize` keeps failing | `uv run lab phases show <slug>`; tail the matching `runs/lab/logs/...lab-<phase>...log` for the prompt + events; for `implement` also `cd ../OpenHarness.worktrees/lab-<slug>` and `git status` / `git log --oneline` to see what landed | Resolve the root cause (e.g. update the SKILL.md, fix a syntax error the agent ran into, top up codex quota), then `uv run lab phases reset <slug> --phase <name>` to retry just that one phase on the next tick. |
+| Worktree under `../OpenHarness.worktrees/lab-<slug>` is stale | `git worktree list` from the parent repo | `uv run lab preflight remove <slug>` (idempotent — also drops the `lab/<slug>` branch unless you pass `--keep-branch`). |
 | Critic skill fails repeatedly for one trial | grep the matching log under `runs/lab/logs/` for the skill name + trial id | Re-run by hand: `codex exec` against the same skill+args; usually it's a JSON-shape mismatch we can fix in the SKILL.md. |
 | `misconfigurations` keeps growing | `SELECT DISTINCT kind, component_id FROM misconfigurations` | Either fix the offending agent YAML, the component spec, or downgrade the check by relaxing `applies_to`. |
 | Schema mismatch errors after a code update | run `uv run lab init` | Applies any new `src/openharness/lab/migrations/NNNN_*.sql`. |
@@ -445,11 +618,13 @@ for those, where Cloudflare Access also records the SSO email.
 
 | Skill | Spawned by | Persists via |
 | --- | --- | --- |
-| [`lab-run-experiment`](../.agents/skills/lab-run-experiment/SKILL.md) | daemon (top of loop) | `uv run lab experiments append-entry` + `scripts/exp/start.sh` |
-| [`trial-critic`](../.agents/skills/trial-critic/SKILL.md) | daemon (per uncritiqued trial) | `uv run lab write-trial-critique` |
-| [`task-features`](../.agents/skills/task-features/SKILL.md) | daemon (per unseen `task_checksum`) | `uv run lab write-task-features` |
-| [`experiment-critic`](../.agents/skills/experiment-critic/SKILL.md) | daemon (after all per-trial critiques land) | `uv run lab write-comparison` + `uv run lab write-experiment-critique` + `runs/experiments/<id>/results/critic_summary.md` |
-| [`cross-experiment-critic`](../.agents/skills/cross-experiment-critic/SKILL.md) | daemon (every `xexp_every` runs) | `uv run lab write-cross-experiment` + `uv run lab idea auto-propose` |
-| [`lab-reflect-and-plan`](../.agents/skills/lab-reflect-and-plan/SKILL.md) | daemon (after `tree apply`) | `uv run lab roadmap suggest` + `uv run lab idea auto-propose` |
-| [`lab-plan-next`](../.agents/skills/lab-plan-next/SKILL.md) | daemon (close-out) | `uv run lab roadmap done` |
+| [`lab-design-variant`](../.agents/skills/lab-design-variant/SKILL.md) | daemon Phase 1 | `runs/lab/state/<slug>/design.md` (read-only sandbox) |
+| [`lab-implement-variant`](../.agents/skills/lab-implement-variant/SKILL.md) | daemon Phase 2 | git commits in `../OpenHarness.worktrees/lab-<slug>/` + `runs/lab/state/<slug>/implement.json` |
+| [`lab-finalize-pr`](../.agents/skills/lab-finalize-pr/SKILL.md) | daemon Phase 5 | `git push` + `gh pr create` (AddBranch / Graduate) **or** unpushed branch (Reject / NoOp); `uv run lab experiments set-branch` rewrites the journal entry's Branch bullet either way; `runs/lab/state/<slug>/finalize.json` carries the cleanup flag |
+| [`trial-critic`](../.agents/skills/trial-critic/SKILL.md) | daemon Phase 4 (per uncritiqued trial) | `uv run lab write-trial-critique` |
+| [`task-features`](../.agents/skills/task-features/SKILL.md) | daemon Phase 4 (per unseen `task_checksum`) | `uv run lab write-task-features` |
+| [`experiment-critic`](../.agents/skills/experiment-critic/SKILL.md) | daemon Phase 4 (after all per-trial critiques land) | `uv run lab write-comparison` + `uv run lab write-experiment-critique` + `runs/experiments/<id>/results/critic_summary.md` |
+| [`cross-experiment-critic`](../.agents/skills/cross-experiment-critic/SKILL.md) | daemon Phase 4 (every `xexp_every` runs) | `uv run lab write-cross-experiment` + `uv run lab idea auto-propose` |
+| [`lab-reflect-and-plan`](../.agents/skills/lab-reflect-and-plan/SKILL.md) | daemon Phase 4 (after `tree apply`) | `uv run lab roadmap suggest` + `uv run lab idea auto-propose` |
+| [`lab-plan-next`](../.agents/skills/lab-plan-next/SKILL.md) | daemon Phase 4 (close-out) | `uv run lab roadmap done` |
 | [`lab-graduate-component`](../.agents/skills/lab-graduate-component/SKILL.md) | human (Cursor) | `uv run lab graduate confirm <slug>` |

@@ -10,8 +10,9 @@ description: >
   lab files (the "tree-vs-journal" model) and the file-ownership
   contract; all entry shapes and edit rules are documented here.
   Points at action skills: lab-propose-idea, lab-plan-next,
-  lab-run-experiment, lab-graduate-component, lab-reflect-and-plan,
-  lab-operator (drives the autonomous daemon).
+  lab-design-variant, lab-implement-variant, lab-finalize-pr,
+  lab-graduate-component, lab-reflect-and-plan, lab-operator
+  (drives the autonomous daemon's 6-phase pipeline end-to-end).
 ---
 
 # Lab — Autonomous Agent-Research Framework
@@ -48,18 +49,27 @@ Never put templates, rules, or how-to back into the lab markdowns.
 ## Mental model (one picture)
 
 ```
-ideas.md ───► roadmap.md ───► lab-run-experiment ───► runs/experiments/<id>/
-                                                            │
-                                                            ▼
-                                          experiment-critic + tree_ops.evaluate
-                                                            │
-                                                            ▼
-                                                    TreeDiff
-                                            (graduate | add_branch | reject | no_op)
-                                                            │
-                          ┌─────────────────────────────────┴────────────────────────────────┐
-                          ▼                                                                  ▼
-              configs.md (the configuration tree)                          experiments.md (the journal)
+ideas.md ───► roadmap.md ───► [orchestrator daemon: 6-phase pipeline]
+                                  │
+                                  │  Phase 0  preflight     (deterministic; clean repo + worktree)
+                                  │  Phase 1  design        (codex skill: lab-design-variant, read-only)
+                                  │  Phase 2  implement     (codex skill: lab-implement-variant, worktree-write)
+                                  │  Phase 3  run           (deterministic; uv run exec, --root parent repo)
+                                  │  Phase 4  critique      (deterministic + trial/experiment-critic spawns)
+                                  │  Phase 5  finalize      (codex skill: lab-finalize-pr → push branch + open PR)
+                                  ▼
+                                runs/experiments/<id>/
+                                          │
+                                          ▼
+                                experiment-critic + tree_ops.evaluate
+                                          │
+                                          ▼
+                                  TreeDiff
+                          (graduate | add_branch | reject | no_op)
+                                          │
+                          ┌───────────────┴───────────────┐
+                          ▼                               ▼
+              configs.md (the configuration tree)        experiments.md (the journal)
               ── Trunk (1)                                                   ── ## YYYY-MM-DD — <slug>
               ── Branches (n; specializations)                                  ── ### Aggregate
               ── Rejected (n; with reason)                                      ── ### Mutation impact
@@ -102,9 +112,17 @@ Use this skill (and pick the right action skill below) when the user:
 -   says "queue X for next" / "add X to the roadmap" / "what's the
     next experiment?" / "reorder the queue" / "promote a Suggested
     entry" → use **`lab-plan-next`**.
--   says "let's try X" / "run an experiment for X" / "test this on
-    tb2-baseline" / "run the next thing on the roadmap" → use
-    **`lab-run-experiment`**.
+-   says "let's try X" / "run the next thing on the roadmap" / "run
+    the lab" / "drive the next experiment end-to-end" → use
+    **`lab-operator`** (which drives the orchestrator daemon's full
+    6-phase pipeline). For *one specific phase* by hand:
+    -   designing a variant (read-only) → **`lab-design-variant`**
+    -   implementing it on a worktree → **`lab-implement-variant`**
+    -   pushing the branch / opening the PR after a verdict →
+        **`lab-finalize-pr`**
+    The deterministic phases (preflight, run, critique) have no
+    skill — call `uv run lab preflight run <slug>` or `uv run exec
+    <slug>` directly.
 -   says "promote X" / "graduate X" / "X worked, let's adopt it" /
     "confirm the staged trunk swap" → use **`lab-graduate-component`**.
 -   says "what should we run next?" / "reflect on the latest results"
@@ -142,7 +160,7 @@ The complete matrix lives in `lab/OPERATIONS.md`. Most-relevant rows:
 | `lab/ideas.md > ## Auto-proposed` | read-only | `cross-experiment-critic`, `lab-reflect-and-plan` |
 | `lab/roadmap.md > ## Up next` (main queue) | yes | `## Done` move only |
 | `lab/roadmap.md > ## Up next > ### Suggested` | promote to main queue | `lab-reflect-and-plan` |
-| `lab/experiments.md` (whole entry) | no | `lab-run-experiment` (header) + `experiments synthesize` (sections) + `tree apply` (### Tree effect) |
+| `lab/experiments.md` (whole entry) | no | orchestrator daemon (Phase 3 appends header + Branch / Run bullets via `lab experiments append-entry` + `set-branch` + `set-run-path`) + `experiments synthesize` (Phase 4 sections) + `tree apply` (Phase 4 ### Tree effect) + `lab-finalize-pr` (Phase 5 updates Branch bullet with PR URL) |
 | `lab/configs.md > ## Branches / ## Rejected / ## Proposed` | rare | `lab tree apply` |
 | `lab/configs.md > ## Trunk` | via `lab trunk set` or `lab graduate confirm` | only via `graduate confirm` |
 | `lab/components.md` (any kind) | `lab components upsert` / `lab components set-status` | `lab tree apply` (forward-only status bump as a verdict side-effect) |
@@ -242,7 +260,12 @@ into the main queue.
 -   **Trunk at run-time:** [`trunk@<sha>`](../src/openharness/agents/configs/trunk.yaml)
 -   **Mutation:** <one-liner>          (omit for broad-sweep)
 -   **Hypothesis:** one sentence.
+-   **Branch:** `lab/<slug>` _(set by daemon Phase 0; rewritten to_
+    _`[lab/<slug>](<pr_url>)` by `lab-finalize-pr` in Phase 5,_
+    _or to `lab/<slug> — not opened (<reason>)` if the verdict_
+    _was Reject / NoOp)._
 -   **Run:** [`runs/experiments/<id>`](../runs/experiments/<id>)
+    _(set by daemon Phase 3 once the run starts; placeholder until then)._
 
 ### Aggregate           ← `lab experiments synthesize`
 ### Mutation impact     ← `lab experiments synthesize`
@@ -387,5 +410,7 @@ error to the user instead of trying to "fix" the file by hand.
     `runs/experiments/` is laid out (each journal entry should link
     a matching directory there).
 -   [`scripts/exp/README.md`](../../../scripts/exp/README.md) — the
-    `tmux`-backed background job manager. `lab-run-experiment`
-    documents when to pick `tmux` vs `Shell` background mode.
+    `tmux`-backed background job manager. The daemon prefers a
+    detached `subprocess.Popen` (`start_new_session=True`) so a
+    daemon restart doesn't kill the in-flight experiment; the tmux
+    path is for hand-driven runs.
