@@ -30,8 +30,21 @@
       </li>
     {% endfor %}
   </ul>
-  <p class="text-xs text-slate-500 mt-2">
-    The daemon auto-demotes a slug to <em>Suggested</em> after
-    {{ daemon_state.max_failures_before_demote }} consecutive non-success ticks.
-  </p>
+  <div class="flex items-center justify-between mt-3 gap-3 flex-wrap">
+    <p class="text-xs text-slate-500">
+      The daemon auto-demotes a slug to <em>Suggested</em> after
+      {{ daemon_state.max_failures_before_demote }} consecutive non-success ticks.
+    </p>
+    {% if identity.can_write and daemon_state.entry_failures %}
+      {# Bulk reset — useful after fixing a host-level cause (PATH,
+         credentials) that broke a batch of slugs simultaneously. #}
+      <form hx-post="/api/cmd" hx-target="#cmd-result" hx-swap="innerHTML"
+            hx-confirm="Clear ALL {{ daemon_state.entry_failures|length }} failure counters?">
+        <input type="hidden" name="cmd_id" value="daemon-reset-all-failures">
+        <button class="text-xs px-2 py-1 rounded border border-amber-300 text-amber-800 hover:bg-amber-100">
+          reset all
+        </button>
+      </form>
+    {% endif %}
+  </div>
 {% endif %}

@@ -1,0 +1,54 @@
+{# Inline tail of a codex spawn log, loaded on-demand into the daemon
+   cockpit's history rows.
+
+   Inputs:
+     filename       — basename like 20260422T184348Z__lab-run-experiment__abc.log
+     tail           — last ~12KB of the file as text
+     truncated      — True if we seeked from the end (file > 12KB)
+     size           — total file size in bytes (for the operator's reference)
+     absolute_path  — full path on disk, surfaced as a copy-paste hint
+
+   The container is closable so the operator can collapse it without
+   navigating away — important when triaging a list of failures. #}
+<div class="mt-2 border border-slate-200 rounded bg-slate-50 p-3">
+  <div class="flex items-baseline gap-2 mb-2">
+    <span class="text-xs font-mono text-slate-700 truncate">{{ filename }}</span>
+    <span class="text-xs text-slate-400">
+      {% if truncated %}last {{ (tail|length) // 1024 }} KB of {{ size // 1024 }} KB{% else %}{{ size }} B{% endif %}
+    </span>
+    <button type="button"
+            class="ml-auto text-xs text-slate-500 hover:text-slate-800"
+            onclick="this.closest('details').open=false">
+      collapse
+    </button>
+  </div>
+  {# Auto-scroll the pre to its bottom on render. The codex spawn
+     log layout puts the stderr block (typically the most relevant
+     content for failure triage) at the very end, so a fresh open
+     should land the operator on the error rather than on the prompt
+     preamble. HTMX evaluates inline <script> in swapped content by
+     default, so this fires on every refresh without needing global
+     event listeners. #}
+  <pre class="text-xs leading-tight font-mono whitespace-pre-wrap break-all
+              max-h-96 overflow-y-auto bg-white border border-slate-200
+              rounded p-2 text-slate-700"
+       data-log-tail>{{ tail }}</pre>
+  <script>
+    (function () {
+      // Defer to next tick so the <pre> is already in the DOM with
+      // its computed height. document.currentScript is unreliable
+      // inside HTMX-swapped content (it may be null after the
+      // re-process), so we scroll every visible log-tail pane —
+      // a no-op for ones the user has already scrolled within.
+      setTimeout(function () {
+        document.querySelectorAll('[data-log-tail]').forEach(function (el) {
+          el.scrollTop = el.scrollHeight;
+        });
+      }, 0);
+    })();
+  </script>
+
+  <p class="text-[11px] text-slate-400 mt-2 font-mono">
+    full path: <span class="text-slate-600">{{ absolute_path }}</span>
+  </p>
+</div>

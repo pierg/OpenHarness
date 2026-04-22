@@ -1,0 +1,43 @@
+{# `journalctl --user -u openharness-daemon -n N --no-pager` rendered
+   as a dark scrollable pre. This is the operator's primary feed for
+   "what is the orchestrator actually doing right now":
+
+     - loop iterations + idle waits
+     - signal wake-ups (SIGUSR1 from CLI/UI)
+     - approval consumption / exit-gate decisions
+     - lab-run-experiment spawn lifecycle
+     - INFO/WARN/ERROR from anything the runner imports
+
+   We render the unfiltered journal text (with ISO timestamps from
+   `--output short-iso`) so the operator sees *exactly* what they'd
+   see in `journalctl --user -u openharness-daemon -f`. The pre
+   auto-scrolls to the bottom on each refresh so the latest
+   activity is always immediately visible.
+
+   Inputs:
+     journal_text     — raw stdout from journalctl
+     requested_lines  — how many lines we asked for (header label)
+     unit_id          — "openharness-daemon" (header label) #}
+<div class="text-xs text-slate-500 mb-2 flex flex-wrap items-baseline gap-2">
+  <span class="font-mono">journalctl --user -u {{ unit_id }}.service -n {{ requested_lines }}</span>
+  <span class="text-slate-400">— compacted (host/pid prefix stripped)</span>
+  <span class="ml-auto text-slate-400">auto-scrolls · refreshes every 5 s</span>
+</div>
+{# Wrap long lines instead of forcing a horizontal scrollbar:
+     `whitespace-pre-wrap` keeps newlines but allows wrap,
+     `break-words` (CSS3 `overflow-wrap: anywhere`) splits inside
+       a long token (e.g. an absolute path) when there's no space.
+   This keeps a single compacted row visible without losing the
+   tail-vs-head distinction. #}
+<pre class="text-xs leading-snug bg-slate-900 text-slate-100 rounded-md p-3
+            overflow-y-auto max-h-[60vh] font-mono whitespace-pre-wrap break-words"
+     data-journal-tail>{{ journal_text }}</pre>
+<script>
+  (function () {
+    setTimeout(function () {
+      document.querySelectorAll('[data-journal-tail]').forEach(function (el) {
+        el.scrollTop = el.scrollHeight;
+      });
+    }, 0);
+  })();
+</script>
