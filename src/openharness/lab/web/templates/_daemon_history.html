@@ -1,0 +1,46 @@
+{# Last N tick outcomes, newest first.
+
+   Compact rows so a 20-tick history fits without scrolling. Outcome
+   chips are color-coded so the operator can see at a glance whether
+   the recent past is healthy. #}
+{% set OUTCOME_STYLE = {
+  "ok":            ("bg-emerald-100 text-emerald-800", "✓"),
+  "refuse":        ("bg-amber-100  text-amber-800",   "✗"),
+  "no-run-dir":    ("bg-amber-100  text-amber-800",   "?"),
+  "timeout":       ("bg-rose-100   text-rose-800",    "⏱"),
+  "error":         ("bg-rose-100   text-rose-800",    "!"),
+  "cancelled":     ("bg-slate-200  text-slate-700",   "⊘"),
+  "auto-demoted":  ("bg-purple-100 text-purple-800",  "↓"),
+} %}
+{% set entries = daemon_state.history|reverse|list %}
+{% if entries %}
+  <ul class="divide-y divide-slate-100">
+    {% for h in entries[:20] %}
+      {% set style, icon = OUTCOME_STYLE.get(h.outcome, ("bg-slate-100 text-slate-700", "•")) %}
+      <li class="py-2 flex flex-wrap items-baseline gap-x-3 gap-y-1">
+        <span class="text-xs px-2 py-0.5 rounded {{ style }} font-mono">
+          {{ icon }} {{ h.outcome }}
+        </span>
+        <a href="/roadmap#{{ h.slug }}" class="font-mono text-sm font-semibold hover:underline">
+          {{ h.slug }}
+        </a>
+        <span class="text-xs text-slate-500">phase: {{ h.phase_reached }}</span>
+        <span class="text-xs text-slate-500 ml-auto">
+          {{ fmt_dt(h.ended_at) }} · {{ '%.1f'|format(h.duration_sec) }}s
+        </span>
+        {% if h.summary %}
+          <p class="basis-full text-xs text-slate-600 pl-1">{{ h.summary }}</p>
+        {% endif %}
+      </li>
+    {% endfor %}
+  </ul>
+  {% if entries|length > 20 %}
+    <p class="text-xs text-slate-400 mt-2">
+      …{{ entries|length - 20 }} older tick(s) hidden. Full ring buffer in <code class="font-mono">runs/lab/daemon-state.json</code>.
+    </p>
+  {% endif %}
+{% else %}
+  <p class="text-sm text-slate-500">
+    No ticks yet. The first roadmap entry the daemon processes will appear here.
+  </p>
+{% endif %}

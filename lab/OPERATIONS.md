@@ -340,13 +340,119 @@ runs emit `HX-Trigger` events (`lab-roadmap-changed`,
 `lab-daemon-changed`) so the affected list refreshes without a
 page reload.
 
-Daemon controls live on `/` and `/daemon`: a green Start button
-when stopped, a red Stop button when running. Start uses
-`daemon start --background` (tmux session if available, else
-detached nohup), Stop sends SIGTERM to the recorded pid. Both
-auto-refresh on a 5–10 s poll as a backstop for state changes
-that didn't originate from this browser tab (e.g. the daemon
-exited on its own after `--once`).
+Daemon controls live on `/` and `/daemon`: a green **Start** button
+when stopped, an amber **Restart** + a red **Stop** when running.
+Under the hood every button shells out to
+`systemctl --user start|restart|stop openharness-daemon.service` —
+systemd owns the process tree so journald gets stdout/stderr,
+`Restart=on-failure` recovers crashes, and the operator can read
+live logs with `journalctl --user -u openharness-daemon -f`.
+The status panel auto-refreshes every 5 s as a backstop for state
+changes that didn't originate from this browser tab.
+
+The `/daemon` page additionally exposes:
+
+- a **Services** panel — every supervised systemd unit
+  (`openharness-lab` for the web UI, `openharness-daemon` for the
+  orchestrator) with its current state and Start / Restart / Stop
+  buttons. Restarting the web UI tears down the current HTMX session
+  briefly, which the operator's browser handles transparently.
+- a **Process tree** panel — live `psutil` view of the daemon's
+  descendants (uv → python → codex → …), with per-row
+  `[kill]` buttons that route through `kill-process` in the
+  whitelist. The precheck refuses any PID that isn't a descendant
+  of the running daemon, so operators can safely reap a wedged
+  experiment subprocess without ever touching unrelated VM
+  processes.
+
+### Process supervision
+
+The two long-running services run as **systemd `--user` units**:
+
+| Unit | Purpose | Restart policy |
+| --- | --- | --- |
+| `openharness-lab.service` | FastAPI web UI | `Restart=always` |
+| `openharness-daemon.service` | Orchestrator daemon (walks the roadmap) | `Restart=on-failure`, 60 s SIGTERM grace |
+
+Install / refresh both from the repo:
+
+```bash
+bash scripts/systemd/install.sh         # install + start
+bash scripts/systemd/install.sh --no-start
+bash scripts/systemd/install.sh --uninstall
+```
+
+#### `lab svc` — canonical operator wrapper
+
+Day-to-day operation goes through one Typer subcommand that hides
+the verbose `systemctl --user` / `journalctl --user` syntax and adds
+an at-a-glance health check. It's a real subcommand of the existing
+`lab` CLI, so nothing extra to install or alias:
+
+```bash
+lab svc                       # = `lab svc status` (default)
+lab svc status                # services + port + lock + log shortcuts
+lab svc restart daemon        # restart the orchestrator
+lab svc restart web           # restart the web UI (browser sees a brief gap)
+lab svc restart               # both (defaults to "all")
+lab svc stop  daemon
+lab svc start daemon
+lab svc logs  daemon          # last 100 lines from journalctl
+lab svc logs  daemon -f       # follow live (Ctrl-C to detach)
+lab svc tail  daemon          # alias for `logs daemon -f`
+lab svc url                   # → http://127.0.0.1:8765/
+lab svc install               # one-shot install/refresh of the units
+```
+
+Short unit aliases: `web` / `webui` / `ui` ↔ `openharness-lab`,
+`daemon` / `d` / `orch` ↔ `openharness-daemon`, `all` / `both`
+(default) ↔ both. Any other word is rejected so a typo can't
+target an unrelated systemd unit.
+
+`scripts/lab-svc.sh` is the same surface as a standalone bash script,
+kept only for non-Python contexts (SSH ForceCommand, CI bootstrap,
+recovery from a broken venv).
+
+`lab svc status` example output:
+
+```
+Services
+  ● web UI                  running (running)
+    pid 2087351   since 2026-04-21 22:26:11 UTC
+  ● orchestrator daemon     running (running)
+    pid 2137756   since 2026-04-21 22:41:40 UTC
+
+Web UI
+  ● listening at http://127.0.0.1:8765/
+
+Orchestrator lock
+  ● held by pid 2137759 (since 2026-04-21T22:41:41+00:00)
+
+Tail logs
+  lab svc logs daemon -f   # orchestrator
+  lab svc logs web -f      # web UI
+```
+
+#### Raw `systemctl` (when you want it)
+
+```bash
+systemctl --user status   openharness-daemon
+systemctl --user restart  openharness-daemon
+journalctl  --user -u openharness-daemon -f
+```
+
+#### Don't run `uv run lab webui` while the unit is up
+
+The `lab webui` CLI refuses to bind if the systemd unit is already
+running and tells you what to do instead — so the canonical "oops
+port 8765 is in use" mistake is one error message, not a puzzling
+uvicorn traceback.
+
+#### Survive reboot when nobody is logged in
+
+```bash
+loginctl enable-linger $USER
+```
 
 ### Auth
 
@@ -434,7 +540,8 @@ for those, where Cloudflare Access also records the SSO email.
 
 | Symptom | First check | Fix |
 | --- | --- | --- |
-| `daemon start` complains "already running" | `uv run lab daemon status` | If the pid is gone, `rm runs/lab/orchestrator.lock`. |
+| `daemon start` complains "already running" | `systemctl --user status openharness-daemon` (preferred) or `uv run lab daemon status` | If the pid is gone, `rm runs/lab/orchestrator.lock`. Under systemd, `systemctl --user restart openharness-daemon` clears most of these. |
+| `Address already in use` on `lab webui` start | `systemctl --user status openharness-lab` | The unit is already running — connect to `127.0.0.1:8765` directly, or `systemctl --user restart openharness-lab` to pick up code changes. |
 | Daemon idles forever | `uv run lab daemon attach`; check the log line "no ready roadmap entries" | Either the queue is empty or every entry's `Depends on:` is unmet. |
 | `lab-run-experiment` never produces a summary.md | tail `runs/experiments/<id>/legs/<leg>/harbor/.../trial.log` | Same failure modes as a hand-launched experiment; the orchestrator just times out and leaves the roadmap entry unmoved. |
 | Critic skill fails repeatedly for one trial | grep the matching log under `runs/lab/logs/` for the skill name + trial id | Re-run by hand: `codex exec` against the same skill+args; usually it's a JSON-shape mismatch we can fix in the SKILL.md. |
