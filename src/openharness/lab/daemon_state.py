@@ -87,16 +87,26 @@ HISTORY_LIMIT = 50
 ``lab query`` style introspection."""
 
 TickPhase = Literal[
-    "spawning",            # codex spawn launched, waiting for it to start
-    "running",             # codex spawn is producing output
-    "post-processing",     # codex returned, ingest / critic fan-out under way
+    # New phased pipeline (one per `_process_entry_phased` step):
+    "preflight",           # git clean-check + worktree create (deterministic)
+    "design",              # `lab-design-variant` codex spawn (read-only)
+    "implement",           # `lab-implement-variant` codex spawn (worktree-write)
+    "run",                 # harbor exec + poll for results/summary.md
+    "critique",            # ingest + per-trial critic fan-out + tree apply
+    "finalize",            # `lab-finalize-pr` codex spawn + cleanup
+    # Post-pipeline / generic:
     "verdict-pending",     # tree apply staged a Graduate; awaiting human
     "done",                # successful close-out, awaiting next tick
+    # Legacy values kept so historical `daemon-state.json` files still
+    # rehydrate cleanly. The new pipeline never writes these.
+    "spawning",
+    "running",
+    "post-processing",
 ]
 """Coarse-grained phases the runner advances through inside one tick.
 Surfaced verbatim by the web UI's `Current tick` panel so the
-operator can tell "still spawning" from "actually working" from
-"waiting on a human"."""
+operator can tell "still designing the variant" from "polling the
+harbor run" from "waiting on a human to confirm a graduate verdict"."""
 
 TickOutcome = Literal[
     "ok",                  # full pipeline succeeded
@@ -535,6 +545,82 @@ def reset_failures(slug: str, *, actor: str | None = None) -> DaemonState:
         return st
 
 
+def reset_all_failures(*, actor: str | None = None) -> tuple[DaemonState, int]:
+    """Clear *every* failure counter at once.
+
+    Useful after the operator has fixed a host-level cause (e.g. a
+    PATH or credential bug that broke a batch of slugs simultaneously)
+    and wants a clean slate without per-slug ``reset-failures`` calls.
+
+    Returns the new state plus the number of slugs whose counter was
+    cleared, so the caller can echo a meaningful message to the user.
+    The two are returned together to avoid a second mutate-cycle just
+    to read the count.
+    """
+    with mutate(actor=actor) as st:
+        cleared = len(st.entry_failures)
+        st.entry_failures = {}
+        return st, cleared
+
+
+def clear_history(*, actor: str | None = None) -> tuple[DaemonState, int]:
+    """Wipe the tick-history ring buffer.
+
+    The history is a presentation surface (the cockpit's "Recent
+    ticks" panel) that the daemon never reads back into its decision
+    loop, so dropping it is purely cosmetic — useful when the
+    operator wants to start fresh after a noisy debugging session.
+
+    Returns the new state plus the number of entries removed.
+    """
+    with mutate(actor=actor) as st:
+        removed = len(st.history)
+        st.history = []
+        return st, removed
+
+
+def notify_daemon() -> bool:
+    """Wake the running orchestrator so it re-reads daemon-state.json now.
+
+    Sends ``SIGUSR1`` to the pid recorded in
+    ``runs/lab/orchestrator.lock``. The runner's signal handler sets
+    a ``threading.Event`` that short-circuits the idle ``Event.wait``
+    in ``loop()``, so the next state read happens within milliseconds
+    instead of waiting up to ``idle_sleep_sec``.
+
+    Idempotent + safe to call from anywhere: CLI, web UI, tests. If
+    the daemon isn't running (no lock, stale lock, malformed JSON,
+    pid gone) this returns ``False`` without raising — the caller can
+    log "daemon not running" but shouldn't fail because of it.
+
+    The signal is delivered immediately, but only acted on at the
+    next ``Event.wait`` boundary. That means: if the daemon is
+    mid-tick (i.e. inside ``_process_entry``), the signal is
+    effectively queued — the post-tick ``_idle_wait`` returns
+    immediately and the next state-driven decision happens right
+    away. We never need to interrupt a running tick to apply a state
+    change; state is consulted at the *top* of every loop iteration.
+    """
+    import signal as _signal
+
+    from openharness.lab.paths import ORCHESTRATOR_LOCK_PATH
+
+    if not ORCHESTRATOR_LOCK_PATH.is_file():
+        return False
+    try:
+        payload = json.loads(ORCHESTRATOR_LOCK_PATH.read_text())
+    except (OSError, json.JSONDecodeError):
+        return False
+    pid = int(payload.get("pid") or 0)
+    if not pid:
+        return False
+    try:
+        os.kill(pid, _signal.SIGUSR1)
+        return True
+    except (ProcessLookupError, PermissionError):
+        return False
+
+
 __all__ = [
     "DAEMON_STATE_PATH",
     "DEFAULT_MAX_FAILURES_BEFORE_DEMOTE",
@@ -554,6 +640,7 @@ __all__ = [
     "end_tick",
     "load",
     "mutate",
+    "notify_daemon",
     "reset_failures",
     "revoke",
     "save",

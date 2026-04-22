@@ -41,6 +41,7 @@ import json
 import os
 import sys
 from datetime import datetime, timezone
+import time
 from pathlib import Path
 from typing import Optional
 
@@ -75,6 +76,15 @@ tree_app = typer.Typer(no_args_is_help=True, help="Inspect / mutate the configur
 trunk_app = typer.Typer(no_args_is_help=True, help="Show / set the trunk pointer.")
 graduate_app = typer.Typer(no_args_is_help=True, help="Confirm or reject staged trunk swaps.")
 components_app = typer.Typer(no_args_is_help=True, help="Inspect / mutate the components catalog (lab/components.md).")
+runs_app = typer.Typer(no_args_is_help=True, help="Manage runs/experiments/<id>/ directories on disk.")
+preflight_app = typer.Typer(
+    no_args_is_help=True,
+    help="Git preflight + per-experiment worktree management (Phase 0 of the lab pipeline).",
+)
+phases_app = typer.Typer(
+    no_args_is_help=True,
+    help="Inspect / reset per-slug pipeline state in runs/lab/state/<slug>/phases.json.",
+)
 from openharness.lab.svc_cli import svc_app  # noqa: E402  (sub-app, imported after `app`)
 app.add_typer(idea_app, name="idea")
 app.add_typer(exp_app, name="experiments")
@@ -84,6 +94,9 @@ app.add_typer(tree_app, name="tree")
 app.add_typer(trunk_app, name="trunk")
 app.add_typer(graduate_app, name="graduate")
 app.add_typer(components_app, name="components")
+app.add_typer(runs_app, name="runs")
+app.add_typer(preflight_app, name="preflight")
+app.add_typer(phases_app, name="phases")
 app.add_typer(svc_app, name="svc")
 
 
@@ -581,6 +594,13 @@ def cmd_exp_append_entry(
         "--run",
         help="repo-relative path, e.g. runs/experiments/<id>. Optional.",
     ),
+    branch: Optional[str] = typer.Option(
+        None,
+        "--branch",
+        help="Experiment branch name (e.g. lab/<slug>). If omitted, "
+             "the entry's Branch bullet is rendered as a placeholder "
+             "and `experiments set-branch` fills it in later.",
+    ),
 ) -> None:
     """Append a new journal entry (tree+journal shape) at the top of
     `lab/experiments.md`.
@@ -604,8 +624,49 @@ def cmd_exp_append_entry(
         mutation=mutation,
         hypothesis=hypothesis,
         run_path=run_path,
+        branch=branch,
     )
     typer.echo(f"appended journal entry {slug!r} (type={type_})")
+
+
+@exp_app.command("set-branch")
+def cmd_exp_set_branch(
+    slug: str,
+    branch: str = typer.Option(..., "--branch", help="e.g. lab/<slug>"),
+    pr_url: Optional[str] = typer.Option(
+        None,
+        "--pr-url",
+        help="Open PR URL. Renders as `Branch: [<branch>](<pr-url>)`.",
+    ),
+    rejected_reason: Optional[str] = typer.Option(
+        None,
+        "--rejected-reason",
+        help="One-line reason. Renders as `Branch: <branch> — not "
+             "opened (<reason>)`. Mutually exclusive with --pr-url.",
+    ),
+) -> None:
+    """Replace the **Branch:** bullet on the journal entry for `slug`.
+
+    Called from the `lab-finalize-pr` skill after deciding whether to
+    push the experiment branch and open a PR (verdict AddBranch /
+    Graduate) or to discard the worktree (verdict Reject / NoOp).
+    Idempotent — safe to re-run with the same arguments.
+    """
+    if pr_url and rejected_reason:
+        typer.echo("[red]--pr-url and --rejected-reason are mutually exclusive[/red]")
+        raise typer.Exit(2)
+    lab_docs.set_journal_branch(
+        slug=slug,
+        branch=branch,
+        pr_url=pr_url,
+        rejected_reason=rejected_reason,
+    )
+    if pr_url:
+        typer.echo(f"set Branch bullet for {slug!r} -> PR {pr_url}")
+    elif rejected_reason:
+        typer.echo(f"set Branch bullet for {slug!r} -> not opened ({rejected_reason})")
+    else:
+        typer.echo(f"set Branch bullet for {slug!r} -> {branch}")
 
 
 @exp_app.command("fill")
@@ -1670,7 +1731,8 @@ def daemon_mode(
         )
         raise typer.Exit(2)
     state = _ds.set_mode(new_mode, actor=actor)  # type: ignore[arg-type]
-    typer.echo(f"mode → {state.mode}")
+    woke = _ds.notify_daemon()
+    typer.echo(f"mode → {state.mode}" + (" (daemon notified)" if woke else ""))
 
 
 @daemon_app.command("approve")
@@ -1686,7 +1748,11 @@ def daemon_approve(
     from openharness.lab import daemon_state as _ds
 
     state = _ds.approve(slug, actor=actor)
-    typer.echo(f"approved {slug!r}; queue: {state.approved_slugs}")
+    woke = _ds.notify_daemon()
+    typer.echo(
+        f"approved {slug!r}; queue: {state.approved_slugs}"
+        + (" (daemon notified)" if woke else "")
+    )
 
 
 @daemon_app.command("revoke")
@@ -1698,7 +1764,11 @@ def daemon_revoke(
     from openharness.lab import daemon_state as _ds
 
     state = _ds.revoke(slug, actor=actor)
-    typer.echo(f"revoked {slug!r}; queue: {state.approved_slugs}")
+    woke = _ds.notify_daemon()
+    typer.echo(
+        f"revoked {slug!r}; queue: {state.approved_slugs}"
+        + (" (daemon notified)" if woke else "")
+    )
 
 
 @daemon_app.command("approvals")
@@ -1762,6 +1832,11 @@ def daemon_cancel(
                 )
             )
             st.active_tick = None
+    # Wake the daemon's idle wait too, in case the spawn died fast and
+    # the runner already returned to the top of the loop. This is a
+    # no-op while the daemon is mid-tick (signal queues, applies at
+    # next _idle_wait). Cheap and safe either way.
+    _ds.notify_daemon()
 
 
 @daemon_app.command("reset-failures")
@@ -1773,7 +1848,51 @@ def daemon_reset_failures(
     from openharness.lab import daemon_state as _ds
 
     _ds.reset_failures(slug, actor=actor)
-    typer.echo(f"failure counter cleared for {slug!r}")
+    woke = _ds.notify_daemon()
+    typer.echo(
+        f"failure counter cleared for {slug!r}"
+        + (" (daemon notified)" if woke else "")
+    )
+
+
+@daemon_app.command("reset-all-failures")
+def daemon_reset_all_failures(
+    actor: str = typer.Option("human:cli", "--actor"),
+) -> None:
+    """Clear every recorded failure counter at once.
+
+    Use after fixing a host-level cause (e.g. PATH, credentials)
+    that broke a batch of slugs simultaneously, so you don't have
+    to issue one ``reset-failures`` call per slug.
+    """
+    from openharness.lab import daemon_state as _ds
+
+    _, cleared = _ds.reset_all_failures(actor=actor)
+    woke = _ds.notify_daemon()
+    typer.echo(
+        f"cleared {cleared} failure counter(s)"
+        + (" (daemon notified)" if woke else "")
+    )
+
+
+@daemon_app.command("clear-history")
+def daemon_clear_history(
+    actor: str = typer.Option("human:cli", "--actor"),
+) -> None:
+    """Wipe the tick-history ring buffer.
+
+    Purely cosmetic — the daemon never reads history back into its
+    decision loop, but the cockpit's "Recent ticks" panel renders
+    from it. Useful for starting fresh after noisy debugging.
+    """
+    from openharness.lab import daemon_state as _ds
+
+    _, removed = _ds.clear_history(actor=actor)
+    woke = _ds.notify_daemon()
+    typer.echo(
+        f"cleared {removed} tick-history entry(ies)"
+        + (" (daemon notified)" if woke else "")
+    )
 
 
 @daemon_app.command("state")
@@ -1798,6 +1917,275 @@ def daemon_state_show(
             typer.echo(f"  {slug}: count={rec.count} last={rec.last_outcome}")
     if state.history:
         typer.echo(f"history:    {len(state.history)} entries (newest: {state.history[-1].slug} / {state.history[-1].outcome})")
+
+
+# ---------------------------------------------------------------------------
+# `lab runs ...` — disk-side cleanup of runs/experiments/<id>/ directories.
+# ---------------------------------------------------------------------------
+#
+# Failed/cancelled experiments leave half-written run dirs behind. They
+# don't break anything, but they accumulate, balloon disk usage, and
+# make `ls runs/experiments/` noisy. These commands give the operator
+# (and the web UI) a one-call cleanup.
+#
+# A run dir is considered **prunable** iff:
+#   1. There is no ``results/summary.md`` (the canonical "experiment
+#      finished cleanly" sentinel — written by the agg/finalize step),
+#   2. AND the directory's mtime is older than ``--age-hours`` (default
+#      1 h) so we never race a run that's currently being written.
+#
+# We never look at the running daemon's process tree to decide what to
+# prune — pidfile coupling is fragile. The mtime gate is the single
+# defence; the operator can always pass ``--age-hours 0 --force`` if
+# they really mean "delete EVERYTHING unfinished right now" (e.g.
+# after stopping the daemon).
+
+
+def _experiments_root() -> Path:
+    # Re-import on every call so tests that reload ``paths`` (with
+    # the ``isolated_lab`` fixture) see the override. The cost is
+    # negligible: a module attribute lookup, not an actual re-import.
+    from openharness.lab import paths as _paths
+    return _paths.REPO_ROOT / "runs" / "experiments"
+
+
+def _is_prunable_run_dir(d: Path, *, age_hours: float) -> tuple[bool, str]:
+    """Return (prunable?, reason) for a candidate run directory.
+
+    Reason strings are short captions suitable for ``--dry-run`` output
+    and for the web UI confirmation dialog. The function never deletes
+    anything itself — only inspects.
+    """
+    if not d.is_dir():
+        return False, "not a directory"
+    summary = d / "results" / "summary.md"
+    if summary.is_file():
+        return False, "completed (results/summary.md present)"
+    try:
+        age_s = time.time() - d.stat().st_mtime
+    except OSError as e:
+        return False, f"stat failed: {e}"
+    if age_s < age_hours * 3600:
+        return False, f"too recent ({age_s/3600:.2f}h < {age_hours}h)"
+    return True, f"orphan, age={age_s/3600:.1f}h"
+
+
+@runs_app.command("list")
+def runs_list(
+    age_hours: float = typer.Option(
+        1.0, "--age-hours",
+        help="Minimum age before a dir is eligible. Default 1h.",
+    ),
+) -> None:
+    """List runs/experiments/<id>/ dirs and their prune-eligibility."""
+    root = _experiments_root()
+    if not root.is_dir():
+        typer.echo(f"(no experiments dir at {root})")
+        return
+    rows: list[tuple[str, bool, str]] = []
+    for child in sorted(root.iterdir()):
+        prunable, reason = _is_prunable_run_dir(child, age_hours=age_hours)
+        rows.append((child.name, prunable, reason))
+    if not rows:
+        typer.echo("(no run directories)")
+        return
+    width = max(len(n) for n, _, _ in rows)
+    for name, prunable, reason in rows:
+        marker = "PRUNE" if prunable else "keep "
+        typer.echo(f"  {marker}  {name:<{width}}  {reason}")
+
+
+@runs_app.command("prune")
+def runs_prune(
+    age_hours: float = typer.Option(
+        1.0, "--age-hours",
+        help=(
+            "Minimum age (hours since last write) before a dir is "
+            "eligible. Default 1h prevents racing a live run; pass 0 "
+            "with --force to wipe everything unfinished."
+        ),
+    ),
+    dry_run: bool = typer.Option(
+        False, "--dry-run",
+        help="List what would be deleted without touching the disk.",
+    ),
+    force: bool = typer.Option(
+        False, "--force",
+        help="Required when --age-hours is below 1.",
+    ),
+    actor: str = typer.Option("human:cli", "--actor"),
+) -> None:
+    """Delete orphan / unfinished runs/experiments/<id>/ directories.
+
+    Deletion is recursive (``rmtree``) — these directories can hold
+    GB of legs/logs/, so this is the only realistic way to free the
+    space. The audit row is appended to ``runs/lab/web_commands.jsonl``
+    so the action remains traceable.
+    """
+    import shutil as _shutil
+
+    if age_hours < 1 and not force:
+        raise typer.BadParameter(
+            "refusing to prune dirs younger than 1h without --force; "
+            "stop the daemon first to be safe"
+        )
+    root = _experiments_root()
+    if not root.is_dir():
+        typer.echo(f"(no experiments dir at {root})")
+        return
+    deleted: list[str] = []
+    skipped: list[tuple[str, str]] = []
+    for child in sorted(root.iterdir()):
+        prunable, reason = _is_prunable_run_dir(child, age_hours=age_hours)
+        if not prunable:
+            skipped.append((child.name, reason))
+            continue
+        if dry_run:
+            typer.echo(f"  would delete  {child.name}  ({reason})")
+            deleted.append(child.name)
+            continue
+        try:
+            _shutil.rmtree(child)
+            deleted.append(child.name)
+            typer.echo(f"  deleted       {child.name}  ({reason})")
+        except OSError as e:
+            typer.echo(f"  FAILED        {child.name}  ({e})", err=True)
+    typer.echo("")
+    typer.echo(
+        f"summary: {len(deleted)} {'would-be ' if dry_run else ''}"
+        f"deleted, {len(skipped)} skipped (actor={actor})"
+    )
+
+
+# ===== preflight (Phase 0 of the lab pipeline) ==============================
+
+
+@preflight_app.command("run")
+def cmd_preflight_run(
+    slug: str,
+    base_branch: Optional[str] = typer.Option(
+        None, "--base-branch",
+        help="Branch to base the worktree on. Defaults to the parent "
+             "repo's current HEAD branch.",
+    ),
+    auto_push: bool = typer.Option(
+        False, "--auto-push",
+        help="Push any unpushed commits on the base branch first.",
+    ),
+) -> None:
+    """Create the worktree for `slug` (idempotent).
+
+    Equivalent to what the orchestrator does in phase 0, callable
+    by hand for debugging or to pre-warm a slug before promoting it
+    to Up next.
+    """
+    from openharness.lab import preflight as preflight_mod
+    try:
+        result = preflight_mod.run_preflight(
+            slug, base_branch=base_branch, auto_push=auto_push,
+            allow_lab_markdown_dirty=False,
+        )
+    except preflight_mod.PreflightError as exc:
+        typer.echo(f"[red]preflight failed: {exc}[/red]")
+        raise typer.Exit(1)
+    typer.echo(f"worktree   : {result.info.path}")
+    typer.echo(f"branch     : {result.info.branch}")
+    typer.echo(f"base       : {result.base_branch} @ {result.base_sha[:8]}")
+
+
+@preflight_app.command("remove")
+def cmd_preflight_remove(
+    slug: str,
+    keep_branch: bool = typer.Option(
+        False, "--keep-branch",
+        help="Don't delete the lab/<slug> branch after removing the worktree.",
+    ),
+) -> None:
+    """Tear down the worktree (and branch) for `slug` (idempotent)."""
+    from openharness.lab import preflight as preflight_mod
+    removed = preflight_mod.remove_worktree(
+        slug, delete_branch=not keep_branch, force=True,
+    )
+    typer.echo("removed" if removed else "(nothing to remove)")
+
+
+@preflight_app.command("list")
+def cmd_preflight_list() -> None:
+    """List every git worktree the parent repo currently knows about."""
+    from openharness.lab import preflight as preflight_mod
+    paths = preflight_mod.list_worktrees()
+    for p in paths:
+        typer.echo(str(p))
+
+
+# ===== phases (per-slug pipeline state) =====================================
+
+
+@phases_app.command("show")
+def cmd_phases_show(
+    slug: Optional[str] = typer.Argument(
+        None,
+        help="Slug to inspect. Omit to list every slug with state on disk.",
+    ),
+) -> None:
+    """Print the phase status for `slug` (or list all known slugs)."""
+    from openharness.lab import phase_state
+    if slug is None:
+        for s in phase_state.all_slugs():
+            state = phase_state.load(s)
+            if state is None:
+                continue
+            done = sum(1 for p in phase_state.PHASE_ORDER
+                       if p in state.phases and state.phases[p].status in ("ok", "skipped"))
+            current = state.first_unfinished() or "done"
+            typer.echo(f"  {s:50s} {done}/{len(phase_state.PHASE_ORDER)}  next={current}")
+        return
+    state = phase_state.load(slug)
+    if state is None:
+        typer.echo(f"(no state for {slug!r})")
+        raise typer.Exit(1)
+    typer.echo(f"slug          : {state.slug}")
+    typer.echo(f"started_at    : {state.started_at}")
+    typer.echo(f"last_updated  : {state.last_updated_at}")
+    typer.echo(f"needs_variant : {state.needs_variant}")
+    typer.echo("")
+    for phase_name in phase_state.PHASE_ORDER:
+        rec = state.phases.get(phase_name)
+        if rec is None:
+            typer.echo(f"  {phase_name:12s}  pending")
+            continue
+        line = f"  {phase_name:12s}  {rec.status:9s}"
+        if rec.finished_at:
+            line += f"  finished={rec.finished_at}"
+        if rec.error:
+            line += f"  err={rec.error[:80]!r}"
+        typer.echo(line)
+
+
+@phases_app.command("reset")
+def cmd_phases_reset(
+    slug: str,
+    phase: Optional[str] = typer.Option(
+        None, "--phase",
+        help="Reset only this phase (preflight | design | implement | "
+             "run | critique | finalize). Omit to delete the entire "
+             "phases.json.",
+    ),
+) -> None:
+    """Reset (drop) one phase's record, or the whole document."""
+    from openharness.lab import phase_state
+    if phase is None:
+        phase_state.reset_all(slug)
+        typer.echo(f"reset all phases for {slug!r}")
+        return
+    if phase not in phase_state.PHASE_ORDER:
+        typer.echo(
+            f"[red]unknown phase {phase!r}; valid: "
+            f"{', '.join(phase_state.PHASE_ORDER)}[/red]"
+        )
+        raise typer.Exit(2)
+    phase_state.reset_phase(slug, phase)  # type: ignore[arg-type]
+    typer.echo(f"reset phase {phase!r} for {slug!r}")
 
 
 def main() -> None:  # pragma: no cover - thin wrapper
