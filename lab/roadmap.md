@@ -18,14 +18,6 @@
 -   **Depends on:** `tb2-baseline-full-sweep`
 -   **Cost:** smoke ~$0.50; full ~$15-25 if it advances.
 
-### grounded-planner-tools-ablation
-
--   **Idea:** [`grounded-planner-tools`](ideas.md#grounded-planner-tools)
--   **Hypothesis:** the read-only planner tools currently wired into `planner_executor.yaml` actually move the pass rate vs a tools-less planner.
--   **Plan:** paired ablation on `planner_executor` only. Leg A: current YAML. Leg B: planner subagent with `tools: []` plus a prompt edit acknowledging the constraint. Smoke slice first.
--   **Depends on:** `tb2-baseline-full-sweep`
--   **Cost:** smoke ~$0.20; full ~$10-15.
-
 ### Suggested
 
 #### planner-executor-cluster-confirmation
@@ -45,6 +37,14 @@
 -   **Hypothesis:** Bumping max_turns 30→60 and max_tokens 8192→16384 on the trunk (basic) on a focused near-miss slice converts >=2 currently-failing tasks into passes, validating whether the 22.5% baseline is budget-bound or capability-bound. Cheapest possible test of the 'extended-budget' idea.
 -   **Source:** lab-reflect-and-plan@2026-04-18
 -   **Cost:** smoke ~$0.40 (small near-miss slice, 2 legs)
+
+#### grounded-planner-tools-ablation
+
+-   **Idea:** [`grounded-planner-tools`](ideas.md#grounded-planner-tools)
+-   **Hypothesis:** the read-only planner tools currently wired into `planner_executor.yaml` actually move the pass rate vs a tools-less planner.
+-   **Plan:** paired ablation on `planner_executor` only. Leg A: current YAML. Leg B: planner subagent with `tools: []` plus a prompt edit acknowledging the constraint. Smoke slice first.
+-   **Depends on:** `tb2-baseline-full-sweep`
+-   **Cost:** smoke ~$0.20; full ~$10-15.
 
 ## Done
 

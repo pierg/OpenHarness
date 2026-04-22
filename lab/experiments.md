@@ -5,7 +5,7 @@
 -   **Type:** paired-ablation
 -   **Trunk at run-time:** [`trunk`](../src/openharness/agents/configs/trunk.yaml)
 -   **Hypothesis:** truncating tool stdout above some threshold lets `reflection` complete on the smoke slice within wall-clock and at <500 k input tokens per trial.
--   **Run:** _(filled after the run completes)_
+-   **Run:** [`runs/experiments/reflection-context-compaction-smoke-20260422-213746`](../runs/experiments/reflection-context-compaction-smoke-20260422-213746)
 -   **Branch:** `lab/reflection-context-compaction-smoke`
 
 ### Aggregate
