@@ -2,14 +2,6 @@
 
 ## Up next
 
-### reflection-context-compaction-smoke
-
--   **Idea:** [`reflection-context-compaction`](ideas.md#reflection-context-compaction)
--   **Hypothesis:** truncating tool stdout above some threshold lets `reflection` complete on the smoke slice within wall-clock and at <500 k input tokens per trial.
--   **Plan:** implement opt-in compaction behind an `AgentConfig` flag, then `exec rerun <latest-smoke-instance> -l reflection` on the smoke slice. If green, add `reflection` back to `experiments/tb2-baseline.yaml`'s `agents:` list and rerun the full sweep with the compaction default flipped on.
--   **Depends on:** `tb2-baseline-full-sweep`
--   **Cost:** smoke ~$0.50.
-
 ### loop-guard-tb2-paired
 
 -   **Idea:** [`loop-guard`](ideas.md#loop-guard)
@@ -47,6 +39,13 @@
 -   **Cost:** smoke ~$0.20; full ~$10-15.
 
 ## Done
+
+### reflection-context-compaction-smoke
+
+-   **Idea:** [`reflection-context-compaction`](ideas.md#reflection-context-compaction)
+-   **Hypothesis:** truncating tool stdout above some threshold lets `reflection` complete on the smoke slice within wall-clock and at <500 k input tokens per trial.
+-   **Run:** [`runs/experiments/reflection-context-compaction-smoke-20260422-213746`](../runs/experiments/reflection-context-compaction-smoke-20260422-213746)
+-   **Outcome:** no_op (both legs pass the smoke tasks; compaction not yet decisive at this sample size)
 
 ### tb2-baseline-full-sweep
 
