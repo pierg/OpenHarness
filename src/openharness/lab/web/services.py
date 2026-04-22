@@ -34,6 +34,7 @@ a clean "supervisor not present" panel instead.
 
 from __future__ import annotations
 
+import re as _re
 import shutil
 import subprocess
 from dataclasses import dataclass, field
@@ -149,7 +150,6 @@ def _journalctl() -> str | None:
 # Process tree panel, and the inner timestamp is identical to the
 # outer one. We strip them so each row fits in a normal-width terminal
 # and wraps cleanly inside the cockpit panel.
-import re as _re  # alias avoids shadowing other imports lower down
 
 
 def _compact_journal_line(line: str) -> str:
