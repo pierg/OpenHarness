@@ -1785,7 +1785,6 @@ def daemon_state_show(
 
     state = _ds.load()
     if json_out:
-        from dataclasses import asdict as _asdict
         # Reuse the canonical serializer.
         typer.echo(json.dumps(_ds._state_to_dict(state), indent=2, default=str))
         return

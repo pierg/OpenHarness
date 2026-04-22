@@ -28,7 +28,6 @@ either the empty-state copy or a real PID column header.
 from __future__ import annotations
 
 import shutil
-from pathlib import Path
 from unittest import mock
 
 import pytest
@@ -238,8 +237,6 @@ def test_kill_precheck_refuses_when_daemon_not_running(monkeypatch: pytest.Monke
 
 def test_kill_precheck_refuses_pid_not_under_daemon(monkeypatch: pytest.MonkeyPatch) -> None:
     """The most important test: a random VM pid must be rejected."""
-    import os
-
     import psutil
 
     # Pretend the daemon is some pid we know is not the test pid's

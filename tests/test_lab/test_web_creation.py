@@ -23,8 +23,6 @@ stays fast.
 
 from __future__ import annotations
 
-import re
-
 from openharness.lab.web import commands as labcmd
 
 
