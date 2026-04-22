@@ -1,5 +1,33 @@
 # Experiments
 
+## 2026-04-22 — reflection-context-compaction-smoke
+
+-   **Type:** paired-ablation
+-   **Trunk at run-time:** [`trunk`](../src/openharness/agents/configs/trunk.yaml)
+-   **Hypothesis:** truncating tool stdout above some threshold lets `reflection` complete on the smoke slice within wall-clock and at <500 k input tokens per trial.
+-   **Run:** _(filled after the run completes)_
+-   **Branch:** `lab/reflection-context-compaction-smoke`
+
+### Aggregate
+
+_(pending)_
+
+### Mutation impact
+
+_(pending)_
+
+### Failure modes
+
+_(pending)_
+
+### Tree effect
+
+_(pending)_
+
+### Linked follow-ups
+
+_(pending)_
+
 ## 2026-04-17 — tb2-baseline-full-sweep
 
 -   **Type:** broad-sweep
