@@ -770,6 +770,8 @@ def _phase_critique(
 
     # Per-trial critic fan-out.
     needing = trials_needing_critique(summary.instance_id)
+    my_pid = os.getpid()
+
     if needing:
         ds.update_tick(
             phase="critique",
@@ -778,6 +780,7 @@ def _phase_critique(
         codex_adapter.run_many(
             [("trial-critic", [trial_dir]) for _, trial_dir in needing],
             cfg=cx, parent_run_dir=run_dir,
+            expected_orchestrator_pid=my_pid,
         )
 
     unseen = checksums_needing_features(summary.instance_id)
@@ -789,6 +792,7 @@ def _phase_critique(
         codex_adapter.run_many(
             [("task-features", [c]) for c in unseen],
             cfg=cx, parent_run_dir=run_dir,
+            expected_orchestrator_pid=my_pid,
         )
 
     still_needing = trials_needing_critique(summary.instance_id)
@@ -802,6 +806,7 @@ def _phase_critique(
         codex_adapter.run(
             "experiment-critic", [summary.instance_id],
             cfg=cx, parent_run_dir=run_dir,
+            expected_orchestrator_pid=my_pid,
         )
 
     cache_counts = labingest.ingest_critiques([run_dir])
@@ -848,6 +853,7 @@ def _phase_critique(
             "lab-reflect-and-plan",
             [f"--instance={summary.instance_id}"],
             cfg=cx, parent_run_dir=run_dir,
+            expected_orchestrator_pid=my_pid,
         )
     except Exception:
         logger.exception("lab-reflect-and-plan failed (non-fatal)")
@@ -856,6 +862,7 @@ def _phase_critique(
         try:
             codex_adapter.run(
                 "cross-experiment-critic", [], cfg=cx, parent_run_dir=run_dir,
+                expected_orchestrator_pid=my_pid,
             )
         except Exception:
             logger.exception("cross-experiment-critic failed (non-fatal)")

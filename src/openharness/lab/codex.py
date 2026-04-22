@@ -950,6 +950,7 @@ def run_many(
     cfg: CodexConfig | None = None,
     profile_override: SkillProfile | None = None,
     parent_run_dir: Path | None = None,
+    expected_orchestrator_pid: int | None = None,
 ) -> list[SpawnResult]:
     """Run a batch of (skill_id, args) tuples respecting the semaphore."""
     cfg = cfg or CodexConfig()
@@ -963,6 +964,7 @@ def run_many(
                 skill_id, args, cfg=cfg,
                 profile_override=profile_override,
                 parent_run_dir=parent_run_dir,
+                expected_orchestrator_pid=expected_orchestrator_pid,
             )
         except CodexAdapterError as exc:
             logger.error("adapter error invoking %s %r: %s", skill_id, args, exc)
