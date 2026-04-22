@@ -959,6 +959,7 @@ def _build_argv(spec: CommandSpec, params: dict[str, str]) -> list[str]:
 
 def _record(result: CommandResult) -> None:
     ensure_lab_runs_dir()
+    _AUDIT_LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
     payload = asdict(result)
     payload["started_at"] = result.started_at.isoformat()
     with _AUDIT_LOG_PATH.open("a", encoding="utf-8") as f:
