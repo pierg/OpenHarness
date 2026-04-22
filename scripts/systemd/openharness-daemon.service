@@ -37,7 +37,16 @@ Environment=HOME=%h
 # PATH so the runner's subprocesses (codex, scripts/exp/start.sh,
 # anything launched by the skills it spawns) can resolve `uv`,
 # `bash`, `git`, etc. by name. Order: user-local first, then system.
-Environment=PATH=%h/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+#
+# We also include the NVM-managed node bin dir because the codex CLI
+# is a `#!/usr/bin/env node` script — without `node` on PATH it dies
+# with `/usr/bin/env: 'node': No such file or directory` and exits 127
+# *before any output reaches stdout*, which used to surface as
+# "spawn exit=127:" with no diagnostic in the UI. Belt + suspenders:
+# scripts/systemd/install.sh also creates ~/.local/bin/node as a
+# stable symlink to whatever NVM "default" points at, so PATH stays
+# valid across `nvm install` upgrades without re-editing this unit.
+Environment=PATH=%h/.local/bin:%h/.nvm/versions/node/v24.14.0/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 # Provider API keys + any other lab-relevant env vars come from
 # %h/OpenHarness/.env (KEY=VALUE per line, no `export`). The leading
 # `-` makes systemd tolerate a missing file (useful in CI / dev
