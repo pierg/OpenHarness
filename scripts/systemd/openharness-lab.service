@@ -21,8 +21,11 @@ StandardError=journal
 Environment=HOME=%h
 # PATH so `subprocess.run(["uv", ...])` from /api/cmd resolves the
 # CLI without a hard-coded path. Order: user-local installs first
-# (uv lives in ~/.local/bin), then the standard system locations.
-Environment=PATH=%h/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+# (uv lives in ~/.local/bin), then the NVM-managed node bin, then
+# the standard system locations. The node entry mirrors the daemon
+# unit's PATH — see openharness-daemon.service for the rationale
+# (codex is `#!/usr/bin/env node`).
+Environment=PATH=%h/.local/bin:%h/.nvm/versions/node/v24.14.0/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 # Mirror the daemon: load env vars from %h/OpenHarness/.env if present.
 # The web UI itself doesn't currently need provider keys, but keeping
 # the two units in sync avoids surprises when /api/cmd shells out.

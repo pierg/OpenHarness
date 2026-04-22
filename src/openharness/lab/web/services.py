@@ -34,6 +34,7 @@ a clean "supervisor not present" panel instead.
 
 from __future__ import annotations
 
+import re as _re
 import shutil
 import subprocess
 from dataclasses import dataclass, field
@@ -45,6 +46,7 @@ __all__ = [
     "UnitId",
     "UnitStatus",
     "available",
+    "journal",
     "status",
     "all_status",
     "unit_file_path",
@@ -134,6 +136,117 @@ def available() -> bool:
     :class:`UnitStatus` with ``error != None`` for each unit.
     """
     return _systemctl() is not None
+
+
+def _journalctl() -> str | None:
+    """Path to ``journalctl`` on the host, or ``None`` if absent."""
+    return shutil.which("journalctl")
+
+
+# systemd journal lines look like:
+#   2026-04-22T19:34:15+0000 pier-dev-engine uv[1370843]: 2026-04-22T19:34:15+0000 INFO openharness.lab.runner: msg
+# The first three tokens (timestamp, hostname, "uv[pid]:") are noise
+# the operator already knows: they're on the host, the pid is in the
+# Process tree panel, and the inner timestamp is identical to the
+# outer one. We strip them so each row fits in a normal-width terminal
+# and wraps cleanly inside the cockpit panel.
+
+
+def _compact_journal_line(line: str) -> str:
+    """Drop systemd's outer ts + hostname + ``uv[pid]:`` prefix.
+
+    Conservative: if the line doesn't match the expected shape,
+    return it verbatim. That preserves anything systemd emits at
+    boundaries (``-- Boot ...``, journal-rotation notices, …) so
+    the operator never loses information by accident.
+    """
+    # ISO-8601 ts (with optional fractional seconds + tz) + space +
+    # hostname + space + ``progname[pid]:`` + space + payload.
+    m = _re.match(
+        r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}[\d.+:Z-]*"
+        r"\s+\S+\s+\S+\[\d+\]:\s+(.*)$",
+        line,
+    )
+    return m.group(1) if m else line
+
+
+def _compact_journal(text: str) -> str:
+    """Apply :func:`_compact_journal_line` to every line in ``text``."""
+    if not text:
+        return text
+    out = [_compact_journal_line(ln) for ln in text.splitlines()]
+    # Preserve trailing newline so the <pre> doesn't lose its bottom
+    # margin character (cosmetic, not functional).
+    suffix = "\n" if text.endswith("\n") else ""
+    return "\n".join(out) + suffix
+
+
+def journal(
+    unit: UnitId,
+    *,
+    lines: int = 300,
+    since: str | None = None,
+    compact: bool = True,
+) -> str:
+    """Read the systemd journal for ``unit`` (read-only).
+
+    Returns the most recent ``lines`` of journal output as plain text,
+    suitable for dropping into a ``<pre>`` in the web UI. This is the
+    operator's window into "what is the daemon actually doing right
+    now" — the orchestrator's stdout/stderr go to journald under
+    systemd, so a tail of the journal is the analogue of
+    ``tail -f /var/log/openharness-daemon.log`` you'd want to see.
+
+    Failure modes (each surfaces as a single-line message in the
+    returned string instead of raising, so the UI panel stays robust):
+
+    - ``journalctl`` not on PATH (CI / minimal container) → "(journalctl not available)"
+    - ``journalctl`` exits non-zero (no permission, unknown unit, …)
+      → the stderr is returned verbatim, prefixed with the exit code
+
+    :param unit: One of :data:`UNITS`. Unit name is concatenated with
+        ``.service`` so it matches what systemd expects.
+    :param lines: How many tail lines to request from journald. 300
+        is enough to cover a full ~75-min idle cycle at the runner's
+        15s heartbeat plus several spawn lifecycles, without dumping
+        gigabytes into the page.
+    :param since: Optional systemd-style time spec (``"2 hours ago"``
+        / ``"2026-04-22 18:00"``). When set, ``lines`` becomes a cap
+        rather than a target. Bounded to a small literal vocabulary
+        in the web layer; this function passes whatever it gets.
+    :param compact: When True (default) strip systemd's outer
+        ``<ts> <hostname> <prog>[<pid>]: `` prefix from each line so
+        rows fit in a normal-width panel. Set False from a raw
+        ``--output json``-style consumer that needs the original.
+    """
+    bin_path = _journalctl()
+    if bin_path is None:
+        return "(journalctl not available on this host)"
+    cmd = [
+        bin_path, "--user",
+        "-u", f"{unit}.service",
+        "-n", str(int(lines)),
+        "--no-pager",
+        "--output", "short-iso",
+    ]
+    if since:
+        cmd += ["--since", since]
+    try:
+        completed = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            timeout=10,
+            check=False,
+        )
+    except subprocess.TimeoutExpired:
+        return "(journalctl timed out after 10s)"
+    if completed.returncode != 0:
+        return (
+            f"(journalctl exit={completed.returncode})\n"
+            f"{completed.stderr.strip()}"
+        )
+    return _compact_journal(completed.stdout) if compact else completed.stdout
 
 
 def _systemctl_show(unit: str) -> dict[str, str]:

@@ -778,6 +778,102 @@ COMMANDS: dict[str, CommandSpec] = {
         confirm_text=None,
         events=["lab-daemon-state-changed"],
     ),
+    "daemon-reset-all-failures": CommandSpec(
+        cmd_id="daemon-reset-all-failures",
+        label="Reset all failure counters",
+        description=(
+            "Clear every recorded failure counter at once. Useful "
+            "after fixing a host-level cause (PATH, credentials) "
+            "that broke a batch of slugs simultaneously."
+        ),
+        argv_template=["daemon", "reset-all-failures", "--actor", "{actor}"],
+        params=[
+            ParamSpec(
+                name="actor",
+                pattern=_SAFE_ACTOR,
+                label="Actor",
+                default="human:webui",
+            ),
+        ],
+        confirm_text=(
+            "Clear ALL failure counters? After this, every approved "
+            "slug starts from zero — no auto-demote until N consecutive "
+            "failures."
+        ),
+        events=["lab-daemon-state-changed"],
+    ),
+    "daemon-clear-history": CommandSpec(
+        cmd_id="daemon-clear-history",
+        label="Clear tick history",
+        description=(
+            "Wipe the tick-history ring buffer. Purely cosmetic — "
+            "the daemon never reads history back into its decision "
+            "loop, but the cockpit's 'Recent ticks' panel renders "
+            "from it. Useful for starting fresh after debugging."
+        ),
+        argv_template=["daemon", "clear-history", "--actor", "{actor}"],
+        params=[
+            ParamSpec(
+                name="actor",
+                pattern=_SAFE_ACTOR,
+                label="Actor",
+                default="human:webui",
+            ),
+        ],
+        confirm_text="Wipe the tick history? This cannot be undone.",
+        events=["lab-daemon-state-changed"],
+    ),
+    # -- on-disk run cleanup -----------------------------------------------
+    #
+    # `runs prune` and friends. Strict regex on age_hours so a typo
+    # ("24h") can't squeak past Typer; force is a literal "true"/"false"
+    # toggle so the form maps cleanly to a checkbox.
+    "runs-prune": CommandSpec(
+        cmd_id="runs-prune",
+        label="Prune unfinished runs",
+        description=(
+            "Delete runs/experiments/<id>/ directories that have NO "
+            "results/summary.md AND haven't been touched for at least "
+            "--age-hours hours. Frees disk and unclutters the file "
+            "list. The default 1 h gate prevents racing a live run; "
+            "for the more aggressive --force/--age-hours=0 mode, use "
+            "the CLI directly."
+        ),
+        argv_template=[
+            "runs", "prune",
+            "--age-hours", "{age_hours}",
+            "--actor", "{actor}",
+        ],
+        params=[
+            ParamSpec(
+                name="age_hours",
+                # Bounded to >=1 here on purpose: the CLI's --force
+                # gate exists for a reason, and exposing the unsafe
+                # path through a web button would hide that gate.
+                pattern=re.compile(r"^(?:[1-9][0-9]{0,3})(?:\.[0-9]{1,3})?$"),
+                label="Min age (hours)",
+                default="1",
+                placeholder="1",
+                help_text=(
+                    "Dirs younger than this stay. Use the CLI with "
+                    "--force for anything below 1h."
+                ),
+            ),
+            ParamSpec(
+                name="actor",
+                pattern=_SAFE_ACTOR,
+                label="Actor",
+                default="human:webui",
+                required=False,
+            ),
+        ],
+        confirm_text=(
+            "Permanently delete every unfinished experiment run "
+            "directory older than the threshold? This cannot be undone."
+        ),
+        danger=True,
+        events=["lab-runs-changed", "lab-daemon-state-changed"],
+    ),
 }
 
 

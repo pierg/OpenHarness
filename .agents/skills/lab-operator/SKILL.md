@@ -9,23 +9,49 @@ description: >
   current experiment", "what's queued next", "kick off the next
   roadmap entry", or otherwise wants to drive the
   `uv run lab daemon` lifecycle without remembering the individual
-  CLI commands. Routes to `lab-run-experiment` /
-  `lab-plan-next` / etc. only when the user is asking for one of
-  those specific actions; otherwise this skill is the single entry
-  point. Companion reference: `lab/OPERATIONS.md`.
+  CLI commands.   Routes to per-phase skills (`lab-design-variant`,
+  `lab-implement-variant`, `lab-finalize-pr`) and
+  `lab-plan-next` / `lab-graduate-component` only when the user is
+  asking for one of those specific actions; otherwise this skill is
+  the single entry point and the daemon drives the full 6-phase
+  pipeline. Companion reference: `lab/OPERATIONS.md`.
 ---
 
 # Operating the autonomous lab
 
-The autonomous lab is one daemon (`uv run lab daemon`) plus four
-codex critic skills it spawns automatically. This skill is the
-operator's playbook: every command you might want to run, in the
-order you'd actually run them, with the expected output and what
-to do when it isn't what you expected.
+The autonomous lab is one daemon (`uv run lab daemon`) that drives
+a deterministic **6-phase pipeline** per roadmap entry — preflight
+(git worktree) → design (codex skill, read-only) → implement
+(codex skill, worktree-write) → run (`uv run exec`) → critique
+(trial/experiment-critic spawns) → finalize (codex skill, push
+branch + open PR). Per-slug state lives in
+`runs/lab/state/<slug>/phases.json` so any phase can be resumed
+after a restart.
+
+This skill is the operator's playbook: every command you might
+want to run, in the order you'd actually run them, with the
+expected output and what to do when it isn't what you expected.
 
 For the architecture, the inner loop, the DB schema, and "what is
 this thing" questions, read [`lab/OPERATIONS.md`](../../../lab/OPERATIONS.md).
 This skill is task-only.
+
+### Inspecting per-slug pipeline state
+
+```bash
+uv run lab phases show                    # every slug with state, one line each
+uv run lab phases show <slug>             # full per-phase status for one slug
+uv run lab phases reset <slug> --phase implement   # force a single phase to retry
+uv run lab phases reset <slug>            # nuke the whole phases.json
+uv run lab preflight list                 # every git worktree the parent repo knows about
+uv run lab preflight remove <slug>        # tear down a stuck worktree (and lab/<slug>)
+```
+
+Use `phases show` first whenever a slug looks stuck — the answer is
+usually "phase X is `failed` because <error>", and you can either
+fix the underlying cause and let the daemon retry on the next tick
+(it always picks the first unfinished phase), or `phases reset <slug>
+--phase X` if the failure poisoned the recorded payload.
 
 ## Quick orientation (always run first)
 
@@ -328,7 +354,9 @@ This skill does **not** edit the queue itself — the user owns
 | `lab svc status` shows daemon `failed` | `uv run lab svc logs daemon` for the traceback. Common cause: lock left behind by a previous crash — `rm runs/lab/orchestrator.lock` then `uv run lab svc restart daemon`. |
 | Daemon idles forever, log says "no ready roadmap entries" | Either `## Up next` is empty or every entry's `Depends on:` is unmet. Ask the user. |
 | One trial-critic keeps failing | Read the matching log under `runs/lab/logs/`; usually a JSON-shape mismatch fixable in the SKILL.md. Re-run by hand: `codex exec` against that one skill+args. |
-| `lab-run-experiment` never produces summary.md | Tail `runs/experiments/<id>/legs/<leg>/harbor/.../trial.log` — same failure modes as a hand-launched experiment. The orchestrator just times out and leaves the roadmap entry in place. |
+| Phase `run` never produces summary.md | Tail `runs/experiments/<id>/legs/<leg>/harbor/.../trial.log` — same failure modes as a hand-launched experiment. The daemon times out the `run` phase and leaves the slug pinned at `run: failed` in `phases.json`; rerun with `uv run lab phases reset <slug> --phase run` once you've fixed the cause. |
+| Phase `design` or `implement` keeps failing | `uv run lab phases show <slug>`; tail the matching `runs/lab/logs/...lab-design-variant...log` or `...lab-implement-variant....log`; for `implement`, also `cd <worktree>` and `git status` / `git log --oneline` to see what landed. Reset just that phase (`uv run lab phases reset <slug> --phase design`) once fixed. |
+| A worktree under `../OpenHarness.worktrees/lab-<slug>` is stale | `uv run lab preflight remove <slug>` (idempotent; also deletes the `lab/<slug>` branch unless you pass `--keep-branch`). |
 | Schema migration error after `git pull` | `uv run lab init` (idempotent; applies any new migrations under `src/openharness/lab/migrations/`). |
 
 ## Reporting back to the user
@@ -356,8 +384,9 @@ action — bake the status into the reply.
 ## What this skill does NOT do
 
 - Implement variants, write critics, propose ideas, or graduate
-  components — those are separate skills (`lab-run-experiment`,
-  `trial-critic`, `lab-propose-idea`, `lab-graduate-component`).
+  components — those are separate skills (`lab-design-variant`,
+  `lab-implement-variant`, `lab-finalize-pr`, `trial-critic`,
+  `lab-propose-idea`, `lab-graduate-component`).
 - Touch `lab/ideas.md > ## Proposed`. The human owns that pile.
 - Edit `lab/roadmap.md > ## Up next`. Use `lab-plan-next` for
   promotions.

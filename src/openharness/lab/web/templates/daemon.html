@@ -42,6 +42,26 @@
   </div>
 </section>
 
+{# Active experiment output — what the running spawn is actually
+   doing right now (codex stdout/stderr + last final-message). When
+   the daemon is idle this falls back to the most recent finished
+   spawn so the operator can see *something* meaningful. Distinct
+   from the Daemon journal panel below, which shows the loop's own
+   logs (heartbeats, scheduling, exit-gate decisions). #}
+<section class="bg-white border border-slate-200 rounded-lg p-5 mb-6">
+  <div class="flex items-baseline gap-3 mb-3">
+    <h2 class="font-semibold">Experiment output</h2>
+    <span class="text-xs text-slate-500">
+      live spawn log — what the codex subprocess is actually saying
+    </span>
+  </div>
+  <div hx-get="/_hx/daemon-active-spawn"
+       hx-trigger="load, every 5s, lab-daemon-state-changed from:body"
+       hx-target="this" hx-swap="innerHTML">
+    <p class="text-slate-400 italic text-sm py-6 text-center">loading spawn output…</p>
+  </div>
+</section>
+
 {# Approvals queue — only really useful in manual mode but always
    shown so the operator can see why nothing is happening. #}
 <section class="bg-white border border-slate-200 rounded-lg p-5 mb-6">
@@ -88,6 +108,43 @@
   </div>
 </section>
 
+{# Disk cleanup — runs/experiments/<id>/ dirs that didn't finish
+   leave half-written trees behind. This panel is the one-click
+   "clean up unfinished experiment runs" affordance; advanced
+   options (--force, --dry-run, --age-hours=0) live on the CLI
+   to keep the safety gate visible. #}
+{% if identity.can_write %}
+<section class="bg-white border border-slate-200 rounded-lg p-5 mb-6">
+  <div class="flex items-baseline gap-3 mb-3">
+    <h2 class="font-semibold">Cleanup</h2>
+    <span class="text-xs text-slate-500">disk-side maintenance</span>
+  </div>
+  <form hx-post="/api/cmd" hx-target="#cmd-result" hx-swap="innerHTML"
+        hx-confirm="Permanently delete every unfinished experiment run directory older than the threshold? This cannot be undone."
+        class="flex flex-wrap items-end gap-3">
+    <input type="hidden" name="cmd_id" value="runs-prune">
+    <label class="flex flex-col text-xs text-slate-600">
+      <span class="mb-1">Min age (hours)</span>
+      <input type="text" name="age_hours" value="1"
+             pattern="^(?:[1-9][0-9]{0,3})(?:\.[0-9]{1,3})?$"
+             class="border border-slate-300 rounded px-2 py-1 font-mono w-24"
+             title="Dirs younger than this stay. Use the CLI with --force for anything below 1h.">
+    </label>
+    <button class="text-sm px-3 py-1.5 rounded border border-rose-300 text-rose-700 hover:bg-rose-50">
+      Prune unfinished runs
+    </button>
+    <p class="text-xs text-slate-500 basis-full">
+      Deletes <code class="font-mono">runs/experiments/&lt;id&gt;/</code>
+      directories with no <code class="font-mono">results/summary.md</code>
+      and an mtime older than the threshold. The 1 h gate prevents
+      racing live runs; for the more aggressive
+      <code class="font-mono">--force --age-hours 0</code> mode, run
+      <code class="font-mono">uv run lab runs prune</code> directly.
+    </p>
+  </form>
+</section>
+{% endif %}
+
 {# ============================================================
    INFRASTRUCTURE LAYER — the systemd unit, raw process tree,
    journalctl tail. These mostly serve "is the host healthy"
@@ -131,11 +188,21 @@
 
 <section class="bg-white border border-slate-200 rounded-lg p-5">
   <div class="flex items-baseline gap-3 mb-3">
-    <h2 class="font-semibold">Log tail</h2>
-    <span class="text-xs text-slate-500">last 300 lines · refreshes every 5 s</span>
+    <h2 class="font-semibold">Daemon journal</h2>
+    <span class="text-xs text-slate-500">
+      what the orchestrator loop is doing — last 300 lines · refreshes every 5 s
+    </span>
   </div>
-  <div hx-get="/_hx/daemon-tail" hx-trigger="every 5s, lab-daemon-changed from:body" hx-target="this" hx-swap="innerHTML">
-    {% include "_log_tail.html" %}
+  {# Live tail of the daemon's systemd journal. Under systemd, the
+     daemon's stdout goes to journald (NOT to runs/lab/orchestrator.out),
+     so this is the canonical "what is the loop doing right now"
+     surface. The legacy /_hx/daemon-tail (which read orchestrator.out)
+     used to be confusing because it silently fell back to the newest
+     spawn log; this panel replaces it. #}
+  <div hx-get="/_hx/daemon-journal"
+       hx-trigger="load, every 5s, lab-daemon-changed from:body, lab-daemon-state-changed from:body"
+       hx-target="this" hx-swap="innerHTML">
+    <p class="text-slate-400 italic text-sm py-6 text-center">loading journal…</p>
   </div>
 </section>
 {% endblock %}

@@ -238,8 +238,15 @@ class SkillProfile:
 # profile here would be misleading. The current orchestrator-side
 # set is exactly:
 #
-#   lab-run-experiment, trial-critic, task-features,
-#   experiment-critic, cross-experiment-critic, lab-plan-next
+#   lab-design-variant, lab-implement-variant, lab-finalize-pr,
+#   trial-critic, task-features, experiment-critic,
+#   cross-experiment-critic, lab-plan-next
+#
+# (The legacy `lab-run-experiment` skill is gone — its
+# responsibilities were split across the deterministic
+# `runner._process_entry_phased` plus the three new `lab-*-variant`
+# skills, with the actual run-kickoff moved into
+# `phase_run.run_experiment`.)
 #
 # Design philosophy: the human optimizes for SIGNAL DENSITY, not
 # throughput or token cost. The lab runs overnight; an extra hour
@@ -256,8 +263,19 @@ class SkillProfile:
 #     `components_perf`, proposes follow-up ideas (writing to
 #     `lab/ideas.md > ## Auto-proposed`), and shapes the entire
 #     roadmap. `xhigh`, `detailed` summary, singleton.
-#   - `lab-run-experiment` writes code in a worktree. Code quality
-#     directly shapes the variant being measured; `high` effort.
+#   - `lab-design-variant` is read-only and writes ONE design.md.
+#     Cheap thinking budget; medium effort. The downstream
+#     implement phase has the design as its contract, so a sloppy
+#     design is a guaranteed implement-phase failure — but a
+#     "good enough" design at high effort wastes thinking time
+#     when the implement phase will catch holes anyway. Sandbox:
+#     read-only.
+#   - `lab-implement-variant` writes code in a worktree. Code
+#     quality directly shapes the variant being measured; `high`
+#     effort. Sandbox: workspace-write scoped to the worktree.
+#   - `lab-finalize-pr` is mostly mechanical (push, gh pr create,
+#     CLI mutation). `low` effort — prompt explicitly disables
+#     creative work here. Sandbox: workspace-write.
 #   - `lab-plan-next` is the only mechanical skill the orchestrator
 #     invokes — closing the loop on the roadmap entry. Smarter
 #     models do not add signal here; mini+low keeps logs clean.
@@ -329,18 +347,57 @@ SKILL_PROFILES: dict[str, SkillProfile] = {
         ),
     ),
 
-    # --- variant implementation + run kickoff (long, code-heavy) ---
-    "lab-run-experiment": SkillProfile(
+    # --- phase 1: design the variant (read-only, cheap) ---
+    "lab-design-variant": SkillProfile(
+        model="gpt-5.4",
+        reasoning_effort="medium",
+        reasoning_summary="concise",
+        sandbox="read-only",
+        timeout_sec=60 * 60,  # 1h cap; designs typically settle in <15min
+        notes=(
+            "Phase 1 of the lab pipeline. Reads the codebase + idea "
+            "and writes runs/lab/state/<slug>/design.md. Read-only "
+            "sandbox by design — no source files change here, so "
+            "failures are always recoverable. Medium effort: the "
+            "implement phase catches design gaps anyway, so paying "
+            "high-effort thinking for marginal design polish is waste."
+        ),
+    ),
+
+    # --- phase 2: implement the variant in the worktree ---
+    "lab-implement-variant": SkillProfile(
         model="gpt-5.4",
         reasoning_effort="high",
         reasoning_summary="detailed",
-        timeout_sec=60 * 60 * 8,
+        timeout_sec=60 * 60 * 4,
         notes=(
-            "Writes the variant in a worktree and launches the harness. "
-            "Code quality directly determines what the experiment "
-            "actually measures, so use high effort. Consider switching "
-            "to a *-codex model once we benchmark code-tuned variants "
-            "on this workload."
+            "Phase 2 of the lab pipeline. Reads design.md and "
+            "applies it inside ../OpenHarness.worktrees/lab-<slug>/. "
+            "Sandbox=danger-full-access (the orchestrator's parent "
+            "default) because the implement phase needs to run "
+            "validation scripts (uv, pytest) inside the worktree. "
+            "High effort: variant code quality is what the experiment "
+            "actually measures."
+        ),
+    ),
+
+    # --- phase 5: open (or skip) the PR after the verdict is in ---
+    "lab-finalize-pr": SkillProfile(
+        model="gpt-5.4-mini",
+        reasoning_effort="low",
+        reasoning_summary="concise",
+        # workspace-write is enough — only git/gh + `uv run lab`. No
+        # code edits expected (and the prompt forbids them).
+        sandbox="workspace-write",
+        full_auto=True,
+        timeout_sec=60 * 30,  # 30min cap; PR creation is fast
+        notes=(
+            "Phase 5 of the lab pipeline. Pushes the experiment "
+            "branch and opens a PR (or skips, on reject/noop), then "
+            "rewrites the journal Branch bullet via "
+            "`lab experiments set-branch`. Mostly mechanical — mini "
+            "model at low effort is enough; the prompt is explicit "
+            "that creative work is forbidden here."
         ),
     ),
 

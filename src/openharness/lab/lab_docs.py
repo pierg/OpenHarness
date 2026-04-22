@@ -708,6 +708,7 @@ def append_journal_entry(
     mutation: str | None,
     hypothesis: str,
     run_path: str | None,
+    branch: str | None = None,
     on_date: date | None = None,
     lab_root: Path = LAB_ROOT,
 ) -> str:
@@ -715,6 +716,12 @@ def append_journal_entry(
 
     Stub-shaped: header bullets present, every `### <section>` empty,
     populated later by `synthesize` and `tree apply`.
+
+    ``branch`` is the experiment branch name (e.g. ``lab/<slug>``) the
+    code variant lives on. Always rendered — either as the recorded
+    branch (if provided) or as the placeholder ``_(pending finalize)_``
+    so downstream tooling and humans can see at a glance whether the
+    run has been finalized into a PR.
     """
     path = _experiments_path(lab_root)
     text = _read(path)
@@ -734,6 +741,10 @@ def append_journal_entry(
         bullets.append(f"-   **Run:** [`{run_path}`](../{run_path})")
     else:
         bullets.append("-   **Run:** _(filled after the run completes)_")
+    if branch:
+        bullets.append(f"-   **Branch:** `{branch.strip()}`")
+    else:
+        bullets.append("-   **Branch:** _(pending finalize)_")
 
     sections = "\n\n".join(f"### {s}\n\n_(pending)_" for s in JOURNAL_SECTIONS)
     stub = f"{header}\n\n" + "\n".join(bullets) + "\n\n" + sections + "\n"
@@ -747,6 +758,103 @@ def append_journal_entry(
         rebuilt += f"\n## {heading}\n\n{body.rstrip()}\n"
     _write(path, rebuilt)
     return rebuilt
+
+
+# Match the Branch bullet inside an entry. The bullet is always
+# present after a `lab experiments append-entry`; this regex finds it
+# whether it currently holds the placeholder or a real branch name.
+_BRANCH_BULLET_RE = re.compile(
+    r"^(-\s+\*\*Branch:\*\*\s+).*$",
+    re.MULTILINE,
+)
+
+# Match the Run bullet (placeholder or already-filled).
+_RUN_BULLET_RE = re.compile(
+    r"^(-\s+\*\*Run:\*\*\s+).*$",
+    re.MULTILINE,
+)
+
+
+def set_journal_run_path(
+    *,
+    slug: str,
+    instance_id: str,
+    lab_root: Path = LAB_ROOT,
+) -> str:
+    """Replace the placeholder ``**Run:**`` bullet with the real path.
+
+    Called by the run phase once an instance id is known. Idempotent;
+    safe to call repeatedly with the same id.
+    """
+    path = _experiments_path(lab_root)
+    text = _read(path)
+    start, end, entry = _entry_text(text, slug)
+    rendered = (
+        f"-   **Run:** [`runs/experiments/{instance_id}`]"
+        f"(../runs/experiments/{instance_id})"
+    )
+    new_entry, n = _RUN_BULLET_RE.subn(rendered, entry, count=1)
+    if n == 0:
+        raise LabDocError(
+            f"No **Run:** bullet found in journal entry for {slug!r}."
+        )
+    new_text = text[:start] + new_entry.rstrip() + "\n" + text[end:]
+    _write(path, new_text)
+    return new_text
+
+
+def set_journal_branch(
+    *,
+    slug: str,
+    branch: str,
+    pr_url: str | None = None,
+    rejected_reason: str | None = None,
+    lab_root: Path = LAB_ROOT,
+) -> str:
+    """Replace the ``**Branch:**`` header bullet on the journal entry for ``slug``.
+
+    Three rendering modes (controlled by which arguments are set):
+
+    -   ``pr_url`` provided -> "Branch: [<branch>](<pr_url>)".
+    -   ``rejected_reason`` provided -> "Branch: <branch> — not
+        opened (<reason>)". Used when verdict is Reject/NoOp and the
+        worktree was scheduled for removal.
+    -   Neither -> just "Branch: <branch>". Used for intermediate
+        states (e.g. preflight finished, branch exists, no PR yet).
+
+    Idempotent: re-running with the same arguments produces the same
+    file. Only ever rewrites the one bullet, never anything else in
+    the entry.
+    """
+    path = _experiments_path(lab_root)
+    text = _read(path)
+    start, end, entry = _entry_text(text, slug)
+
+    if pr_url:
+        rendered = f"-   **Branch:** [`{branch}`]({pr_url})"
+    elif rejected_reason:
+        rendered = f"-   **Branch:** `{branch}` — not opened ({rejected_reason})"
+    else:
+        rendered = f"-   **Branch:** `{branch}`"
+
+    if not _BRANCH_BULLET_RE.search(entry):
+        # Older entries (pre-Branch-bullet) don't have it yet. Insert
+        # immediately after the **Run:** bullet so the header order
+        # stays canonical.
+        run_re = re.compile(r"^-\s+\*\*Run:\*\*.*$", re.MULTILINE)
+        m = run_re.search(entry)
+        if not m:
+            raise LabDocError(
+                f"Cannot place Branch bullet in entry {slug!r}: "
+                "no **Run:** bullet found to anchor against."
+            )
+        new_entry = entry[: m.end()] + "\n" + rendered + entry[m.end():]
+    else:
+        new_entry = _BRANCH_BULLET_RE.sub(rendered, entry, count=1)
+
+    new_text = text[:start] + new_entry.rstrip() + "\n" + text[end:]
+    _write(path, new_text)
+    return new_text
 
 
 # ----- configs.md: configuration-tree CRUD ---------------------------------

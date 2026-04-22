@@ -1,0 +1,59 @@
+{# "What is the daemon actually running?" — tail of the spawn log
+   that's relevant *right now*.
+
+   Inputs:
+     source        — "active" | "newest" | "idle"
+     log_path      — full path to the chosen log (empty when idle)
+     log_basename  — basename of the chosen log
+     tail          — last ~16 KB of that file
+     truncated     — whether tail is a tail (vs full file)
+     size          — total file size in bytes
+     active_slug   — slug attached to the active tick, when source=="active"
+
+   This is intentionally *separate* from the daemon journal panel:
+   journal = the loop's own activity (heartbeats, scheduling, exit
+   gates), spawn = the experiment subprocess's stdout/stderr (codex
+   reasoning, REFUSE/OK, tool errors). When something is running,
+   the operator wants the spawn output, not the heartbeat. #}
+
+{% if source == "idle" %}
+  <p class="text-sm text-slate-500 italic py-4 text-center">
+    No spawn logs yet — nothing has been run on this lab.
+    Approve a roadmap entry to kick off a tick.
+  </p>
+{% else %}
+  <div class="text-xs text-slate-500 mb-2 flex flex-wrap items-baseline gap-2">
+    {% if source == "active" %}
+      <span class="px-2 py-0.5 rounded bg-emerald-100 text-emerald-800 font-mono">
+        ● live
+      </span>
+      <span>
+        running <a href="/roadmap#{{ active_slug }}" class="font-mono font-semibold hover:underline">{{ active_slug }}</a>
+      </span>
+    {% else %}
+      <span class="px-2 py-0.5 rounded bg-slate-200 text-slate-700 font-mono">
+        ○ idle
+      </span>
+      <span>showing the most recent finished spawn</span>
+    {% endif %}
+    <span class="ml-auto text-slate-400">
+      auto-scrolls · refreshes every {{ '3' if source == 'active' else '10' }} s
+    </span>
+  </div>
+  <div class="text-xs text-slate-500 mb-2 truncate">
+    <span class="font-mono">{{ log_path }}</span>
+    {% if truncated %}<span class="text-slate-400 ml-1">(last 16 KB of {{ size }} B)</span>{% endif %}
+  </div>
+  <pre class="text-xs leading-snug bg-slate-900 text-slate-100 rounded-md p-3
+              overflow-y-auto max-h-[60vh] font-mono whitespace-pre-wrap break-words"
+       data-spawn-tail>{{ tail }}</pre>
+  <script>
+    (function () {
+      setTimeout(function () {
+        document.querySelectorAll('[data-spawn-tail]').forEach(function (el) {
+          el.scrollTop = el.scrollHeight;
+        });
+      }, 0);
+    })();
+  </script>
+{% endif %}

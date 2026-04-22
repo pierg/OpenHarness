@@ -26,6 +26,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -66,6 +67,7 @@ def create_app() -> FastAPI:
     templates.env.globals["render_md"] = labmd.render
     templates.env.globals["fmt_dt"] = _fmt_dt
     templates.env.globals["fmt_delta"] = _fmt_delta
+    templates.env.globals["fmt_elapsed"] = _fmt_elapsed
     templates.env.globals["fmt_money"] = _fmt_money
     templates.env.globals["pct_color"] = _pct_color
     templates.env.globals["status_color"] = _status_color
@@ -433,6 +435,97 @@ def create_app() -> FastAPI:
             _close_reader(request, reader)
             raise
 
+    @app.get("/_hx/daemon-active-spawn", response_class=HTMLResponse)
+    def hx_daemon_active_spawn(request: Request) -> HTMLResponse:
+        """The "what is the daemon actually running" surface.
+
+        Picks one log path with this priority and returns its tail:
+
+          1. ``daemon_state.active_tick.log_path`` — the codex spawn
+             attached to the in-flight tick, if any. This is the
+             *live* output the operator wants when something is
+             happening right now.
+          2. The newest ``*.log`` under ``runs/lab/logs/`` — the most
+             recent finished spawn. Useful immediately after a tick
+             ended (so the operator can read the verdict) and as a
+             fallback when the daemon has nothing in flight.
+          3. None — render an empty-state placeholder.
+
+        Distinct from ``/_hx/daemon-journal`` (which is the daemon's
+        OWN systemd output) and from the per-row "view spawn log"
+        disclosures in the history panel (which are the per-tick
+        archive view).
+        """
+        from openharness.lab import paths as _paths
+        from openharness.lab import daemon_state as _ds
+
+        state = _ds.load()
+        chosen: Path | None = None
+        source: str = "idle"
+        if state.active_tick and state.active_tick.log_path:
+            p = Path(state.active_tick.log_path)
+            if p.is_file():
+                chosen = p
+                source = "active"
+        if chosen is None:
+            newest = labdata._newest_log_file(_paths.LAB_LOGS_DIR)
+            if newest is not None:
+                chosen = newest
+                source = "newest"
+
+        tail = ""
+        truncated = False
+        size = 0
+        if chosen is not None:
+            max_bytes = 16 * 1024
+            with chosen.open("rb") as fh:
+                try:
+                    fh.seek(-max_bytes, os.SEEK_END)
+                    truncated = True
+                except OSError:
+                    fh.seek(0)
+                tail = fh.read().decode("utf-8", errors="replace")
+            size = chosen.stat().st_size
+
+        return HTMLResponse(
+            templates.get_template("_daemon_active_spawn.html").render(
+                request=request,
+                source=source,
+                log_path=str(chosen) if chosen else "",
+                log_basename=chosen.name if chosen else "",
+                tail=tail,
+                truncated=truncated,
+                size=size,
+                active_slug=(state.active_tick.slug if state.active_tick else ""),
+            )
+        )
+
+    @app.get("/_hx/daemon-journal", response_class=HTMLResponse)
+    def hx_daemon_journal(
+        request: Request, lines: int = 300,
+    ) -> HTMLResponse:
+        """Tail of `journalctl --user -u openharness-daemon`.
+
+        This is the operator's "what is the daemon doing right now"
+        feed — orchestrator loop iterations, signal wake-ups, exit-gate
+        decisions, ingest summaries, anything the runner logs at INFO
+        or above. Distinct from `_hx/daemon-tail`, which is a stale
+        legacy path that reads `runs/lab/orchestrator.out` (only
+        populated under tmux/nohup).
+
+        The `lines` query param is bounded to a sensible range so a
+        rogue caller can't request 10 M lines and OOM the page render.
+        """
+        n = max(50, min(int(lines), 2000))
+        text = labsvc.journal("openharness-daemon", lines=n)
+        return _render(
+            request, "_daemon_journal.html",
+            _reader=_reader_ctx(request),
+            journal_text=text,
+            requested_lines=n,
+            unit_id="openharness-daemon",
+        )
+
     @app.get("/_hx/daemon-status", response_class=HTMLResponse)
     def hx_daemon_status(request: Request) -> HTMLResponse:
         reader = _reader_ctx(request)
@@ -562,6 +655,72 @@ def create_app() -> FastAPI:
         except Exception:
             _close_reader(request, reader)
             raise
+
+    @app.get("/_hx/daemon-log/{filename}", response_class=HTMLResponse)
+    def hx_daemon_log(request: Request, filename: str) -> HTMLResponse:  # noqa: PLR0913
+        # noqa above is preemptive: this body grew because security
+        # validation lives inline (no separate helper).
+        """Inline tail of a codex spawn log, surfaced from the cockpit.
+
+        Security: ``filename`` is validated against a strict regex
+        (only the basenames lab logs actually use) and the resolved
+        path is confirmed to live inside ``LAB_LOGS_DIR`` — no
+        traversal, no symlink escapes. We deliberately do NOT
+        ``send_file`` the raw log: keeping it inside the HTMX layout
+        means the rest of the cockpit stays interactive.
+
+        The body is the last ~12 KB. That's enough to capture both
+        the final stderr block (root-cause for exit-code failures)
+        and the OK/REFUSE summary line (root-cause for         the codex-said-
+        no failure mode), without dumping a 2 MB jsonl event stream
+        into the DOM.
+        """
+        # Allow only the canonical lab-log basenames:
+        #   <ts>__<skill>__<spawn_id>.log
+        # and the optional sibling .last.txt (final-message snapshot).
+        if not re.fullmatch(r"[A-Za-z0-9._-]{8,256}\.(log|last\.txt)", filename):
+            raise HTTPException(status_code=400, detail="invalid log filename")
+        # Re-import on each request so test fixtures that reload
+        # ``paths`` (with a tmp repo root) see the override. The cost
+        # is negligible: a module attribute lookup, not a re-import.
+        from openharness.lab import paths as _paths
+        logs_dir = _paths.LAB_LOGS_DIR
+        target = (logs_dir / filename).resolve()
+        # Defense in depth: confirm the resolved path is inside the
+        # logs dir even after symlink resolution (CVE-class concern).
+        try:
+            target.relative_to(logs_dir.resolve())
+        except ValueError:
+            raise HTTPException(status_code=400, detail="path escapes lab logs dir")
+        if not target.is_file():
+            raise HTTPException(status_code=404, detail=f"log {filename} not found")
+
+        max_bytes = 12 * 1024
+        with target.open("rb") as fh:
+            try:
+                fh.seek(-max_bytes, os.SEEK_END)
+                truncated = True
+            except OSError:
+                fh.seek(0)
+                truncated = False
+            tail_bytes = fh.read()
+        tail = tail_bytes.decode("utf-8", errors="replace")
+        size = target.stat().st_size
+
+        # The log-tail partial is intentionally chrome-less (no nav,
+        # no pending-actions sidebar) so it can be swapped into a
+        # disclosure pane inline. We render it directly via the
+        # template environment to bypass _render's reader requirement.
+        return HTMLResponse(
+            templates.get_template("_daemon_log_tail.html").render(
+                request=request,
+                filename=filename,
+                tail=tail,
+                truncated=truncated,
+                size=size,
+                absolute_path=str(target),
+            )
+        )
 
     @app.get("/_hx/roadmap-body", response_class=HTMLResponse)
     def hx_roadmap_body(request: Request) -> HTMLResponse:
@@ -831,6 +990,34 @@ def _fmt_delta(v: object) -> str:
     if v is None:
         return "—"
     return f"{float(v):+.1f}"  # type: ignore[arg-type]
+
+
+def _fmt_elapsed(v: object) -> str:
+    """Render "X seconds ago" / "Xm Ys ago" for a past datetime.
+
+    Used by the active-tick panel to show how long the running tick
+    has been alive. Robust to naive datetimes (assumed UTC) and to
+    None (returns "—"), so a half-populated daemon_state doesn't
+    500 the page render.
+    """
+    if v is None:
+        return "—"
+    if not isinstance(v, datetime):
+        return str(v)
+    if v.tzinfo is None:
+        v = v.replace(tzinfo=timezone.utc)
+    delta = datetime.now(timezone.utc) - v
+    secs = int(delta.total_seconds())
+    if secs < 0:
+        # Clock skew or a future timestamp (rare); avoid negative
+        # signs in the UI.
+        return "just now"
+    if secs < 60:
+        return f"{secs}s"
+    if secs < 3600:
+        return f"{secs // 60}m {secs % 60:02d}s"
+    h, rem = divmod(secs, 3600)
+    return f"{h}h {rem // 60:02d}m"
 
 
 def _fmt_money(v: object) -> str:

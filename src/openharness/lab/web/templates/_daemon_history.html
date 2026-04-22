@@ -12,6 +12,36 @@
   "cancelled":     ("bg-slate-200  text-slate-700",   "⊘"),
   "auto-demoted":  ("bg-purple-100 text-purple-800",  "↓"),
 } %}
+{# Open-state persistence for the per-row "view spawn log" disclosures.
+   The history panel refreshes every 30s + on `lab-daemon-state-changed`,
+   which would normally collapse any opened <details> the operator was
+   reading. We persist the open set in localStorage keyed by log
+   basename so a panel refresh restores the expanded view. #}
+<script>
+  (function () {
+    var KEY = 'lab-daemon-history-open';
+    function read() {
+      try { return new Set(JSON.parse(localStorage.getItem(KEY) || '[]')); }
+      catch (e) { return new Set(); }
+    }
+    function write(s) {
+      try { localStorage.setItem(KEY, JSON.stringify(Array.from(s))); }
+      catch (e) {}
+    }
+    setTimeout(function () {
+      var open = read();
+      document.querySelectorAll('details[data-log-toggle]').forEach(function (d) {
+        var key = d.getAttribute('data-log-toggle');
+        if (open.has(key)) { d.open = true; }
+        d.addEventListener('toggle', function () {
+          var s = read();
+          if (d.open) { s.add(key); } else { s.delete(key); }
+          write(s);
+        });
+      });
+    }, 0);
+  })();
+</script>
 {% set entries = daemon_state.history|reverse|list %}
 {% if entries %}
   <ul class="divide-y divide-slate-100">
@@ -31,6 +61,28 @@
         {% if h.summary %}
           <p class="basis-full text-xs text-slate-600 pl-1">{{ h.summary }}</p>
         {% endif %}
+        {% if h.log_path %}
+          {# A spawn was attempted (we have a log file). Offer a
+             one-click disclosure that lazy-loads the tail; we use
+             <details> + hx-get on the inner div so the file is only
+             fetched when actually opened, keeping the history list
+             cheap to render even with 20 entries.
+
+             ``h.log_path`` is recorded as an absolute path; we strip
+             to basename here because the endpoint only accepts the
+             basename (see /_hx/daemon-log/<filename> validator). #}
+          {% set log_basename = h.log_path.rsplit('/', 1)[-1] %}
+          <details class="basis-full pl-1" data-log-toggle="{{ log_basename }}">
+            <summary class="text-xs text-blue-700 hover:underline cursor-pointer select-none">
+              view spawn log ({{ log_basename }})
+            </summary>
+            <div hx-get="/_hx/daemon-log/{{ log_basename }}"
+                 hx-trigger="toggle from:closest details once"
+                 hx-swap="innerHTML">
+              <p class="text-xs text-slate-400 italic mt-1">loading…</p>
+            </div>
+          </details>
+        {% endif %}
       </li>
     {% endfor %}
   </ul>
@@ -38,6 +90,21 @@
     <p class="text-xs text-slate-400 mt-2">
       …{{ entries|length - 20 }} older tick(s) hidden. Full ring buffer in <code class="font-mono">runs/lab/daemon-state.json</code>.
     </p>
+  {% endif %}
+  {% if identity.can_write %}
+    {# Cosmetic-only wipe of the ring buffer — daemon never reads
+       history back into its decision loop, so this just clears the
+       cockpit panel. Hidden behind a confirm so it's not a one-click
+       accident. #}
+    <div class="mt-3 flex justify-end">
+      <form hx-post="/api/cmd" hx-target="#cmd-result" hx-swap="innerHTML"
+            hx-confirm="Wipe {{ entries|length }} tick history entries? This cannot be undone.">
+        <input type="hidden" name="cmd_id" value="daemon-clear-history">
+        <button class="text-xs px-2 py-1 rounded border border-slate-300 text-slate-700 hover:bg-slate-100">
+          clear history
+        </button>
+      </form>
+    </div>
   {% endif %}
 {% else %}
   <p class="text-sm text-slate-500">

@@ -18,7 +18,7 @@
       </div>
       <div class="text-sm text-slate-600">
         Phase: <span class="font-mono">{{ at.phase }}</span>
-        · started {{ fmt_dt(at.started_at) }} ({{ fmt_delta(at.started_at) }} ago)
+        · started {{ fmt_dt(at.started_at) }} ({{ fmt_elapsed(at.started_at) }} ago)
       </div>
     </div>
     {% if identity.can_write %}
@@ -47,9 +47,20 @@
       </div>
     {% endif %}
     {% if at.log_path %}
+      {% set log_basename = at.log_path.rsplit('/', 1)[-1] %}
       <div class="truncate">
         <strong>log:</strong>
         <span class="font-mono select-all">{{ at.log_path }}</span>
+        <details class="mt-1">
+          <summary class="text-blue-700 hover:underline cursor-pointer select-none">
+            view tail (live)
+          </summary>
+          <div hx-get="/_hx/daemon-log/{{ log_basename }}"
+               hx-trigger="toggle from:closest details once, every 5s from:closest details"
+               hx-swap="innerHTML">
+            <p class="text-slate-400 italic mt-1">loading…</p>
+          </div>
+        </details>
       </div>
     {% endif %}
     {% if at.worktree_path %}
