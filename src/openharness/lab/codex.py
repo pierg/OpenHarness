@@ -347,19 +347,21 @@ SKILL_PROFILES: dict[str, SkillProfile] = {
         ),
     ),
 
-    # --- phase 1: design the variant (read-only, cheap) ---
+    # --- phase 1: design the variant ---
+    # Sandbox is workspace-write (not read-only) because the output file
+    # `runs/lab/state/<slug>/design.md` lives inside the workspace and the
+    # read-only sandbox blocks writes to it. Source-file edits are
+    # prevented by the SKILL.md contract ("No source-file edits") rather
+    # than the sandbox — the same pattern used by the implement phase.
     "lab-design-variant": SkillProfile(
         model="gpt-5.4",
         reasoning_effort="medium",
         reasoning_summary="concise",
-        sandbox="read-only",
         timeout_sec=60 * 60,  # 1h cap; designs typically settle in <15min
         notes=(
             "Phase 1 of the lab pipeline. Reads the codebase + idea "
-            "and writes runs/lab/state/<slug>/design.md. Read-only "
-            "sandbox by design — no source files change here, so "
-            "failures are always recoverable. Medium effort: the "
-            "implement phase catches design gaps anyway, so paying "
+            "and writes runs/lab/state/<slug>/design.md. Medium effort: "
+            "the implement phase catches design gaps anyway, so paying "
             "high-effort thinking for marginal design polish is waste."
         ),
     ),

@@ -17,8 +17,7 @@ description: >
 Take an idea + roadmap entry and produce a single artifact: a
 **design document** the next phase (`lab-implement-variant`) will
 follow. You touch zero source files — this is the "think before you
-type" phase, and it runs read-only by design so failure modes are
-safe and resumable.
+type" phase so failure modes are safe and resumable.
 
 ## When to Use
 
