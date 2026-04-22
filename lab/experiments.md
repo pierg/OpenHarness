@@ -9,21 +9,32 @@
 -   **Branch:** `lab/reflection-context-compaction-smoke`
 
 ### Aggregate
-
-_(pending)_
-
+| Leg | Agent | Trials | Passed | Failed | Pass rate | Cost (USD) |
+|-----|-------|-------:|-------:|-------:|----------:|-----------:|
+| `reflection_compacted` | `reflection_context_compaction` | 2 | 1 | 1 | 50.0% | $1.79 |
+| `reflection_control` | `reflection` | 2 | 1 | 1 | 50.0% | $1.68 |
 ### Mutation impact
-
-_(pending)_
-
+-   **Best leg:** `reflection_compacted` (50.0%, $1.79)
+-   **Worst leg:** `reflection_control` (50.0%, $1.68)
+-   **Spread:** +0.0 pp
+-   _(experiment-critic JSON missing a `mutation_impact` field; this is a DB-only fallback.)_
 ### Failure modes
 
 _(pending)_
 
 ### Tree effect
+-   **Verdict:** **No-op** — recorded for trend analysis
+-   **Target:** `reflection`
+-   **Pair:** trunk leg `reflection_compacted` vs mutation `reflection_control`
+-   **Δ pass-rate:** +0.00 pp
+-   **Δ $/pass:** -6.1%
+-   **Confidence:** 0.00
+-   **Rationale:** Inconclusive: Δ pass-rate = +0.0pp (trunk 50.0% vs mutation 50.0%); 0 positive cluster(s) (threshold 2); Δ $/pass = -6%.
 
-_(pending)_
-
+| Cluster | trunk pass | mut pass | Δ pp |
+|---------|-----------:|---------:|-----:|
+| `bash_pipeline` | 1/1 | 1/1 | +0.0 |
+| `regex_programming` | 0/1 | 0/1 | +0.0 |
 ### Linked follow-ups
 
 _(pending)_
