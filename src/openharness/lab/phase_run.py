@@ -194,6 +194,23 @@ def _spawn_exec(
         args += ["--profile", profile]
     log_path.parent.mkdir(parents=True, exist_ok=True)
     run_dir.parent.mkdir(parents=True, exist_ok=True)
+    # Merge .env from the repo root so services like Langfuse are
+    # available to the experiment subprocess even when the daemon was
+    # started without sourcing .env (e.g. from a systemd unit or a
+    # bare Python invocation rather than scripts/exp/start.sh).
+    env = {**os.environ, "PYTHONUNBUFFERED": "1"}
+    dotenv_path = REPO_ROOT / ".env"
+    if dotenv_path.is_file():
+        for raw in dotenv_path.read_text().splitlines():
+            raw = raw.strip()
+            if not raw or raw.startswith("#") or "=" not in raw:
+                continue
+            k, _, v = raw.partition("=")
+            k = k.strip()
+            # Never override already-set vars; the parent daemon's env
+            # wins. This preserves intentional overrides set before launch.
+            if k and k not in os.environ:
+                env[k] = v.strip()
     log_fp = open(log_path, "ab", buffering=0)
     try:
         proc = subprocess.Popen(
@@ -203,7 +220,7 @@ def _spawn_exec(
             stderr=subprocess.STDOUT,
             stdin=subprocess.DEVNULL,
             start_new_session=True,
-            env={**os.environ, "PYTHONUNBUFFERED": "1"},
+            env=env,
         )
     finally:
         # The child inherits the fd; closing in the parent is safe and
