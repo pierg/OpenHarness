@@ -6,7 +6,7 @@
 -   **Trunk at run-time:** [`trunk`](../src/openharness/agents/configs/trunk.yaml)
 -   **Hypothesis:** truncating tool stdout above some threshold lets `reflection` complete on the smoke slice within wall-clock and at <500 k input tokens per trial.
 -   **Run:** [`runs/experiments/reflection-context-compaction-smoke-20260422-213746`](../runs/experiments/reflection-context-compaction-smoke-20260422-213746)
--   **Branch:** `lab/reflection-context-compaction-smoke`
+-   **Branch:** `lab/reflection-context-compaction-smoke` — not opened (no_op: Inconclusive: Δ pass-rate = +0.0pp (trunk 50.0% vs mutation 50.0%); 0 positive cluster(s) (threshold 2); Δ $/pass = -6%.)
 
 ### Aggregate
 | Leg | Agent | Trials | Passed | Failed | Pass rate | Cost (USD) |
