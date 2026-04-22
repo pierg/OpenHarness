@@ -1,0 +1,56 @@
+{# Per-slug approval list (manual mode only).
+
+   Two purposes:
+   1. Make it obvious what the daemon will pick next.
+   2. Let the operator revoke without leaving the daemon page.
+
+   In autonomous / paused mode the panel renders an explanatory note
+   instead of the list, so it's clear approvals are inert in those
+   modes. (Approvals are kept across mode flips, intentionally — if
+   you queue an approval, switch to autonomous to chew through the
+   roadmap, then switch back to manual, your approval is still there.)
+   #}
+{% if daemon_state.mode == "manual" %}
+  {% if daemon_state.approved_slugs %}
+    <ul class="space-y-2">
+      {% for slug in daemon_state.approved_slugs %}
+        <li class="flex items-center gap-3 border border-slate-100 rounded px-3 py-2">
+          <span class="font-mono text-sm">{{ loop.index }}.</span>
+          <a href="/roadmap#{{ slug }}" class="font-mono text-sm font-semibold hover:underline">{{ slug }}</a>
+          {% set fr = daemon_state.entry_failures.get(slug) %}
+          {% if fr and fr.count %}
+            <span class="text-xs px-2 py-0.5 rounded bg-amber-100 text-amber-800"
+                  title="{{ fr.last_error or '' }}">
+              {{ fr.count }} consecutive failure{{ '' if fr.count == 1 else 's' }}
+            </span>
+          {% endif %}
+          {% if identity.can_write %}
+          <form hx-post="/api/cmd" hx-target="#cmd-result" hx-swap="innerHTML"
+                class="ml-auto">
+            <input type="hidden" name="cmd_id" value="daemon-revoke">
+            <input type="hidden" name="slug" value="{{ slug }}">
+            <button class="text-xs text-rose-700 hover:text-rose-900 underline">
+              revoke
+            </button>
+          </form>
+          {% endif %}
+        </li>
+      {% endfor %}
+    </ul>
+    <p class="text-xs text-slate-500 mt-3">
+      The daemon picks one approval per tick. Approvals are consumed on success or terminal failure.
+    </p>
+  {% else %}
+    <p class="text-sm text-slate-500">
+      No approvals queued. Visit <a href="/roadmap" class="text-blue-600 hover:underline">/roadmap</a> and click <em>Approve &amp; run</em> on an Up-next entry.
+    </p>
+  {% endif %}
+{% elif daemon_state.mode == "paused" %}
+  <p class="text-sm text-slate-500">
+    Daemon is paused; approvals are inert until you switch back to manual mode.
+  </p>
+{% else %}
+  <p class="text-sm text-slate-500">
+    Autonomous mode is on; approvals are ignored. The daemon walks Up next from the top.
+  </p>
+{% endif %}
