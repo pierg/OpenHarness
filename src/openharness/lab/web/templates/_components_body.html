@@ -49,29 +49,8 @@
                 </ul>
               {% else %}—{% endif %}
             </td>
-            {% if identity.can_write %}
-              <td class="text-right whitespace-nowrap py-2">
-                {# Inline set-status form. Selecting a value other than
-                   the current status submits via onchange. We render
-                   the current status as a disabled placeholder so the
-                   first non-placeholder selection is always a real
-                   change. #}
-                <form hx-post="/api/cmd" hx-target="#cmd-result" hx-swap="innerHTML"
-                      hx-confirm="Force-set status for {{ e.component_id }}? This bypasses the forward-only bump lattice."
-                      class="inline">
-                  <input type="hidden" name="cmd_id" value="component-set-status">
-                  <input type="hidden" name="component_id" value="{{ e.component_id }}">
-                  <select name="status"
-                          onchange="this.form.requestSubmit();"
-                          class="text-xs border border-slate-300 rounded px-1 py-0.5 bg-white">
-                    <option value="" disabled selected>set status…</option>
-                    {% for s in status_options if s != e.status %}
-                      <option value="{{ s }}">→ {{ s }}</option>
-                    {% endfor %}
-                  </select>
-                </form>
-              </td>
-            {% endif %}
+{# Inline set-status form removed in the IA redesign — components are
+   managed via the CLI / `lab-implement-variant` skill instead. #}
           </tr>
         {% endfor %}
       </tbody>

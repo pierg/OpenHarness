@@ -11,7 +11,7 @@ from __future__ import annotations
 import json
 import logging
 import re
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Iterator
@@ -28,9 +28,13 @@ from openharness.lab.paths import (
     ORCHESTRATOR_LOCK_PATH,
 )
 from openharness.lab.web.models import (
+    ActivityLogEntry,
+    CellRow,
+    ClusterDeltaRow,
     ComparisonRow,
     ComponentDetail,
     ComponentPerfRow,
+    DaemonIdleReason,
     DaemonStatus,
     DoneEntryView,
     ExperimentSummary,
@@ -40,6 +44,7 @@ from openharness.lab.web.models import (
     PendingActions,
     PhaseView,
     PipelineView,
+    PRStateRow,
     ProcessNode,
     RoadmapEntryView,
     SpawnRow,
@@ -49,6 +54,7 @@ from openharness.lab.web.models import (
     TaskFeatureView,
     TaskLeaderboardRow,
     TreeDiffRow,
+    TreeVizNode,
     TrialCritique,
     TrialDetail,
     TrialRow,
@@ -1139,6 +1145,542 @@ class LabReader:
             experiments_active_in=active_in,
             experiments_count=len(active_in),
         )
+
+    # ---- PR cache + PR-aware view-models -------------------------------
+
+    def pr_states(
+        self,
+        *,
+        kinds: tuple[str, ...] = ("add_branch", "graduate"),
+    ) -> list[PRStateRow]:
+        """Snapshot of every experiment PR known to the lab.
+
+        Joins ``tree_diffs.pr_url`` (cheap, always present once
+        :func:`cli.set_branch` has run) with cached ``gh pr view``
+        output. The cache TTL matches the runner's
+        ``_PR_MERGE_CACHE_TTL_SEC`` (90 s) so the daemon and the web
+        UI see consistent state without each having to spam the
+        GitHub API.
+
+        When ``gh`` is missing or the call fails, the row still
+        appears with ``state=None`` + ``error="..."`` populated, so
+        the operator sees "PR open · status unknown" rather than
+        the row silently disappearing.
+        """
+        if not self._db_available:
+            return []
+        if not kinds:
+            return []
+        placeholders = ",".join("?" for _ in kinds)
+        rows = self._qd(
+            f"""
+            SELECT slug, instance_id, kind, pr_url
+            FROM tree_diffs
+            WHERE pr_url IS NOT NULL
+              AND kind IN ({placeholders})
+            ORDER BY applied_at DESC NULLS LAST
+            """,
+            list(kinds),
+        )
+        out: list[PRStateRow] = []
+        for r in rows:
+            url = str(r["pr_url"])
+            cached = _pr_cache_lookup(url)
+            if cached is None:
+                cached = _pr_cache_refresh(url)
+            number = _pr_number_from_url(url)
+            out.append(PRStateRow(
+                slug=str(r["slug"]),
+                instance_id=str(r["instance_id"]),
+                kind=str(r["kind"]),
+                pr_url=url,
+                pr_number=number,
+                state=cached.state,
+                is_merged=cached.is_merged,
+                mergeable=cached.mergeable,
+                checks_status=cached.checks_status,
+                auto_merge_enabled=cached.auto_merge_enabled,
+                title=cached.title,
+                head_sha=cached.head_sha,
+                checked_at=cached.checked_at,
+                error=cached.error,
+            ))
+        return out
+
+    # ---- daemon idle reason ---------------------------------------------
+
+    def idle_reason(
+        self,
+        *,
+        ready_slugs: list[str] | None = None,
+    ) -> DaemonIdleReason:
+        """Why is the daemon doing what it's doing right now?
+
+        Combines daemon status + state + PR cache to produce one
+        actionable badge. Computation order matches the runner's
+        ``loop()`` priority: status < paused < pr_blocked < no_queue
+        < manual_no_appr < running.
+        """
+        from openharness.lab import daemon_state as _ds
+
+        status = self.daemon_status()
+        if not status.running and not status.lock_corrupted:
+            return DaemonIdleReason(
+                code="stopped",
+                detail="Orchestrator daemon is not running.",
+            )
+
+        state = _ds.load()
+        if state.active_tick is not None:
+            slug = state.active_tick.slug
+            return DaemonIdleReason(
+                code="running",
+                detail=f"Tick in progress on {slug}.",
+                slug=slug,
+            )
+
+        if state.mode == "paused":
+            return DaemonIdleReason(
+                code="paused",
+                detail="Mode is paused. The daemon will not pick up entries.",
+            )
+
+        # PR-blocked: any unmerged AddBranch PRs prevent the next tick
+        # from forking off main. Mirrors runner._find_unmerged_addbranch_prs.
+        unmerged = [
+            pr for pr in self.pr_states(kinds=("add_branch",))
+            if pr.state in (None, "OPEN") and not pr.is_merged
+        ]
+        if unmerged:
+            return DaemonIdleReason(
+                code="pr_blocked",
+                detail=(
+                    f"{len(unmerged)} AddBranch PR(s) still open. "
+                    "Daemon won't fork the next experiment off main "
+                    "until they merge."
+                ),
+                blocking_prs=[pr.pr_url for pr in unmerged],
+            )
+
+        if ready_slugs is None:
+            try:
+                up_next, _suggested, done = self.roadmap()
+                done_slugs = {d.slug for d in done}
+                ready_slugs = [
+                    r.slug for r in up_next
+                    if all(d in done_slugs for d in r.depends_on)
+                ]
+            except Exception:  # noqa: BLE001
+                ready_slugs = []
+
+        if not ready_slugs:
+            return DaemonIdleReason(
+                code="no_queue",
+                detail="Roadmap has no entries with satisfied dependencies.",
+            )
+
+        if state.mode == "manual":
+            approved = set(state.approved_slugs)
+            for slug in ready_slugs:
+                if slug in approved:
+                    return DaemonIdleReason(
+                        code="running",
+                        detail=f"{slug} approved; next tick will pick it up.",
+                        slug=slug,
+                    )
+            return DaemonIdleReason(
+                code="manual_no_appr",
+                detail=(
+                    "Manual mode: no approved entries. Approve a roadmap "
+                    "slug to let the daemon proceed."
+                ),
+            )
+
+        return DaemonIdleReason(
+            code="running",
+            detail="Autonomous mode; next tick will pick up the queue.",
+            slug=ready_slugs[0],
+        )
+
+    # ---- /log activity timeline -----------------------------------------
+
+    def activity_log(
+        self,
+        *,
+        limit: int = 200,
+        kinds: tuple[str, ...] | None = None,
+    ) -> list[ActivityLogEntry]:
+        """Unified activity timeline across all the lab's audit surfaces.
+
+        Folds together ``runs/lab/web_commands.jsonl`` (web commands),
+        ``daemon_state.history`` (tick outcomes), DuckDB ``spawns``
+        (codex skill spawns), DuckDB ``tree_diffs`` (verdicts), and
+        DuckDB ``trunk_changes`` (trunk swaps).
+
+        Sorted newest-first. ``kinds`` filters by row type.
+        """
+        from openharness.lab import daemon_state as _ds
+        from openharness.lab.web import commands as _labcmd
+
+        wanted = set(kinds) if kinds else {
+            "cmd", "tick", "spawn", "verdict", "trunk-swap"
+        }
+        out: list[ActivityLogEntry] = []
+
+        if "cmd" in wanted:
+            for r in _labcmd.audit_tail(n=max(limit * 2, 200)):
+                ts = _parse_ts(str(r.get("started_at") or "")) if r.get("started_at") else None
+                if ts is None:
+                    continue
+                exit_code = r.get("exit_code")
+                cmd_id = str(r.get("cmd_id") or "?")
+                out.append(ActivityLogEntry(
+                    at_ts=ts,
+                    kind="cmd",
+                    actor=str(r.get("actor") or "?"),
+                    title=cmd_id,
+                    detail=(
+                        f"exit={exit_code}" if exit_code is not None else None
+                    ),
+                    success=(exit_code == 0) if exit_code is not None else None,
+                ))
+
+        if "tick" in wanted:
+            try:
+                state = _ds.load()
+                for h in reversed(state.history):
+                    out.append(ActivityLogEntry(
+                        at_ts=h.ended_at,
+                        kind="tick",
+                        actor="daemon",
+                        title=f"{h.slug} → {h.outcome}",
+                        detail=(
+                            f"phase={h.phase_reached} "
+                            f"dur={h.duration_sec:.1f}s"
+                        ),
+                        slug=h.slug,
+                        success=(h.outcome == "ok"),
+                    ))
+            except Exception:  # noqa: BLE001
+                pass
+
+        if "spawn" in wanted and self._db_available:
+            for s in self.recent_spawns(limit=limit):
+                if s.finished_at is None:
+                    continue
+                out.append(ActivityLogEntry(
+                    at_ts=s.finished_at,
+                    kind="spawn",
+                    actor="daemon",
+                    title=s.skill,
+                    detail=(
+                        f"exit={s.exit_code}"
+                        + (f" cost={s.cost_usd_estimate:.2f}"
+                           if s.cost_usd_estimate else "")
+                    ),
+                    success=(s.exit_code == 0) if s.exit_code is not None else None,
+                ))
+
+        if "verdict" in wanted and self._db_available:
+            for d in self.tree_diffs(limit=limit):
+                out.append(ActivityLogEntry(
+                    at_ts=d.applied_at or datetime.now(timezone.utc),
+                    kind="verdict",
+                    actor=d.applied_by or "?",
+                    title=f"{d.slug}: {d.kind}",
+                    detail=(
+                        ("staged" if not d.applied else "applied")
+                        + (f" → {d.target_id}" if d.target_id else "")
+                    ),
+                    slug=d.slug,
+                    instance_id=d.instance_id,
+                    href=f"/runs/{d.instance_id}",
+                ))
+
+        if "trunk-swap" in wanted:
+            for tc in self.trunk_history(limit=limit):
+                out.append(ActivityLogEntry(
+                    at_ts=tc.at_ts,
+                    kind="trunk-swap",
+                    actor=tc.applied_by,
+                    title=f"trunk → {tc.to_id}",
+                    detail=(
+                        f"from {tc.from_id}" if tc.from_id else "initial"
+                    ),
+                    instance_id=tc.instance_id,
+                    href=(
+                        f"/runs/{tc.instance_id}" if tc.instance_id else None
+                    ),
+                ))
+
+        out.sort(key=lambda e: e.at_ts, reverse=True)
+        return out[:limit]
+
+    # ---- experiment cell matrix + deltas -------------------------------
+
+    def cells_for_instance(self, instance_id: str) -> list[CellRow]:
+        """Per-task × per-leg cells for one experiment.
+
+        Joins trials with task_features so the operator can group
+        cells by cluster (task category) without a second query.
+        """
+        if not self._db_available:
+            return []
+        rows = self._qd(
+            """
+            SELECT t.task_name, t.task_checksum, t.leg_id, t.trial_id,
+                   t.passed, t.score, t.status, t.cost_usd, t.duration_sec,
+                   t.n_turns, t.trial_dir,
+                   COALESCE(tf.category, 'unclassified') AS cluster
+            FROM trials t
+            LEFT JOIN task_features tf USING (task_checksum)
+            WHERE t.instance_id = ?
+            ORDER BY cluster, task_name, leg_id
+            """,
+            [instance_id],
+        )
+        out: list[CellRow] = []
+        for r in rows:
+            passed = _opt_bool(r.get("passed"))
+            status = _opt_str(r.get("status"))
+            glyph, border = _cell_glyph(passed, status)
+            out.append(CellRow(
+                task_name=str(r["task_name"]),
+                task_checksum=_opt_str(r.get("task_checksum")),
+                leg_id=str(r["leg_id"]),
+                cluster=str(r["cluster"]),
+                trial_id=str(r["trial_id"]),
+                passed=passed,
+                score=_opt_float(r.get("score")),
+                status=status,
+                cost_usd=_opt_float(r.get("cost_usd")),
+                duration_sec=_opt_float(r.get("duration_sec")),
+                n_turns=_opt_int(r.get("n_turns")),
+                trial_dir=str(r.get("trial_dir") or ""),
+                status_glyph=glyph,
+                border_color=border,
+            ))
+        return out
+
+    def cluster_deltas(
+        self,
+        instance_id: str,
+        *,
+        min_tasks_warning: int = 5,
+    ) -> list[ClusterDeltaRow]:
+        """Per-cluster paired Δ between every leg pair.
+
+        For each task-cluster, computes ``leg_a_pass_rate -
+        leg_b_pass_rate`` for every ordered pair (legA, legB).
+        ``warning`` fires when the per-cluster sample is below the
+        methodology's "minimum power" floor — see METHODOLOGY.md §5.
+        """
+        cells = self.cells_for_instance(instance_id)
+        if not cells:
+            return []
+
+        legs = sorted({c.leg_id for c in cells})
+        clusters = sorted({c.cluster for c in cells})
+        out: list[ClusterDeltaRow] = []
+        for cluster in clusters:
+            in_cluster = [c for c in cells if c.cluster == cluster]
+            tasks = sorted({c.task_name for c in in_cluster})
+            n_tasks = len(tasks)
+            for i, a in enumerate(legs):
+                for b in legs[i + 1:]:
+                    pa, pb = _paired_pass_rate(in_cluster, a, b, tasks)
+                    delta_pp: float | None = None
+                    if pa is not None and pb is not None:
+                        delta_pp = (pa - pb) * 100.0
+                    out.append(ClusterDeltaRow(
+                        cluster=cluster,
+                        n_tasks=n_tasks,
+                        leg_a=a,
+                        leg_b=b,
+                        delta_pp=delta_pp,
+                        warning=n_tasks < min_tasks_warning,
+                    ))
+        return out
+
+    # ---- tree visualisation --------------------------------------------
+
+    def tree_viz_nodes(self) -> list[TreeVizNode]:
+        """Flat list of every node in the configuration tree.
+
+        Each node carries its associated PRStateRow (if any) so the
+        template can paint badges without a second pass.
+        """
+        snapshot = self.tree()
+        prs_by_branch = {pr.slug: pr for pr in self.pr_states()}
+        nodes: list[TreeVizNode] = []
+        nodes.append(TreeVizNode(
+            node_id=snapshot.trunk_id,
+            role="trunk",
+            mutation="(trunk)",
+            sketch=snapshot.trunk_anchor,
+        ))
+        for b in snapshot.branches:
+            nodes.append(TreeVizNode(
+                node_id=b.branch_id,
+                role="branch",
+                mutation=b.mutation,
+                use_when=b.use_when,
+                last_verified=b.last_verified,
+                pr=prs_by_branch.get(b.branch_id),
+            ))
+        for r in snapshot.rejected:
+            nodes.append(TreeVizNode(
+                node_id=r.branch_id,
+                role="rejected",
+                reason=r.reason,
+                sketch=r.evidence,
+                pr=prs_by_branch.get(r.branch_id),
+            ))
+        for p in snapshot.proposed:
+            nodes.append(TreeVizNode(
+                node_id=p.branch_id,
+                role="proposed",
+                sketch=p.sketch,
+                use_when=p.linked_idea,
+            ))
+        return nodes
+
+
+# ---------------------------------------------------------------------------
+# PR cache (process-local, TTL-keyed)
+# ---------------------------------------------------------------------------
+
+
+@dataclass(eq=False, slots=True)
+class _PRCacheEntry:
+    state: str | None = None
+    is_merged: bool = False
+    mergeable: str | None = None
+    checks_status: str | None = None
+    auto_merge_enabled: bool = False
+    title: str | None = None
+    head_sha: str | None = None
+    checked_at: datetime | None = None
+    error: str | None = None
+
+
+_PR_CACHE: dict[str, tuple[float, _PRCacheEntry]] = {}
+_PR_CACHE_TTL_SEC = 90.0
+
+
+def _pr_cache_lookup(url: str) -> _PRCacheEntry | None:
+    """Return a cached entry if still fresh; else None."""
+    import time as _time
+    rec = _PR_CACHE.get(url)
+    if rec is None:
+        return None
+    cached_at, entry = rec
+    if (_time.monotonic() - cached_at) > _PR_CACHE_TTL_SEC:
+        return None
+    return entry
+
+
+def _pr_cache_refresh(url: str) -> _PRCacheEntry:
+    """Run ``gh pr view`` for ``url`` and cache the result.
+
+    Errors (no ``gh`` on PATH, network failure, non-zero exit, JSON
+    decode error) are recorded as a cache entry with ``error`` set
+    so we don't re-spawn ``gh`` on every page render. The cache TTL
+    still applies — a transient failure clears after 90 s.
+    """
+    import shutil
+    import subprocess
+    import time as _time
+
+    entry = _PRCacheEntry(checked_at=datetime.now(timezone.utc))
+    if not shutil.which("gh"):
+        entry.error = "gh not on PATH"
+        _PR_CACHE[url] = (_time.monotonic(), entry)
+        return entry
+    try:
+        proc = subprocess.run(
+            ["gh", "pr", "view", url, "--json",
+             "state,mergedAt,mergeable,title,headRefOid,"
+             "autoMergeRequest,statusCheckRollup"],
+            check=False, capture_output=True, text=True, timeout=20,
+        )
+    except Exception as exc:  # noqa: BLE001
+        entry.error = f"gh raised: {exc!r}"
+        _PR_CACHE[url] = (_time.monotonic(), entry)
+        return entry
+    if proc.returncode != 0:
+        entry.error = (
+            f"gh exit={proc.returncode}: "
+            f"{(proc.stderr or '').strip()[:160]}"
+        )
+        _PR_CACHE[url] = (_time.monotonic(), entry)
+        return entry
+    try:
+        data = json.loads(proc.stdout or "{}")
+    except json.JSONDecodeError:
+        entry.error = "gh returned invalid JSON"
+        _PR_CACHE[url] = (_time.monotonic(), entry)
+        return entry
+
+    entry.state = (str(data.get("state") or "")).upper() or None
+    entry.is_merged = (
+        entry.state == "MERGED" and bool(data.get("mergedAt"))
+    )
+    entry.mergeable = _opt_str(data.get("mergeable"))
+    entry.title = _opt_str(data.get("title"))
+    entry.head_sha = _opt_str(data.get("headRefOid"))
+    entry.auto_merge_enabled = bool(data.get("autoMergeRequest"))
+    rollup = data.get("statusCheckRollup")
+    if isinstance(rollup, list) and rollup:
+        states = [str(r.get("conclusion") or r.get("status") or "")
+                  for r in rollup if isinstance(r, dict)]
+        if any(s == "FAILURE" for s in states):
+            entry.checks_status = "FAILURE"
+        elif any(s in ("PENDING", "IN_PROGRESS", "QUEUED") for s in states):
+            entry.checks_status = "PENDING"
+        elif all(s in ("SUCCESS", "NEUTRAL", "SKIPPED") for s in states):
+            entry.checks_status = "SUCCESS"
+
+    _PR_CACHE[url] = (_time.monotonic(), entry)
+    return entry
+
+
+_PR_NUMBER_RE = re.compile(r"/pull/(\d+)(?:/|$)")
+
+
+def _pr_number_from_url(url: str) -> int | None:
+    m = _PR_NUMBER_RE.search(url)
+    return int(m.group(1)) if m else None
+
+
+def _cell_glyph(passed: bool | None, status: str | None) -> tuple[str, str]:
+    """Map a trial outcome to (icon, Tailwind border-color class)."""
+    if passed is True:
+        return ("✓", "border-emerald-400")
+    if passed is False:
+        return ("✕", "border-rose-400")
+    if status == "errored":
+        return ("!", "border-rose-300")
+    if status in ("pending", "running"):
+        return ("…", "border-amber-300")
+    return ("?", "border-slate-200")
+
+
+def _paired_pass_rate(
+    cells: list[CellRow], leg_a: str, leg_b: str, tasks: list[str],
+) -> tuple[float | None, float | None]:
+    """Return (pass-rate-A, pass-rate-B) over tasks where BOTH ran."""
+    by_key = {(c.leg_id, c.task_name): c for c in cells}
+    paired = [
+        (by_key.get((leg_a, t)), by_key.get((leg_b, t)))
+        for t in tasks
+    ]
+    paired_present = [(a, b) for a, b in paired if a is not None and b is not None]
+    if not paired_present:
+        return None, None
+    pa = sum(1.0 for a, _ in paired_present if a.passed) / len(paired_present)
+    pb = sum(1.0 for _, b in paired_present if b.passed) / len(paired_present)
+    return pa, pb
 
 
 # ---------------------------------------------------------------------------

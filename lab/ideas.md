@@ -1,5 +1,19 @@
 # Ideas
 
+## Auto-proposed
+
+#### loop-guard-on-planner-executor
+
+-   **Motivation:** Once loop-guard lands as a runtime atom on trunk, the same mechanism is more likely to help on planner_executor (which adds a planning hop that can also stall) than on basic alone. Composition test, not yet runnable.
+-   **Sketch:** Paired ablation on planner_executor only: leg A current YAML; leg B same YAML with loop-guard runtime atom enabled. Run on the three positive clusters from the planner_executor branch (security_certificates, system_administration, python_data) plus a same-size negative-cluster control.
+-   **Auto-proposed by:** lab-reflect-and-plan@2026-04-18
+
+#### tool-result-summariser-paired
+
+-   **Motivation:** Sibling of context-compaction but cheaper to test in isolation: rather than truncating raw tool stdout, inject an LLM-generated short summary of any tool result above K tokens before the next turn. Could rescue reflection (currently rejected) without the brittle line-count heuristic of context-compaction.
+-   **Sketch:** Implement behind an AgentConfig flag (off by default). Paired ablation on basic (cheapest harness) with the flag on/off on a slice biased toward tasks where tool stdout exceeded 50 lines in tb2-baseline-full-sweep. Re-test on reflection only if the basic ablation is positive.
+-   **Auto-proposed by:** lab-reflect-and-plan@2026-04-18
+
 ## Proposed
 
 ### Architecture
@@ -36,11 +50,6 @@
 -   **Motivation:** Long-running commands (builds, downloads) hit the bash tool timeout and we have no recovery path.
 -   **Sketch:** Detect timeouts, relaunch the command in background, poll status. Or expose a `run_in_background=True` flag on the bash tool.
 
-#### extended-budget
-
--   **Motivation:** The 30/8192 baseline sometimes hits the agent-phase timeout on heavier `build-*` and `git-*` tasks. Raising to 60/16384 might convert near-misses into passes.
--   **Sketch:** Bump `defaults.max_turns` to 60 and `max_tokens` to 16384 in `experiments/tb2-baseline.yaml` (and matching agent configs).
-
 ### Tools
 
 #### grounded-planner-tools
@@ -66,12 +75,6 @@
 -   **Sketch:** Indexed store of post-run reflections keyed by task signature; planner pulls top-k before producing a plan.
 
 ### Framework
-
-> Improvements to the experimentation framework itself (the `lab/`
-> + `tree_ops.evaluate` machinery), not to any single agent. These
-> tighten the scientific contract pinned in
-> [`METHODOLOGY.md`](METHODOLOGY.md) — each one is referenced from
-> a specific section there as DEFERRED.
 
 #### cluster-combined-slice-shape
 
@@ -99,7 +102,10 @@
 
 ## Trying
 
-_(none)_
+#### extended-budget
+
+-   **Motivation:** The 30/8192 baseline sometimes hits the agent-phase timeout on heavier `build-*` and `git-*` tasks. Raising to 60/16384 might convert near-misses into passes.
+-   **Sketch:** Bump `defaults.max_turns` to 60 and `max_tokens` to 16384 in `experiments/tb2-baseline.yaml` (and matching agent configs).
 
 ## Graduated
 
@@ -108,17 +114,3 @@ _(none)_
 ## Rejected
 
 _(none)_
-
-## Auto-proposed
-
-#### loop-guard-on-planner-executor
-
--   **Motivation:** Once loop-guard lands as a runtime atom on trunk, the same mechanism is more likely to help on planner_executor (which adds a planning hop that can also stall) than on basic alone. Composition test, not yet runnable.
--   **Sketch:** Paired ablation on planner_executor only: leg A current YAML; leg B same YAML with loop-guard runtime atom enabled. Run on the three positive clusters from the planner_executor branch (security_certificates, system_administration, python_data) plus a same-size negative-cluster control.
--   **Auto-proposed by:** lab-reflect-and-plan@2026-04-18
-
-#### tool-result-summariser-paired
-
--   **Motivation:** Sibling of context-compaction but cheaper to test in isolation: rather than truncating raw tool stdout, inject an LLM-generated short summary of any tool result above K tokens before the next turn. Could rescue reflection (currently rejected) without the brittle line-count heuristic of context-compaction.
--   **Sketch:** Implement behind an AgentConfig flag (off by default). Paired ablation on basic (cheapest harness) with the flag on/off on a slice biased toward tasks where tool stdout exceeded 50 lines in tb2-baseline-full-sweep. Re-test on reflection only if the basic ablation is positive.
--   **Auto-proposed by:** lab-reflect-and-plan@2026-04-18

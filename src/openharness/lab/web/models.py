@@ -448,3 +448,171 @@ class ComponentDetail:
     perf_rows: list[ComponentPerfRow]
     experiments_active_in: list[str]
     experiments_count: int
+
+
+# ---------------------------------------------------------------------------
+# Phase 3 — PR-aware redesign view models
+#
+# Surface the methodology dimensions documented in lab/METHODOLOGY.md:
+# every Verdict (`add_branch` / `graduate` / …) is bound to a PR landing
+# on `main`. The web UI needs to know, per row, whether that PR is open,
+# merged, or rejected — and the daemon's idle reason needs to surface it
+# when the next tick is parked waiting for CI to go green.
+# ---------------------------------------------------------------------------
+
+
+@dataclass(eq=False, slots=True)
+class PRStateRow:
+    """Summarised state of one experiment PR.
+
+    Built by :meth:`LabReader.pr_states`. Composes
+    ``tree_diffs.pr_url`` (cheap, always present) with optional
+    ``gh pr view`` data (slow, may be None when ``gh`` is missing or
+    the worker host has no GitHub token). When ``state`` is None the
+    UI renders a "PR open · CI status unknown" fallback rather than
+    pretending the PR doesn't exist.
+
+    ``slug`` and ``instance_id`` are duplicated so callers can render
+    a row without re-joining tree_diffs.
+    """
+
+    slug: str
+    instance_id: str
+    kind: str  # add_branch | graduate
+    pr_url: str
+    pr_number: int | None
+    state: str | None  # OPEN | MERGED | CLOSED
+    is_merged: bool
+    mergeable: str | None  # MERGEABLE | CONFLICTING | UNKNOWN
+    checks_status: str | None  # SUCCESS | FAILURE | PENDING
+    auto_merge_enabled: bool
+    title: str | None
+    head_sha: str | None
+    checked_at: datetime | None
+    error: str | None  # populated when gh refused / wasn't on PATH
+
+
+@dataclass(eq=False, slots=True)
+class DaemonIdleReason:
+    """Why the daemon is not (or is) advancing.
+
+    Computed by :meth:`LabReader.idle_reason` from the live
+    DaemonState and the PR cache. Surfaced by the homepage's "Now /
+    Waiting on" zones so the operator can tell at a glance whether
+    the lab is genuinely idle, paused on purpose, or blocked on
+    something they need to resolve.
+
+    ``code`` values:
+      - ``running``        — there is an active tick; ``slug`` set
+      - ``paused``         — daemon mode == "paused"
+      - ``manual_no_appr`` — manual mode, no approved+ready entries
+      - ``no_queue``       — autonomous (or manual) but nothing ready
+      - ``pr_blocked``     — at least one AddBranch PR is unmerged
+      - ``stopped``        — daemon is not running at all
+      - ``unknown``        — fallback so the UI never renders "" badge
+    """
+
+    code: str
+    detail: str
+    slug: str | None = None
+    blocking_prs: list[str] = field(default_factory=list)
+
+
+@dataclass(eq=False, slots=True)
+class ActivityLogEntry:
+    """One row in the unified ``/log`` activity timeline.
+
+    Fold-in of audit-log entries (``runs/lab/web_commands.jsonl``),
+    tick history (from daemon_state.history), spawn finishes (from
+    DuckDB ``spawns``), trunk swaps (``trunk_changes``), and tree
+    verdicts (``tree_diffs``). Lets the operator see "what changed in
+    the last hour" without bouncing between four pages.
+
+    ``kind`` is one of:
+      - ``cmd``            — web /api/cmd execution
+      - ``tick``           — daemon tick finished
+      - ``spawn``          — codex skill spawn finished
+      - ``verdict``        — tree_diffs row appeared
+      - ``trunk-swap``     — trunk_changes row appeared
+    """
+
+    at_ts: datetime
+    kind: str
+    actor: str
+    title: str
+    detail: str | None = None
+    slug: str | None = None
+    instance_id: str | None = None
+    success: bool | None = None
+    href: str | None = None
+
+
+@dataclass(eq=False, slots=True)
+class CellRow:
+    """One cell in the per-task × per-leg evidence matrix.
+
+    Rebuilt for the ``/runs/<id> Cells`` tab; the older
+    :class:`TrialRow` only carried per-trial scalars. Here we also
+    expose:
+
+    - ``cluster``          — task-feature category, used for grouping
+    - ``trial_dir``        — drawer link target
+    - ``status_glyph``     — pre-computed icon class for the cell
+    - ``border_color``     — pre-computed Tailwind class so the
+      template doesn't have to ladder through if/elif by status
+    """
+
+    task_name: str
+    task_checksum: str | None
+    leg_id: str
+    cluster: str
+    trial_id: str
+    passed: bool | None
+    score: float | None
+    status: str | None
+    cost_usd: float | None
+    duration_sec: float | None
+    n_turns: int | None
+    trial_dir: str
+    status_glyph: str = "?"
+    border_color: str = "border-slate-200"
+
+
+@dataclass(eq=False, slots=True)
+class ClusterDeltaRow:
+    """Per-cluster paired-Δ across the experiment's legs.
+
+    Drives the ``/runs/<id> Δ`` tab's headline numbers. ``warning``
+    fires when the per-cluster trial count falls below the
+    methodology's "minimum power" floor, so the operator can flag
+    the row as "noise, not signal" without re-reading
+    ``METHODOLOGY.md``.
+    """
+
+    cluster: str
+    n_tasks: int
+    leg_a: str
+    leg_b: str
+    delta_pp: float | None
+    warning: bool
+
+
+@dataclass(eq=False, slots=True)
+class TreeVizNode:
+    """One node in the configuration-tree visualisation.
+
+    Joined view: ``lab/configs.md`` (trunk + branches + rejected +
+    proposed) + ``tree_diffs.pr_url`` + the live PR cache. The
+    template uses this to render the SVG with per-node badges
+    indicating which branch has an open PR (dashed outline), a
+    merged PR (solid border), or no PR yet (no badge).
+    """
+
+    node_id: str
+    role: str  # trunk | branch | rejected | proposed
+    mutation: str | None = None
+    use_when: str | None = None
+    sketch: str | None = None
+    reason: str | None = None
+    last_verified: str | None = None
+    pr: PRStateRow | None = None

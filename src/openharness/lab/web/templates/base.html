@@ -72,19 +72,17 @@
             <span class="text-[10px] uppercase tracking-wide bg-slate-100 text-slate-500 rounded px-1.5 py-0.5"
                   title="Open mode — loopback / SSH-tunnel deployment. Set LAB_TRUST_PROXY_AUTH before exposing beyond loopback.">open</span>
           {% endif %}
-          {# DB-connected badge: hide on the smallest screens to give the
-             pending button room. Operators can still see it on /daemon. #}
+          {# DB-connected badge. The pending counter has moved into the
+             "You owe" panel on the new home page (/), so the header is
+             now just the auth posture + DB status. #}
           <span class="text-xs text-slate-400 hidden sm:inline">{% if db_available %}DB connected{% else %}<span class="text-rose-600">DB missing — run a write CLI first</span>{% endif %}</span>
-          {# Plain link to /pending — the right drawer (when visible)
-             auto-refreshes on its own (every 30s + lab-pending-changed),
-             so a button that only forces a drawer re-fetch isn't worth
-             losing the navigation behaviour on narrow viewports where
-             the drawer is collapsed. #}
-          <a href="/pending"
-             class="rounded-md border border-slate-200 hover:border-slate-400 px-2.5 py-1 text-sm flex items-center gap-1.5">
-            <span>Pending</span>
-            <span class="bg-amber-200 text-amber-900 rounded-full px-2 py-px text-xs font-semibold">{{ pending.total }}</span>
-          </a>
+          {% if (pending.total or 0) > 0 %}
+            <a href="/#you-owe"
+               class="rounded-md border border-amber-300 bg-amber-50 hover:bg-amber-100 px-2.5 py-1 text-sm flex items-center gap-1.5 text-amber-900">
+              <span>You owe</span>
+              <span class="bg-amber-200 text-amber-900 rounded-full px-2 py-px text-xs font-semibold">{{ pending.total }}</span>
+            </a>
+          {% endif %}
         </div>
       </header>
 
@@ -108,23 +106,10 @@
       </div>
     </main>
 
-    {# ``lab-pending-changed from:body`` re-fetches the drawer the
-       moment a command mutates pending state, so the operator never
-       sees a stale ``Confirm trunk swap`` button after they just
-       confirmed it. The 30s poll stays as a backstop for daemon-side
-       changes that didn't originate from this browser tab. #}
-    <aside class="w-80 border-l border-slate-200 bg-white shrink-0 hidden lg:block"
-           hx-get="/_hx/pending"
-           hx-trigger="load, every 30s, lab-pending-changed from:body"
-           hx-target="#drawer-body" hx-swap="innerHTML">
-      <div class="p-4 border-b border-slate-200">
-        <h2 class="font-semibold text-slate-700">Pending actions</h2>
-        <p class="text-xs text-slate-400 mt-1">Updates every 30s</p>
-      </div>
-      <div id="drawer-body" class="p-3 text-sm overflow-y-auto" style="max-height: calc(100vh - 5rem);">
-        {% include "_drawer.html" %}
-      </div>
-    </aside>
+    {# Right-rail "Pending actions" drawer was removed in the IA
+       redesign — the same actions surface in the "You owe" zone on
+       the home page (/). Removing the rail also gives the main pane
+       the full viewport width, which the new dense pages need. #}
   </div>
 </body>
 </html>

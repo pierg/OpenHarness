@@ -2,16 +2,26 @@
 {% block title %}Components · OpenHarness lab{% endblock %}
 {% block crumbs %}<a href="/" class="hover:underline">Home</a> / Components{% endblock %}
 {% block content %}
-<h1 class="text-xl font-semibold mb-4">Components catalog</h1>
+<div class="flex flex-wrap items-baseline gap-3 mb-4">
+  <h1 class="text-xl font-semibold">Components catalog</h1>
+  <nav class="ml-auto text-xs text-slate-500 flex flex-wrap gap-x-4">
+    <a href="/components-perf" class="hover:underline">Perf matrix ›</a>
+    <a href="/tree" class="hover:underline">Configuration tree ›</a>
+  </nav>
+</div>
 
 <div id="cmd-result" class="mb-4"></div>
 
-{# Add/upsert form. Same form covers create + update — the CLI is
-   idempotent and uses the forward-only bump lattice when ``--status``
-   is supplied (so existing entries can't be downgraded by accident
-   from this surface). For unconditional status setting use the inline
-   select on each row, which calls ``component-set-status``. #}
-{% if identity.can_write %}
+{# Component upsert/add forms removed in the IA redesign. Components
+   are managed via the CLI (`uv run lab components upsert …`) or the
+   `lab-implement-variant` skill. The web UI no longer accepts
+   free-form text input. The catalog table below is read-only. #}
+<div class="mb-4 rounded-md border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600">
+  Components are managed via <code class="font-mono">uv run lab components …</code> or the
+  <code class="font-mono">lab-implement-variant</code> skill. This page is read-only.
+</div>
+
+{% if False %}
 <details class="mb-6 bg-white border border-slate-200 rounded-lg">
   <summary class="cursor-pointer px-4 py-3 font-medium select-none flex items-baseline gap-2">
     <span class="text-emerald-700">＋</span>

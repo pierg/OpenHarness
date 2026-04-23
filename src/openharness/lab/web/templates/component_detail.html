@@ -12,7 +12,13 @@
   <a href="/components-perf" class="ml-auto text-xs text-blue-600 hover:underline">perf matrix ›</a>
 </header>
 
-{% if identity.can_write %}
+{# Component editing forms removed in the IA redesign. Use the CLI:
+   `uv run lab components set-status …` / `lab components upsert …`. #}
+<div class="mb-4 rounded-md border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600">
+  Component edits go through <code class="font-mono">uv run lab components …</code>. This page is read-only.
+</div>
+
+{% if False %}
 {% set status_options = [
   "proposed", "experimental", "branch", "validated", "rejected", "superseded"
 ] %}

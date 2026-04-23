@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 {% block title %}{{ instance_id }} · OpenHarness lab{% endblock %}
-{% block crumbs %}<a href="/" class="hover:underline">Home</a> / <a href="/experiments" class="hover:underline">Experiments</a> / <span class="font-mono text-xs">{{ instance_id }}</span>{% endblock %}
+{% block crumbs %}<a href="/" class="hover:underline">Home</a> / <a href="/runs" class="hover:underline">Runs</a> / <span class="font-mono text-xs">{{ instance_id }}</span>{% endblock %}
 {% block content %}
 
 <header class="mb-6 flex flex-wrap items-baseline gap-3">
@@ -15,26 +15,61 @@
       {% if verdict.target_id %} · <span class="font-mono">{{ verdict.target_id }}</span>{% endif %}
     </span>
   {% endif %}
+  {% set pr = pr_for_run if pr_for_run is defined else none %}
+  {% if pr %}
+    {# Inline PR badge — methodology-aligned: AddBranch auto-merges,
+       Graduate waits for human review. The badge is a direct link to
+       GitHub so reviewers can act in one click. #}
+    {% include "_pr_badge.html" with context %}
+  {% endif %}
 </header>
 
 {% if verdict and verdict.kind == 'graduate' and not verdict.applied %}
+  {% set pr_for_gate = pr_for_run if pr_for_run is defined else none %}
   <section class="border border-amber-300 bg-amber-50 rounded-lg p-4 mb-6">
     <div class="font-semibold text-amber-900">Trunk swap awaiting confirmation</div>
     <p class="text-sm text-amber-800 mt-1">{{ verdict.rationale or "—" }}</p>
+
+    {# PR/merge gate. The methodology binds graduate-confirm to PR
+       state=MERGED. Show the operator exactly why the button is or
+       isn't available so they aren't confused by the disabled CTA. #}
+    {% if pr_for_gate %}
+      <p class="text-xs text-amber-800 mt-2">
+        Graduate PR: {% include "_pr_badge.html" with context %}
+        {% if not pr_for_gate.is_merged %}
+          <span class="ml-1 italic">— <code>lab graduate-confirm</code> refuses until the PR is merged.</span>
+        {% else %}
+          <span class="ml-1 italic">— PR merged; trunk swap unblocked.</span>
+        {% endif %}
+      </p>
+    {% else %}
+      <p class="text-xs text-amber-800 mt-2 italic">
+        No graduate PR yet. <code>lab finalize</code> opens it; until then the trunk-swap CLI is the only path.
+      </p>
+    {% endif %}
+
     {% if identity.can_write %}
-      <form hx-post="/api/cmd" hx-target="#cmd-result" hx-swap="innerHTML"
-            hx-confirm="Confirm trunk swap to {{ verdict.target_id }}? This swaps the active trunk yaml."
-            class="mt-2 flex items-center gap-2 flex-wrap">
-        <input type="hidden" name="cmd_id" value="graduate-confirm">
-        <input type="hidden" name="slug" value="{{ verdict.slug or instance_id }}">
-        <button class="text-xs bg-amber-700 hover:bg-amber-800 text-white rounded px-3 py-1.5 font-semibold">
-          Confirm trunk swap
+      {% if pr_for_gate and not pr_for_gate.is_merged %}
+        <button class="mt-2 text-xs bg-slate-200 text-slate-500 rounded px-3 py-1.5 font-semibold cursor-not-allowed"
+                disabled
+                title="lab graduate-confirm refuses unless gh pr view reports state=MERGED">
+          Confirm trunk swap (PR not merged)
         </button>
-        <span class="text-xs text-amber-800">
-          CLI equivalent:
-          <code class="font-mono">uv run lab graduate-confirm {{ verdict.slug or instance_id }}</code>
-        </span>
-      </form>
+      {% else %}
+        <form hx-post="/api/cmd" hx-target="#cmd-result" hx-swap="innerHTML"
+              hx-confirm="Confirm trunk swap to {{ verdict.target_id }}? This swaps the active trunk yaml."
+              class="mt-2 flex items-center gap-2 flex-wrap">
+          <input type="hidden" name="cmd_id" value="graduate-confirm">
+          <input type="hidden" name="slug" value="{{ verdict.slug or instance_id }}">
+          <button class="text-xs bg-amber-700 hover:bg-amber-800 text-white rounded px-3 py-1.5 font-semibold">
+            Confirm trunk swap
+          </button>
+          <span class="text-xs text-amber-800">
+            CLI equivalent:
+            <code class="font-mono">uv run lab graduate-confirm {{ verdict.slug or instance_id }}</code>
+          </span>
+        </form>
+      {% endif %}
     {% else %}
       <div class="mt-2 font-mono text-xs bg-white px-2 py-1 rounded border border-amber-200 inline-block select-all">uv run lab graduate-confirm {{ verdict.slug or instance_id }}</div>
     {% endif %}
@@ -245,6 +280,65 @@
       </li>
     {% endfor %}
   </ul>
+</section>
+{% endif %}
+
+{# ──────────────────────────────────────────────────────────────────
+   Paired delta-by-cluster.
+   Methodology calls out that the "real" measurement unit is the
+   per-cluster paired delta (legA - legB on the *same* tasks). This
+   block surfaces it inline so the operator doesn't have to scroll
+   through the legs/cells tables to recover it. Only renders when the
+   route handler supplies a non-empty cluster_deltas list.
+   ────────────────────────────────────────────────────────────────── #}
+{% if cluster_deltas is defined and cluster_deltas %}
+<section class="bg-white border border-slate-200 rounded-lg p-5 mt-6">
+  <h2 class="font-semibold mb-1">Paired Δ by cluster</h2>
+  <p class="text-xs text-slate-500 mb-3">
+    Each row compares two legs on the <em>same</em> tasks within a
+    cluster. Δ = treated pass-rate − control pass-rate (positive =
+    treatment wins). N is the number of paired tasks per cluster.
+  </p>
+  <div class="-mx-5 px-5 overflow-x-auto">
+  <table class="w-full text-sm min-w-[640px]">
+    <thead>
+      <tr class="text-xs uppercase text-slate-500 border-b border-slate-200 text-left">
+        <th class="py-2">Cluster</th>
+        <th>Treatment</th>
+        <th>Control</th>
+        <th class="text-right">N</th>
+        <th class="text-right">Δ pass-rate</th>
+        <th class="text-right">Treat / Ctrl</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for d in cluster_deltas %}
+        <tr class="border-b border-slate-100">
+          <td class="py-1.5">{{ d.cluster }}</td>
+          <td class="font-mono text-xs">{{ d.treated_leg }}</td>
+          <td class="font-mono text-xs">{{ d.control_leg }}</td>
+          <td class="text-right text-xs">{{ d.n_paired }}</td>
+          <td class="text-right">
+            <span class="font-mono text-xs px-1.5 py-0.5 rounded
+                  {% if d.delta_pp is none %}bg-slate-100 text-slate-500
+                  {% elif d.delta_pp > 0 %}bg-emerald-100 text-emerald-900
+                  {% elif d.delta_pp < 0 %}bg-rose-100 text-rose-900
+                  {% else %}bg-slate-100 text-slate-700{% endif %}">
+              {% if d.delta_pp is none %}—
+              {% elif d.delta_pp > 0 %}+{{ '{:.1f}'.format(d.delta_pp) }}pp
+              {% else %}{{ '{:.1f}'.format(d.delta_pp) }}pp{% endif %}
+            </span>
+          </td>
+          <td class="text-right text-xs font-mono text-slate-600">
+            {% if d.treated_pass_pct is not none and d.control_pass_pct is not none -%}
+              {{ '{:.0f}%'.format(d.treated_pass_pct) }} / {{ '{:.0f}%'.format(d.control_pass_pct) }}
+            {%- else -%}—{%- endif %}
+          </td>
+        </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  </div>
 </section>
 {% endif %}
 

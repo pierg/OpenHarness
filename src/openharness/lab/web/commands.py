@@ -427,6 +427,12 @@ COMMANDS: dict[str, CommandSpec] = {
         confirm_text=None,
         events=["lab-pending-changed", "lab-ideas-changed"],
     ),
+    # NOTE: idea-append / roadmap-add / roadmap-suggest /
+    # component-set-status / component-upsert remain registered so
+    # the CLI audit shape is identical for every writer. The web UI
+    # no longer surfaces forms for them per the operator's
+    # "no raw user input via the UI" redesign brief — entries land
+    # via skills (`lab-propose-idea`, `lab-plan-next`) or the CLI.
     "idea-append": CommandSpec(
         cmd_id="idea-append",
         label="Propose new idea",

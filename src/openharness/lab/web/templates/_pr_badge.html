@@ -1,0 +1,49 @@
+{# Small inline PR badge.
+
+   Usage:
+     {% include "_pr_badge.html" with context %}
+   where the caller has set ``pr`` to a PRStateRow (or None).
+
+   Renders:
+     · #123 OPEN ✓ ci  (auto-merge)        for an open AddBranch PR
+     · #124 MERGED                          once merged
+     · #125 OPEN · awaiting review          for a Graduate PR
+     · #126 status unknown (gh missing)     when the cache has an error
+     · nothing at all if pr is None.
+
+   Color encoding mirrors the lab methodology:
+     - emerald: merged
+     - amber:   open (AddBranch — daemon waits for merge)
+     - violet:  open (Graduate — human reviewer is the gate)
+     - rose:    closed without merge
+     - slate:   unknown (gh not installed / api error)
+#}
+{% if pr %}
+  {%- if pr.is_merged -%}
+    {%- set _palette = ("border-emerald-300", "bg-emerald-50", "text-emerald-900") -%}
+    {%- set _label = "MERGED" -%}
+  {%- elif pr.state == "OPEN" and pr.kind == "graduate" -%}
+    {%- set _palette = ("border-violet-300", "bg-violet-50", "text-violet-900") -%}
+    {%- set _label = "OPEN · awaiting review" -%}
+  {%- elif pr.state == "OPEN" -%}
+    {%- set _palette = ("border-amber-300", "bg-amber-50", "text-amber-900") -%}
+    {%- set _label = "OPEN" -%}
+  {%- elif pr.state == "CLOSED" -%}
+    {%- set _palette = ("border-rose-300", "bg-rose-50", "text-rose-900") -%}
+    {%- set _label = "CLOSED" -%}
+  {%- else -%}
+    {%- set _palette = ("border-slate-300", "bg-slate-50", "text-slate-700") -%}
+    {%- set _label = (pr.state or "status unknown") -%}
+  {%- endif -%}
+  <a href="{{ pr.pr_url }}" target="_blank" rel="noopener"
+     class="inline-flex items-baseline gap-1 px-1.5 py-0.5 rounded border text-xs hover:brightness-95 {{ _palette[0] }} {{ _palette[1] }} {{ _palette[2] }}"
+     title="{{ pr.title or pr.pr_url }}{% if pr.error %} — {{ pr.error }}{% endif %}">
+    <span class="font-mono">PR #{{ pr.pr_number or "?" }}</span>
+    <span>{{ _label }}</span>
+    {%- if pr.checks_status == "PASS" %} <span class="text-emerald-700">✓ ci</span>
+    {%- elif pr.checks_status == "FAIL" %} <span class="text-rose-700">✕ ci</span>
+    {%- elif pr.checks_status == "PENDING" %} <span class="text-slate-500">… ci</span>
+    {%- endif %}
+    {%- if pr.auto_merge_enabled and not pr.is_merged %} <span class="text-slate-500">(auto-merge)</span>{%- endif %}
+  </a>
+{% endif %}
