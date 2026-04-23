@@ -302,5 +302,3 @@ could satisfy on the first try.
   move is to refuse with a one-paragraph note and let the
   orchestrator demote the entry. Don't pad `design.md` with
   defensive prose.
-th
-  defensive prose.
