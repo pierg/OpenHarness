@@ -5,7 +5,7 @@
 -   **Type:** paired-ablation
 -   **Trunk at run-time:** [`trunk`](../src/openharness/agents/configs/trunk.yaml)
 -   **Hypothesis:** the 22.5% baseline is meaningfully budget-bound on the near-miss slice; raising `max_turns` from 30 → 60 → 120 (with `max_tokens` scaled 8192 → 16384 → 32768) lifts pass-rate by ≥10pp on tasks that pinned `n_turns=30` in `tb2-baseline-full-sweep`.
--   **Run:** _(filled after the run completes)_
+-   **Run:** [`runs/experiments/extended-budget-paired-on-trunk-20260423-184410`](../runs/experiments/extended-budget-paired-on-trunk-20260423-184410)
 -   **Branch:** `lab/extended-budget-paired-on-trunk`
 
 ### Aggregate
