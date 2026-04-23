@@ -18,6 +18,7 @@
 | ID | Reason | Evidence |
 |----|--------|----------|
 | `reflection` | context blow-up: ≥ 500k input tokens / trial on the smoke slice. Re-add only with [`reflection-context-compaction`](ideas.md#reflection-context-compaction). | [`reflection-context-compaction`](ideas.md#reflection-context-compaction) (idea — not yet on the roadmap; needs a meaningful slice, not a smoke run) |
+| `basic` | Δ pass-rate = -3.6pp; Δ $/pass = -85%; no positive cluster. (also: basic_60_16384 → no_op: Inconclusive: Δ pass-rate = +0.0pp (trunk 14.3% vs mutation 14.3%); 0 positive cluster(s) (threshold 2); Δ $/ | /home/pier_ridgesecurity_ai/OpenHarness/runs/experiments/extended-budget-paired-on-trunk-20260423-184410/critic/experiment-critic.json, /home/pier_ridgesecurity_ai/OpenHarness/runs/experiments/extended-budget-paired-on-trunk-20260423-184410/critic/comparisons |
 
 ## Proposed
 

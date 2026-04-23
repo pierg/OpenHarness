@@ -9,21 +9,40 @@
 -   **Branch:** `lab/extended-budget-paired-on-trunk`
 
 ### Aggregate
-
-_(pending)_
-
+| Leg | Agent | Trials | Passed | Failed | Pass rate | Cost (USD) |
+|-----|-------|-------:|-------:|-------:|----------:|-----------:|
+| `basic_120_32768` | `basic` | 28 | 4 | 24 | 14.3% | $20.63 |
+| `basic_30_8192` | `basic` | 28 | 3 | 25 | 10.7% | $2.28 |
+| `basic_60_16384` | `basic` | 28 | 4 | 24 | 14.3% | $6.58 |
 ### Mutation impact
-
-_(pending)_
-
+Relative to trunk `basic_30_8192` (10.7% pass, 3/28), both extended budgets improved to 14.3% (4/28), a +3.6 percentage-point gain driven entirely by the `scientific_computing` task `tune-mjcf`; `crack-7z-hash`, `headless-terminal`, and `pytorch-model-cli` already passed across legs and only changed on efficiency. The 60-turn/16k leg captured the full pass-rate gain at 2.9x trunk cost ($6.58 vs $2.28), while the 120-turn/32k leg added 0 extra percentage points over 60-turn and raised cost to 9.1x trunk ($20.63). The causal pattern is narrow: extra search budget helps evaluator-guided optimization, but on most tasks it just prolongs the same `repeated_failed_command` / `timeout_no_recovery` loops and increases `hallucinated_success`.
 ### Failure modes
-
-_(pending)_
-
+-   **repeated_command_loops** (×64): 64/84 trials carried `repeated_failed_command` or `timeout_no_recovery`: the agent kept rerunning near-identical probes after a blocker instead of switching strategy.
+-   **premature_abandonment** (×31): 31 trials were tagged `gave_up_too_early`, usually after the first missing-tool or hard-instance signal rather than after a verifier-grounded recovery attempt.
+-   **wrong_tool_selection** (×23): 23 trials used the wrong tool family for the job, such as regex scraping or environment mutation where the task needed direct artifact generation, compilation, or evaluator-guided tuning.
+-   **required_artifact_never_written** (×15): 15 trials made partial analytical progress but still never wrote the required output artifact, which is the decisive miss on tasks like `db-wal-recovery`, `password-recovery`, and `write-compressor`.
+-   **insufficient_workspace_inspection** (×14): 14 trials were tagged `no_pre_edit_inspection`, with the agent locking onto regex-only or guessed-distribution plans before inspecting the real workspace and verifier contract.
+-   **false_completion_after_partial_validation** (×6): 6 trials showed `hallucinated_success` or `partial_verification`: the agent treated a partial local check as completion even though the verifier still exercised missing paths.
 ### Tree effect
+-   **Verdict:** **Reject** — auto-applied
+-   **Target:** `basic`
+-   **Pair:** trunk leg `basic_120_32768` vs mutation `basic_30_8192`
+-   **Δ pass-rate:** -3.57 pp
+-   **Δ $/pass:** -85.3%
+-   **Confidence:** 0.71
+-   **Rationale:** Δ pass-rate = -3.6pp; Δ $/pass = -85%; no positive cluster. (also: basic_60_16384 → no_op: Inconclusive: Δ pass-rate = +0.0pp (trunk 14.3% vs mutation 14.3%); 0 positive cluster(s) (threshold 2); Δ $/pass = -68%.)
+-   **Evidence:** [`experiment-critic.json`](../runs/experiments/extended-budget-paired-on-trunk-20260423-184410/critic/experiment-critic.json), [`comparisons`](../runs/experiments/extended-budget-paired-on-trunk-20260423-184410/critic/comparisons), [`critic_summary.md`](../runs/experiments/extended-budget-paired-on-trunk-20260423-184410/results/critic_summary.md)
 
-_(pending)_
-
+| Cluster | trunk pass | mut pass | Δ pp |
+|---------|-----------:|---------:|-----:|
+| `scientific_computing` | 1/1 | 0/1 | -100.0 |
+| `binary_emulation` | 0/1 | 0/1 | +0.0 |
+| `c_build` | 0/3 | 0/3 | +0.0 |
+| `c_graphics` | 0/1 | 0/1 | +0.0 |
+| `c_ml_inference` | 0/1 | 0/1 | +0.0 |
+| `c_runtime_debugging` | 0/1 | 0/1 | +0.0 |
+| `compression_reverse_engineering` | 0/1 | 0/1 | +0.0 |
+| `coq_theorem_proving` | 0/1 | 0/1 | +0.0 |
 ### Linked follow-ups
 
 _(pending)_
