@@ -6,62 +6,15 @@
 
 <div id="cmd-result" class="mb-4"></div>
 
-{# Propose-an-idea form. Collapsed by default so the page reads as a
-   browse view first; admins see the form, viewers and anonymous see
-   nothing extra. The form posts to the same /api/cmd endpoint every
-   other writer uses. #}
-{% if identity.can_write %}
-<details class="mb-6 bg-white border border-slate-200 rounded-lg">
-  <summary class="cursor-pointer px-4 py-3 font-medium select-none flex items-baseline gap-2">
-    <span class="text-emerald-700">＋</span>
-    <span>Propose new idea</span>
-    <span class="text-xs text-slate-500 ml-auto">appends to <code class="font-mono">## Proposed</code></span>
-  </summary>
-  <form hx-post="/api/cmd" hx-target="#cmd-result" hx-swap="innerHTML"
-        class="px-4 pb-4 space-y-3 text-sm">
-    <input type="hidden" name="cmd_id" value="idea-append">
-    <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
-      <label class="block">
-        <span class="block text-xs font-medium text-slate-700 mb-1">Idea id <span class="text-rose-600">*</span></span>
-        <input name="idea_id" required pattern="[A-Za-z0-9][A-Za-z0-9_.\-]{0,127}"
-               placeholder="loop-guard"
-               class="w-full font-mono text-sm border border-slate-300 rounded px-2 py-1 focus:border-emerald-500 focus:outline-none">
-        <span class="block text-xs text-slate-500 mt-1">Lowercase slug, hyphen-separated. Must be unique.</span>
-      </label>
-      <label class="block">
-        <span class="block text-xs font-medium text-slate-700 mb-1">Theme <span class="text-rose-600">*</span></span>
-        <select name="theme" required
-                class="w-full text-sm border border-slate-300 rounded px-2 py-1 focus:border-emerald-500 focus:outline-none">
-          <option value="">— choose —</option>
-          <option value="Architecture">Architecture</option>
-          <option value="Runtime">Runtime</option>
-          <option value="Tools">Tools</option>
-          <option value="Memory">Memory</option>
-        </select>
-      </label>
-    </div>
-    <label class="block">
-      <span class="block text-xs font-medium text-slate-700 mb-1">Motivation <span class="text-rose-600">*</span></span>
-      <input name="motivation" required maxlength="512"
-             placeholder="Why this might be worth trying."
-             class="w-full text-sm border border-slate-300 rounded px-2 py-1 focus:border-emerald-500 focus:outline-none">
-    </label>
-    <label class="block">
-      <span class="block text-xs font-medium text-slate-700 mb-1">Sketch <span class="text-rose-600">*</span></span>
-      <textarea name="sketch" required rows="4" maxlength="4096"
-                placeholder="Rough outline of the change. Multi-line OK."
-                class="w-full text-sm border border-slate-300 rounded px-2 py-1 font-mono focus:border-emerald-500 focus:outline-none"></textarea>
-    </label>
-    <div class="flex items-center justify-end gap-3 pt-1">
-      <button type="button" onclick="this.closest('details').open=false"
-              class="text-xs text-slate-600 hover:underline">Cancel</button>
-      <button class="text-sm bg-emerald-600 hover:bg-emerald-700 text-white rounded px-4 py-1.5">
-        Propose
-      </button>
-    </div>
-  </form>
-</details>
-{% endif %}
+{# The "Propose new idea" raw-input form was removed in the IA
+   redesign. Per the operator brief, ideas land via the CLI / skill
+   path (`uv run lab idea-append` or the `lab-propose-idea` skill).
+   The web UI no longer accepts free-form text input; "You owe" on
+   the home page surfaces the inbox with one-click confirmations only. #}
+<div class="mb-4 rounded-md border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600">
+  Ideas are added via the CLI (<code class="font-mono">uv run lab idea-append …</code>) or the
+  <code class="font-mono">lab-propose-idea</code> skill. The web UI no longer accepts raw input.
+</div>
 
 <div id="ideas-body"
      hx-get="/_hx/ideas-body"

@@ -6,11 +6,18 @@
 
 <div id="cmd-result" class="mb-4"></div>
 
-{# Two creation forms, both collapsed by default. ``add`` is the human
-   path (lands directly in Up next); ``suggest`` is the daemon path
-   (lands in Suggested for human review). We still expose both to
-   admins so the human can simulate either flow when needed. #}
-{% if identity.can_write %}
+{# Roadmap entries land via the CLI / lab-plan-next skill; the web UI
+   no longer accepts free-form text input. Operators promote or
+   discard suggestions one-click via the home page's "You owe" zone. #}
+<div class="mb-4 rounded-md border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600">
+  Roadmap entries are added via the CLI (<code class="font-mono">uv run lab roadmap-add …</code>)
+  or the <code class="font-mono">lab-plan-next</code> skill. Use the home page's
+  <a href="/#you-owe" class="text-blue-700 hover:underline">You owe</a> panel for
+  one-click promote / discard on daemon-suggested entries.
+</div>
+
+{# Suppressed forms — keep template intact for legacy URL but make them invisible. #}
+{% if False %}
 <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
   <details class="bg-white border border-slate-200 rounded-lg">
     <summary class="cursor-pointer px-4 py-3 font-medium select-none flex items-baseline gap-2">

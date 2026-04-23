@@ -167,27 +167,39 @@ def _client():  # type: ignore[no-untyped-def]
     return TestClient(create_app())
 
 
-def test_ideas_page_renders_create_form_in_open_mode() -> None:
+def test_ideas_page_no_longer_renders_raw_input_form() -> None:
+    # IA redesign: raw user input forms removed. Ideas land via CLI/skill
+    # path (`uv run lab idea-append`); the UI shows a read-only catalog
+    # plus a "where to add ideas" notice.
     r = _client().get("/ideas")
     assert r.status_code == 200
-    assert 'cmd_id" value="idea-append"' in r.text
-    # And the per-card move buttons.
+    assert 'cmd_id" value="idea-append"' not in r.text
+    # Per-card actions (move) survive — they're one-click confirmations,
+    # not free-form input.
     assert 'cmd_id" value="idea-move"' in r.text
+    # The replacement notice is present.
+    assert "lab-propose-idea" in r.text or "idea-append" in r.text
 
 
-def test_roadmap_page_renders_both_create_forms() -> None:
+def test_roadmap_page_no_longer_renders_raw_input_forms() -> None:
+    # IA redesign: roadmap-add / roadmap-suggest forms removed. Operators
+    # use the CLI / `lab-plan-next` skill, or one-click promote/discard
+    # on the home-page "You owe" zone.
     r = _client().get("/roadmap")
     assert r.status_code == 200
-    assert 'cmd_id" value="roadmap-add"' in r.text
-    assert 'cmd_id" value="roadmap-suggest"' in r.text
+    assert 'cmd_id" value="roadmap-add"' not in r.text
+    assert 'cmd_id" value="roadmap-suggest"' not in r.text
+    assert "lab-plan-next" in r.text or "roadmap-add" in r.text
 
 
-def test_components_page_renders_upsert_and_inline_status() -> None:
+def test_components_page_no_longer_renders_upsert_or_inline_status() -> None:
+    # IA redesign: component-upsert and the inline per-row
+    # component-set-status select were removed. The catalog is read-only.
     r = _client().get("/components")
     assert r.status_code == 200
-    assert 'cmd_id" value="component-upsert"' in r.text
-    # The inline per-row select for force-setting status.
-    assert 'cmd_id" value="component-set-status"' in r.text
+    assert 'cmd_id" value="component-upsert"' not in r.text
+    assert 'cmd_id" value="component-set-status"' not in r.text
+    assert "lab-implement-variant" in r.text or "components" in r.text
 
 
 def test_components_body_partial_used_for_autorefresh() -> None:
@@ -261,6 +273,114 @@ def test_api_cmd_rejects_unknown_extras() -> None:
     })
     assert r.status_code == 400
     assert "unexpected param" in r.text
+
+
+# ---------------------------------------------------------------------------
+# IA redesign smoke tests
+# ---------------------------------------------------------------------------
+#
+# After the 6-page IA redesign, the following surfaces should all
+# render with HTTP 200 and contain the expected anchor text. These are
+# pure smoke tests — they do not assert on layout — but they catch
+# template-undefined errors (the most common regression after a route
+# refactor) and protect the navigation contract.
+
+
+def test_home_page_renders_three_zones_and_pr_aware_idle_reason() -> None:
+    r = _client().get("/")
+    assert r.status_code == 200
+    body = r.text
+    # The three zones the operator sees first.
+    assert "Now" in body
+    # Zone anchors used by the "You owe" pill in the header.
+    assert 'id="you-owe"' in body or "You owe" in body
+    # HTMX partials mounted on first render.
+    assert "/_hx/idle-reason" in body
+    assert "/_hx/you-owe" in body
+
+
+def test_idle_reason_partial_renders_a_palette() -> None:
+    r = _client().get("/_hx/idle-reason")
+    assert r.status_code == 200
+    # One of the operational states should be reflected somewhere.
+    body = r.text.lower()
+    assert any(token in body for token in (
+        "idle", "running", "paused", "stopped", "blocked", "queue",
+    ))
+
+
+def test_you_owe_partial_renders_or_is_empty_state() -> None:
+    r = _client().get("/_hx/you-owe")
+    assert r.status_code == 200
+    # Either the operator owes nothing (empty state) or there are
+    # actionable rows. In both cases the partial must render — not
+    # throw an UndefinedError.
+    body = r.text
+    assert any(token in body for token in (
+        "You owe", "Nothing", "Graduate", "Discard", "Promote", "queue",
+        # In empty state the partial still has to render *something*
+        # benign — any non-empty body is acceptable as long as no
+        # template error leaked through.
+    ))
+
+
+def test_log_page_renders_filter_form_and_kind_pills() -> None:
+    r = _client().get("/log")
+    assert r.status_code == 200
+    body = r.text
+    # Filter form controls.
+    assert 'name="kind"' in body
+    assert 'name="actor"' in body
+    # The five activity kinds the unified log merges.
+    for kind in ("cmd", "tick", "spawn", "verdict", "trunk-swap"):
+        assert kind in body, f"kind '{kind}' missing from /log"
+
+
+def test_log_page_filter_query_round_trips() -> None:
+    # /log accepts `kind`, `actor`, `slug`, `limit` GET params and
+    # echoes them back into the form. Pick something obviously absent
+    # so the table renders as empty.
+    r = _client().get("/log?kind=cmd&actor=zzz-not-a-real-actor&limit=50")
+    assert r.status_code == 200
+    body = r.text
+    assert "zzz-not-a-real-actor" in body
+
+
+def test_runs_index_aliases_experiments_list() -> None:
+    # /runs is the new IA name; /experiments is kept for backward
+    # compatibility. Both should return 200 and render the same table.
+    c = _client()
+    r1 = c.get("/runs")
+    r2 = c.get("/experiments")
+    assert r1.status_code == 200
+    assert r2.status_code == 200
+    # Both surfaces use the same template, so a stable identifier
+    # ("Experiments" or "Runs" header) should appear in both bodies.
+    for body in (r1.text, r2.text):
+        assert "Runs" in body or "Experiments" in body
+
+
+def test_tree_page_renders_with_pr_badge_template_available() -> None:
+    # The tree page now embeds the _pr_badge.html partial. With no
+    # PRs in the local DB the include is a no-op, but the page must
+    # still render (no UndefinedError on `pr_by_slug` / `pr_by_instance`).
+    r = _client().get("/tree")
+    assert r.status_code == 200
+    body = r.text
+    assert "Configuration tree" in body
+    # Verdict workflow surface is part of the redesigned tree page.
+    assert "Verdicts" in body
+
+
+def test_sidebar_reflects_new_six_page_ia() -> None:
+    # The sidebar shipped with the redesign exposes exactly the six
+    # IA endpoints. The audit power-user surface remains.
+    r = _client().get("/")
+    assert r.status_code == 200
+    body = r.text
+    for href in ('href="/"', 'href="/tree"', 'href="/runs"',
+                 'href="/tasks"', 'href="/log"', 'href="/audit"'):
+        assert href in body, f"sidebar link {href} missing"
 
 
 # Sanity: the open-mode auth still allows writes from loopback. We

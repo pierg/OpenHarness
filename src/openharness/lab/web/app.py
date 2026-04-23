@@ -32,7 +32,7 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse
+from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
@@ -108,21 +108,28 @@ def create_app() -> FastAPI:
 
     @app.get("/", response_class=HTMLResponse)
     def home(request: Request) -> HTMLResponse:
+        # New /-as-status-room. The "Now / Waiting on / You owe" zones
+        # are HTMX-mounted partials so each refreshes independently
+        # without re-rendering the whole control room. We still
+        # populate them on the first render so the page is meaningful
+        # before the first HTMX swap completes.
         reader = _reader_ctx(request)
         try:
-            up_next, suggested, _done = reader.roadmap()
-            recent_exp = reader.experiments(limit=5)
-            recent_spawns = reader.recent_spawns(limit=10)
+            recent_exp = reader.experiments(limit=8)
+            pr_rows = reader.pr_states(kinds=("graduate",))
+            pr_by_slug = {pr.slug: pr for pr in pr_rows}
             return _render(
                 request, "home.html",
                 _reader=reader,
-                nav_active="home",
-                daemon=reader.daemon_status(),
-                up_next=up_next[:5],
-                suggested=suggested[:5],
+                nav_active="status",
                 recent_experiments=recent_exp,
-                recent_spawns=recent_spawns,
+                pr_by_slug=pr_by_slug,
                 db_info=reader.db_info(),
+                db_path=str(reader.db_path),
+                status=reader.daemon_status(),
+                daemon_state=reader.daemon_state(),
+                pipeline=reader.pipeline_view(),
+                idle_reason=reader.idle_reason(),
             )
         except Exception:
             _close_reader(request, reader)
@@ -130,6 +137,8 @@ def create_app() -> FastAPI:
 
     @app.get("/pending", response_class=HTMLResponse)
     def pending(request: Request) -> HTMLResponse:
+        # Legacy: kept so external bookmarks keep working. The sidebar
+        # surfaces the same content via the home page's "You owe" zone.
         reader = _reader_ctx(request)
         return _render(request, "pending.html", _reader=reader, nav_active="pending")
 
@@ -137,6 +146,9 @@ def create_app() -> FastAPI:
     def tree(request: Request) -> HTMLResponse:
         reader = _reader_ctx(request)
         try:
+            pr_rows = reader.pr_states()
+            pr_by_slug = {pr.slug: pr for pr in pr_rows}
+            pr_by_instance = {pr.instance_id: pr for pr in pr_rows}
             return _render(
                 request, "tree.html",
                 _reader=reader, nav_active="tree",
@@ -145,6 +157,8 @@ def create_app() -> FastAPI:
                 staged_graduates=reader.tree_diffs(applied=False, kind="graduate"),
                 pending_eval=reader.experiments_without_diff(limit=10),
                 recent_diffs=reader.tree_diffs(limit=10),
+                pr_by_slug=pr_by_slug,
+                pr_by_instance=pr_by_instance,
             )
         except Exception:
             _close_reader(request, reader)
@@ -954,6 +968,169 @@ def create_app() -> FastAPI:
     @app.get("/_hx/cmd-clear", response_class=HTMLResponse)
     def hx_cmd_clear() -> HTMLResponse:
         return HTMLResponse("")
+
+    # ---- New IA routes (Phase 4 redesign) -------------------------------
+    #
+    # /runs and /log are the two new top-level surfaces. The /runs/...
+    # detail and trial-detail routes proxy to the existing
+    # experiment_detail templates so we don't duplicate rendering
+    # logic; the route just sets ``nav_active="runs"`` for the
+    # highlighted sidebar item.
+
+    @app.get("/runs", response_class=HTMLResponse)
+    def runs(request: Request) -> HTMLResponse:
+        reader = _reader_ctx(request)
+        try:
+            return _render(
+                request, "experiments_list.html",
+                _reader=reader, nav_active="runs",
+                experiments=reader.experiments(limit=200),
+                journal=reader.journal(),
+                pr_states=reader.pr_states(),
+            )
+        except Exception:
+            _close_reader(request, reader)
+            raise
+
+    @app.get("/runs/{instance_id}", response_class=HTMLResponse)
+    def runs_detail(request: Request, instance_id: str) -> HTMLResponse:
+        # Same render path as /experiments/<id>, but with a nav_active
+        # of "runs" so the sidebar reflects the new IA. We deliberately
+        # do *not* redirect /experiments/<id> → /runs/<id> so external
+        # bookmarks keep working.
+        reader = _reader_ctx(request)
+        try:
+            exp = reader.experiment(instance_id)
+            if exp is None:
+                if labdata.run_dir_for(instance_id) is None:
+                    _close_reader(request, reader)
+                    raise HTTPException(404, f"unknown instance {instance_id}")
+            legs = reader.legs(instance_id)
+            tasks, leg_ids, cells = reader.task_pass_matrix(instance_id)
+            verdict = next(
+                (d for d in reader.tree_diffs() if d.instance_id == instance_id),
+                None,
+            )
+            journal = reader.journal_entry_for_instance(instance_id)
+            clusters = reader.task_clusters_for_instance(instance_id)
+            comparisons = reader.comparisons_for_instance(instance_id)
+            critic_md = labdata.critic_summary_md(instance_id)
+            sum_md = labdata.summary_md(instance_id)
+            cluster_deltas = reader.cluster_deltas(instance_id)
+            cell_rows = reader.cells_for_instance(instance_id)
+            pr_for_run = next(
+                (pr for pr in reader.pr_states() if pr.instance_id == instance_id),
+                None,
+            )
+            return _render(
+                request, "experiment_detail.html",
+                _reader=reader, nav_active="runs",
+                instance_id=instance_id,
+                experiment=exp,
+                legs=legs,
+                tasks=tasks,
+                leg_ids=leg_ids,
+                cells=cells,
+                verdict=verdict,
+                journal=journal,
+                clusters=clusters,
+                comparisons=comparisons,
+                critic_md=critic_md,
+                summary_md=sum_md,
+                cluster_deltas=cluster_deltas,
+                cell_rows=cell_rows,
+                pr_for_run=pr_for_run,
+            )
+        except HTTPException:
+            raise
+        except Exception:
+            _close_reader(request, reader)
+            raise
+
+    @app.get("/runs/{instance_id}/trials/{trial_id}", response_class=HTMLResponse)
+    def runs_trial(request: Request, instance_id: str, trial_id: str) -> HTMLResponse:
+        reader = _reader_ctx(request)
+        try:
+            trial = reader.trial(instance_id, trial_id)
+            if trial is None:
+                _close_reader(request, reader)
+                raise HTTPException(404, f"unknown trial {trial_id} in {instance_id}")
+            return _render(
+                request, "trial_detail.html",
+                _reader=reader, nav_active="runs",
+                instance_id=instance_id,
+                trial=trial,
+            )
+        except HTTPException:
+            raise
+        except Exception:
+            _close_reader(request, reader)
+            raise
+
+    @app.get("/log", response_class=HTMLResponse)
+    def log_page(
+        request: Request,
+        kind: str | None = None,
+        actor: str | None = None,
+        slug: str | None = None,
+        limit: int = 200,
+    ) -> HTMLResponse:
+        # Unified activity log: web_commands.jsonl + tick history +
+        # spawn finishes + verdicts + trunk swaps. Filters narrow by
+        # row kind, actor, or slug; the fields the operator clicks on
+        # are pre-computed into ``ActivityLogEntry.href``.
+        reader = _reader_ctx(request)
+        try:
+            kinds: tuple[str, ...] | None
+            kinds = (kind,) if kind else None
+            rows = reader.activity_log(limit=max(50, min(limit, 1000)), kinds=kinds)
+            if actor:
+                rows = [r for r in rows if r.actor == actor]
+            if slug:
+                rows = [r for r in rows if r.slug == slug]
+            return _render(
+                request, "log.html",
+                _reader=reader, nav_active="log",
+                rows=rows,
+                filter_kind=kind or "",
+                filter_actor=actor or "",
+                filter_slug=slug or "",
+                limit=limit,
+            )
+        except Exception:
+            _close_reader(request, reader)
+            raise
+
+    # ---- HTMX partials for the new home page ---------------------------
+
+    @app.get("/_hx/idle-reason", response_class=HTMLResponse)
+    def hx_idle_reason(request: Request) -> HTMLResponse:
+        reader = _reader_ctx(request)
+        try:
+            return _render(
+                request, "_idle_reason.html",
+                _reader=reader,
+                idle_reason=reader.idle_reason(),
+            )
+        except Exception:
+            _close_reader(request, reader)
+            raise
+
+    @app.get("/_hx/you-owe", response_class=HTMLResponse)
+    def hx_you_owe(request: Request) -> HTMLResponse:
+        reader = _reader_ctx(request)
+        try:
+            pr_rows = reader.pr_states(kinds=("graduate",))
+            pr_by_slug = {pr.slug: pr for pr in pr_rows}
+            return _render(
+                request, "_you_owe.html",
+                _reader=reader,
+                pending=reader.pending_actions(),
+                pr_by_slug=pr_by_slug,
+            )
+        except Exception:
+            _close_reader(request, reader)
+            raise
 
     @app.get("/audit", response_class=HTMLResponse)
     def audit_page(

@@ -38,9 +38,11 @@
         {% for d in staged_graduates %}
           <li class="border border-amber-200 bg-amber-50 rounded-md p-3 text-sm flex items-baseline gap-3 flex-wrap">
             <div class="flex-1 min-w-0">
-              <div class="font-mono text-xs">
-                <a href="/experiments/{{ d.instance_id }}" class="text-blue-700 hover:underline">{{ d.slug or d.instance_id }}</a>
+              <div class="font-mono text-xs flex flex-wrap items-baseline gap-2">
+                <a href="/runs/{{ d.instance_id }}" class="text-blue-700 hover:underline">{{ d.slug or d.instance_id }}</a>
                 <span class="text-slate-500">→ {{ d.target_id }}</span>
+                {% set pr = pr_by_slug.get(d.slug) or pr_by_instance.get(d.instance_id) %}
+                {% include "_pr_badge.html" with context %}
               </div>
               {% if d.rationale %}<p class="text-xs text-slate-600 mt-1 line-clamp-2">{{ d.rationale }}</p>{% endif %}
             </div>
@@ -49,15 +51,23 @@
                     class="text-xs bg-white border border-slate-300 hover:border-slate-500 rounded px-2.5 py-1">
               Preview verdict
             </button>
+            {% set pr_for_gate = pr_by_slug.get(d.slug) or pr_by_instance.get(d.instance_id) %}
             {% if identity.can_write %}
-            <form hx-post="/api/cmd" hx-target="#cmd-result" hx-swap="innerHTML"
-                  hx-confirm="Confirm trunk swap to {{ d.target_id }}? This swaps the active trunk yaml.">
-              <input type="hidden" name="cmd_id" value="graduate-confirm">
-              <input type="hidden" name="slug" value="{{ d.slug or d.instance_id }}">
-              <button class="text-xs bg-amber-700 hover:bg-amber-800 text-white rounded px-2.5 py-1 font-semibold">
-                Confirm trunk swap
-              </button>
-            </form>
+              {% if pr_for_gate and not pr_for_gate.is_merged %}
+                <span class="text-xs italic text-slate-500"
+                      title="lab graduate confirm refuses unless gh pr view reports state=MERGED">
+                  PR not merged — confirm blocked
+                </span>
+              {% else %}
+                <form hx-post="/api/cmd" hx-target="#cmd-result" hx-swap="innerHTML"
+                      hx-confirm="Confirm trunk swap to {{ d.target_id }}? This swaps the active trunk yaml.">
+                  <input type="hidden" name="cmd_id" value="graduate-confirm">
+                  <input type="hidden" name="slug" value="{{ d.slug or d.instance_id }}">
+                  <button class="text-xs bg-amber-700 hover:bg-amber-800 text-white rounded px-2.5 py-1 font-semibold">
+                    Confirm trunk swap
+                  </button>
+                </form>
+              {% endif %}
             {% endif %}
           </li>
         {% endfor %}
@@ -76,7 +86,7 @@
           <li class="border border-slate-200 rounded-md p-3 text-sm flex items-baseline gap-3 flex-wrap">
             <div class="flex-1 min-w-0">
               <div class="font-mono text-xs">
-                <a href="/experiments/{{ e.instance_id }}" class="text-blue-700 hover:underline">{{ e.instance_id }}</a>
+                <a href="/runs/{{ e.instance_id }}" class="text-blue-700 hover:underline">{{ e.instance_id }}</a>
               </div>
               <p class="text-xs text-slate-500 mt-0.5">
                 {{ e.experiment_id }} · {{ e.n_legs }} legs · {{ e.n_trials }} trials
@@ -103,8 +113,10 @@
         {% for d in recent_diffs %}
           <li class="border-b border-slate-100 pb-1 last:border-b-0 flex items-baseline gap-2 flex-wrap">
             <span class="px-1.5 py-0.5 border rounded {{ verdict_color(d.kind, d.applied) }}">{{ d.kind }}{% if not d.applied %} · staged{% endif %}</span>
-            <a href="/experiments/{{ d.instance_id }}" class="font-mono text-blue-700 hover:underline">{{ d.slug or d.instance_id }}</a>
+            <a href="/runs/{{ d.instance_id }}" class="font-mono text-blue-700 hover:underline">{{ d.slug or d.instance_id }}</a>
             <span class="text-slate-500">→ {{ d.target_id }}</span>
+            {% set pr = pr_by_slug.get(d.slug) or pr_by_instance.get(d.instance_id) %}
+            {% include "_pr_badge.html" with context %}
             {% if d.applied_at %}<span class="text-slate-400 ml-auto">{{ fmt_dt(d.applied_at) }}</span>{% endif %}
             <button hx-get="/_hx/tree-preview?slug={{ d.slug or d.instance_id }}"
                     hx-target="#tree-diff-preview" hx-swap="innerHTML"
@@ -221,7 +233,7 @@
           <div>
             <div class="font-mono">{{ h.from_id or "—" }} → <strong>{{ h.to_id }}</strong></div>
             <div class="text-xs text-slate-600">{{ h.reason or "—" }}</div>
-            <div class="text-xs text-slate-400">by {{ h.applied_by }}{% if h.instance_id %} · <a href="/experiments/{{ h.instance_id }}" class="text-blue-600 hover:underline font-mono">{{ h.instance_id[:16] }}…</a>{% endif %}</div>
+            <div class="text-xs text-slate-400">by {{ h.applied_by }}{% if h.instance_id %} · <a href="/runs/{{ h.instance_id }}" class="text-blue-600 hover:underline font-mono">{{ h.instance_id[:16] }}…</a>{% endif %}</div>
           </div>
         </li>
       {% endfor %}
