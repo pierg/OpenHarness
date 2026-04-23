@@ -10,16 +10,6 @@
 > phase always runs the full slice. There are no separate `-smoke`
 > / `-full-sweep` roadmap entries.
 
-### extended-budget-paired-on-trunk
-
--   **Idea:** [`extended-budget`](ideas.md#extended-budget)
--   **Hypothesis:** the 22.5% baseline is meaningfully budget-bound on the near-miss slice; raising `max_turns` from 30 → 60 → 120 (with `max_tokens` scaled 8192 → 16384 → 32768) lifts pass-rate by ≥10pp on tasks that pinned `n_turns=30` in `tb2-baseline-full-sweep`.
--   **Slice:** `near-miss` — *predicate*: every task in the `basic` leg of `tb2-baseline-20260417-234913` whose terminal trial logged `n_turns=30` (i.e. exhausted the 30-turn budget). The implement phase MUST resolve the predicate against recorded artefacts and encode the resulting list as `task_filter.include_tasks:` in the spec — count is whatever the predicate yields (expected ~15-30 tasks; do NOT hard-code a number). `n_trials/leg = n_tasks × 1` (single-shot). Floor §6 cleared as long as predicate yields ≥ 5 tasks.
--   **Legs:** 3-leg multi-arm (METHODOLOGY §3 — variable has > 2 levels). Leg A: `basic` @ 30/8192 (current trunk). Leg B: `basic` @ 60/16384. Leg C: `basic` @ 120/32768. **Differs in exactly one axis** (the budget pair).
--   **Repetitions:** `single-shot` — pure config tweak (deterministic mechanism), slice ≥ floor (predicate is expected to yield ≥ 15 tasks vs floor 5; if it yields fewer than 5 the implement phase MUST refuse with a precise blocker — that's a real signal the slice doesn't exist).
--   **Control:** `fresh` — required by selection bias on the near-miss slice (METHODOLOGY §5 RTM warning).
--   **Why first:** cheapest experiment in the queue, answers a foundational question that informs every future variant ("is the 22.5% baseline budget-bound or capability-bound?"). Pure YAML tweak — no implementation work.
--   **Cost:** ~$2-3 (3 legs × 15 trials × ~$0.05/trial).
 
 ### planner-executor-cluster-confirmation
 
@@ -74,6 +64,29 @@
 -   **Source:** lab-reflect-and-plan@2026-04-23
 -   **Cost:** ~$10-20
 
+## Done
+
+### extended-budget-paired-on-trunk
+
+-   **Idea:** [`extended-budget`](ideas.md#extended-budget)
+-   **Hypothesis:** the 22.5% baseline is meaningfully budget-bound on the near-miss slice; raising `max_turns` from 30 → 60 → 120 (with `max_tokens` scaled 8192 → 16384 → 32768) lifts pass-rate by ≥10pp on tasks that pinned `n_turns=30` in `tb2-baseline-full-sweep`.
+-   **Slice:** `near-miss` — *predicate*: every task in the `basic` leg of `tb2-baseline-20260417-234913` whose terminal trial logged `n_turns=30` (i.e. exhausted the 30-turn budget). The implement phase MUST resolve the predicate against recorded artefacts and encode the resulting list as `task_filter.include_tasks:` in the spec — count is whatever the predicate yields (expected ~15-30 tasks; do NOT hard-code a number). `n_trials/leg = n_tasks × 1` (single-shot). Floor §6 cleared as long as predicate yields ≥ 5 tasks.
+-   **Legs:** 3-leg multi-arm (METHODOLOGY §3 — variable has > 2 levels). Leg A: `basic` @ 30/8192 (current trunk). Leg B: `basic` @ 60/16384. Leg C: `basic` @ 120/32768. **Differs in exactly one axis** (the budget pair).
+-   **Repetitions:** `single-shot` — pure config tweak (deterministic mechanism), slice ≥ floor (predicate is expected to yield ≥ 15 tasks vs floor 5; if it yields fewer than 5 the implement phase MUST refuse with a precise blocker — that's a real signal the slice doesn't exist).
+-   **Control:** `fresh` — required by selection bias on the near-miss slice (METHODOLOGY §5 RTM warning).
+-   **Why first:** cheapest experiment in the queue, answers a foundational question that informs every future variant ("is the 22.5% baseline budget-bound or capability-bound?"). Pure YAML tweak — no implementation work.
+-   **Cost:** ~$2-3 (3 legs × 15 trials × ~$0.05/trial).
+
+-   **Ran:** [extended-budget-paired-on-trunk](experiments.md#2026-04-23--extended-budget-paired-on-trunk)
+-   **Outcome:** Reject: 10.7% trunk pass rate vs 14.3% on both extended-budget legs; budget increases helped one narrow task but did not justify promotion.
+
+### tb2-baseline-full-sweep
+
+-   **Idea:** baseline snapshot
+-   **Hypothesis:** the post-reset baseline runs cleanly across all of `terminal-bench@2.0` and produces a real per-agent pass-rate distribution to anchor every future ablation.
+-   **Plan:** `uv run exec tb2-baseline` (no `--profile`); 3 legs × ~89 tasks. Launch via `scripts/exp/start.sh exec tb2-baseline` so it survives an SSH disconnect. Watch `events.jsonl` for 429s on the ~30 RPM Gemini cap and adjust `n_concurrent` if needed.
+-   **Cost:** ~$15-25, a few hours wall-clock.
+
 ## Deferred
 
 > Entries that have been considered and intentionally pushed out of
@@ -96,12 +109,3 @@
 ### grounded-planner-tools-ablation (FOLDED into `planner-executor-cluster-confirmation`)
 
 -   **Status:** dropped as standalone entry; the question is now answered by Leg C of `planner-executor-cluster-confirmation` (`planner_executor` with planner subagent `tools: []`). Folding in saves ~$10 of full-bench spend and keeps the comparison anchored on the slice where `planner_executor` actually routes.
-
-## Done
-
-### tb2-baseline-full-sweep
-
--   **Idea:** baseline snapshot
--   **Hypothesis:** the post-reset baseline runs cleanly across all of `terminal-bench@2.0` and produces a real per-agent pass-rate distribution to anchor every future ablation.
--   **Plan:** `uv run exec tb2-baseline` (no `--profile`); 3 legs × ~89 tasks. Launch via `scripts/exp/start.sh exec tb2-baseline` so it survives an SSH disconnect. Watch `events.jsonl` for 429s on the ~30 RPM Gemini cap and adjust `n_concurrent` if needed.
--   **Cost:** ~$15-25, a few hours wall-clock.
