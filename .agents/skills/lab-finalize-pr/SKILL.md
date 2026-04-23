@@ -59,8 +59,9 @@ Depending on `verdict`:
 
 | Verdict | Side effects |
 |---|---|
-| `add_branch` / `graduate` | (a) `git push origin lab/<slug>` from inside the worktree. (b) `gh pr create …` with the title and body specified below. (c) `uv run lab experiments set-branch <slug> --branch lab/<slug> --pr-url <url>`. |
-| `reject` / `noop`        | (a) `uv run lab experiments set-branch <slug> --branch lab/<slug> --rejected-reason "<verdict>: <one-line evidence>"`. (b) Mark the worktree for cleanup by writing ``runs/lab/state/<slug>/finalize.json`` with ``{"cleanup_worktree": true}``. The orchestrator does the actual `git worktree remove` after this skill exits. |
+| `add_branch` | (a) `git push origin lab/<slug>` from inside the worktree. (b) `gh pr create …` with the title and body specified below. (c) `gh pr merge <url> --auto --squash --delete-branch` so CI gates the merge and keeps `main` and `lab/configs.md` in lock-step. (d) `uv run lab experiments set-branch <slug> --branch lab/<slug> --pr-url <url>`. |
+| `graduate` | (a) `git push origin lab/<slug>`. (b) `gh pr create … --label graduate-candidate`. (c) **Do NOT** enable auto-merge — `lab graduate confirm` will refuse until a human merges the PR (see [`lab/METHODOLOGY.md`](../../../lab/METHODOLOGY.md) §6). (d) `uv run lab experiments set-branch <slug> --branch lab/<slug> --pr-url <url>`. |
+| `reject` / `noop`        | (a) Capture the branch HEAD: `discarded_sha=$(git rev-parse HEAD)` from inside the worktree. (b) `uv run lab experiments set-branch <slug> --branch lab/<slug> --rejected-reason "<verdict>: <one-line evidence>" --discarded-sha "$discarded_sha"`. (c) Mark the worktree for cleanup by writing ``runs/lab/state/<slug>/finalize.json`` with ``{"cleanup_worktree": true}``. The orchestrator does the actual `git worktree remove` after this skill exits. |
 
 The orchestrator marks `finalize: ok` once `set-branch` has run and
 either the PR url is recorded or the cleanup flag is set.
@@ -89,13 +90,25 @@ either the PR url is recorded or the cleanup flag is set.
    lab(<slug>): <one-line mutation summary>
    ```
 
-   Body format (use a heredoc to preserve newlines):
+   Body format (use a heredoc to preserve newlines). Include the
+   verdict, the evidence, the methodology contract that justified
+   it, and the cluster_evidence table from the TreeDiff (if the
+   verdict surfaced one):
 
    ````markdown
    <one-paragraph description of what this branch does, copied or
    summarised from the journal entry's Mutation: bullet>
 
    **Verdict:** `<verdict>` — <verdict_evidence>
+
+   **Methodology:** [`lab/METHODOLOGY.md` §6 — Verdict thresholds](../blob/<base-branch>/lab/METHODOLOGY.md#6-verdict-thresholds)
+
+   **Cluster evidence** (if present in the TreeDiff):
+
+   | cluster | n | Δ pass-rate | source |
+   |---|---|---|---|
+   | python_data | 7 | +14pp | runs/experiments/<instance_id>/critic/comparisons/* |
+   | …  | … | … | … |
 
    **Run:** `runs/experiments/<instance_id>/`
 
@@ -118,7 +131,21 @@ either the PR url is recorded or the cleanup flag is set.
    For `verdict=graduate`, also pass `--label graduate-candidate`
    so the human review knows trunk swap is queued.
 
-5. **Record the PR URL** in the journal:
+5. **For `add_branch` only — enable auto-merge.** `lab/configs.md`
+   on `main` already references this branch as a node in the
+   configuration tree; if the code never lands the tree diverges
+   from the reachable graph. Auto-merge keeps them in lock-step:
+
+   ```bash
+   gh pr merge <pr-url> --auto --squash --delete-branch
+   ```
+
+   GitHub merges as soon as required CI checks pass. **Do NOT**
+   enable auto-merge for `verdict=graduate` — `lab graduate
+   confirm` requires the PR be merged FIRST (manually, after
+   human review), then it swaps `trunk.yaml`.
+
+6. **Record the PR URL** in the journal AND the DB cache:
 
    ```bash
    uv run lab experiments set-branch <slug> \
@@ -127,21 +154,37 @@ either the PR url is recorded or the cleanup flag is set.
    ```
 
    This rewrites the entry's ``**Branch:**`` bullet to
-   ``Branch: [`lab/<slug>`](<pr-url>)``.
+   ``Branch: [`lab/<slug>`](<pr-url>)`` and mirrors the URL into
+   `tree_diffs.pr_url` so the web UI and the daemon's
+   block-on-unmerged check can find it.
 
 ### For `reject` / `noop`
 
 1. **Do NOT push.** The branch stays local; the orchestrator will
    delete it shortly after this skill returns.
-2. **Update the journal:**
+2. **Capture the branch HEAD** so the deleted branch can be
+   resurrected later for forensic review:
+
+   ```bash
+   discarded_sha=$(git -C <worktree> rev-parse HEAD)
+   ```
+
+3. **Update the journal AND the DB cache:**
 
    ```bash
    uv run lab experiments set-branch <slug> \
      --branch lab/<slug> \
-     --rejected-reason "<verdict>: <one-line evidence>"
+     --rejected-reason "<verdict>: <one-line evidence>" \
+     --discarded-sha "$discarded_sha"
    ```
 
-3. **Write `finalize.json`:**
+   The journal renders `Branch: lab/<slug> — not opened
+   (<verdict>: …; head=<short-sha>)`. The full SHA goes into
+   `tree_diffs.branch_sha` so a human can later run
+   `git fetch origin <sha>:retro/<slug>` to inspect what was
+   tried.
+
+4. **Write `finalize.json`:**
 
    ```json
    {"cleanup_worktree": true, "reason": "<verdict>"}
@@ -169,6 +212,17 @@ either the PR url is recorded or the cleanup flag is set.
   for verdicts that the orchestrator has already decided not to
   pursue. The branch + worktree are deliberately discarded so
   future searches don't surface dead ends.
+- **Don't enable auto-merge on `graduate` PRs.** Graduate is the
+  ONE asymmetric verdict in the loop — it changes trunk for
+  every future experiment. A human runs `lab graduate confirm
+  <slug>`, which (a) requires the PR be merged first, (b) swaps
+  `trunk.yaml`, (c) writes a `trunk_changes` audit row.
+  Auto-merging the PR would skip the human review the workflow
+  exists to enforce.
+- **Don't skip `--discarded-sha` for `reject`/`noop`.** The SHA
+  is the only audit trail left after the worktree is wiped — it
+  lets a curious human (or a future cross-experiment-critic)
+  fetch the branch back and look at what was actually tried.
 - **Don't re-run the experiment from this skill.** If the run
   artefacts are missing, refuse — that's a sign the orchestrator
   spawned this phase out of order, not something this skill

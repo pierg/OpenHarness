@@ -636,7 +636,9 @@ def cmd_exp_set_branch(
     pr_url: Optional[str] = typer.Option(
         None,
         "--pr-url",
-        help="Open PR URL. Renders as `Branch: [<branch>](<pr-url>)`.",
+        help="Open PR URL. Renders as `Branch: [<branch>](<pr-url>)` and "
+             "mirrors into `tree_diffs.pr_url` so the web UI can render "
+             "the link without re-parsing markdown.",
     ),
     rejected_reason: Optional[str] = typer.Option(
         None,
@@ -644,27 +646,66 @@ def cmd_exp_set_branch(
         help="One-line reason. Renders as `Branch: <branch> — not "
              "opened (<reason>)`. Mutually exclusive with --pr-url.",
     ),
+    discarded_sha: Optional[str] = typer.Option(
+        None,
+        "--discarded-sha",
+        help="HEAD SHA of the discarded branch (Reject/NoOp paths). "
+             "Recorded in the markdown bullet AND in "
+             "`tree_diffs.branch_sha` so the deleted branch can be "
+             "resurrected later via `git fetch origin <sha>:retro/<slug>`.",
+    ),
 ) -> None:
     """Replace the **Branch:** bullet on the journal entry for `slug`.
 
     Called from the `lab-finalize-pr` skill after deciding whether to
     push the experiment branch and open a PR (verdict AddBranch /
     Graduate) or to discard the worktree (verdict Reject / NoOp).
+    Also writes the PR URL / discarded SHA into the `tree_diffs`
+    cache so downstream tooling (web UI, `lab graduate confirm`,
+    daemon block-on-unmerged check) can find them with a SQL query.
     Idempotent — safe to re-run with the same arguments.
     """
     if pr_url and rejected_reason:
         typer.echo("[red]--pr-url and --rejected-reason are mutually exclusive[/red]")
+        raise typer.Exit(2)
+    if discarded_sha and pr_url:
+        typer.echo("[red]--discarded-sha and --pr-url are mutually exclusive[/red]")
         raise typer.Exit(2)
     lab_docs.set_journal_branch(
         slug=slug,
         branch=branch,
         pr_url=pr_url,
         rejected_reason=rejected_reason,
+        discarded_sha=discarded_sha,
     )
+    # Mirror into the tree_diffs cache so the web UI / merge-gate /
+    # daemon checks don't have to re-parse markdown.
+    if pr_url or discarded_sha:
+        with labdb.writer() as conn:
+            row = conn.execute(
+                "SELECT instance_id FROM tree_diffs WHERE slug = ? "
+                "ORDER BY applied_at DESC NULLS LAST LIMIT 1",
+                [slug],
+            ).fetchone()
+            if row is not None:
+                instance_id = row[0]
+                if pr_url:
+                    conn.execute(
+                        "UPDATE tree_diffs SET pr_url = ? WHERE instance_id = ?",
+                        [pr_url, instance_id],
+                    )
+                if discarded_sha:
+                    conn.execute(
+                        "UPDATE tree_diffs SET branch_sha = ? WHERE instance_id = ?",
+                        [discarded_sha, instance_id],
+                    )
     if pr_url:
         typer.echo(f"set Branch bullet for {slug!r} -> PR {pr_url}")
     elif rejected_reason:
-        typer.echo(f"set Branch bullet for {slug!r} -> not opened ({rejected_reason})")
+        suffix = f"; head={discarded_sha[:7]}" if discarded_sha else ""
+        typer.echo(
+            f"set Branch bullet for {slug!r} -> not opened ({rejected_reason}{suffix})"
+        )
     else:
         typer.echo(f"set Branch bullet for {slug!r} -> {branch}")
 
@@ -1277,11 +1318,25 @@ def graduate_confirm(
         None, "--instance",
         help="Override: use this instance_id (else resolved from slug).",
     ),
+    skip_pr_merge_check: bool = typer.Option(
+        False, "--skip-pr-merge-check",
+        help="Bypass the requirement that the experiment's PR be "
+             "merged first. ONLY use when graduating an experiment "
+             "that pre-dates the PR-merge gate (e.g. trunk swaps "
+             "from before this check was added). Records "
+             "`pr_merge_check_skipped=true` in the audit log.",
+    ),
 ) -> None:
     """Confirm a STAGED Graduate diff: copy `<target>.yaml → trunk.yaml` + audit.
 
     This is the only path that swaps the actual trunk YAML. It
     requires `--applied-by` so we always know who made the call.
+
+    Gates on the experiment PR being merged (see
+    [`lab/METHODOLOGY.md`](../../lab/METHODOLOGY.md) §6) — trunk
+    must never reference code that isn't on `main`. Bypass with
+    `--skip-pr-merge-check` only for legacy graduations that
+    pre-date the gate.
     """
     from openharness.lab import tree as _tree
     from openharness.lab import tree_ops as _tree_ops
@@ -1298,12 +1353,77 @@ def graduate_confirm(
         )
         raise typer.Exit(2)
 
+    if not skip_pr_merge_check:
+        ok, msg = _check_pr_merged(slug)
+        if not ok:
+            err_console.print(f"[red]Cannot graduate {slug!r}: {msg}[/red]")
+            err_console.print(
+                "[yellow]Either merge the PR first or re-run with "
+                "--skip-pr-merge-check (only for pre-gate "
+                "experiments).[/yellow]"
+            )
+            raise typer.Exit(2)
+
     result = _tree.confirm_graduate(
         slug=slug, diff=diff, applied_by=applied_by, reason=reason,
     )
     typer.echo(f"graduated `{diff.target_id}` → trunk (by={applied_by}).")
     for note in result.notes:
         typer.echo(f"  - {note}")
+
+
+def _check_pr_merged(slug: str) -> tuple[bool, str]:
+    """Return ``(merged, human_message)`` for the slug's PR.
+
+    Looks up `tree_diffs.pr_url` for the latest diff on this slug,
+    then asks `gh` whether the PR has been merged. Used by
+    ``graduate confirm`` (hard gate) and by the daemon's
+    block-on-unmerged check (soft gate — daemon idles instead of
+    failing). Treats any communication error with ``gh`` as
+    "unknown, do not advance" — the operator can override with the
+    documented escape hatch.
+    """
+    import json as _json
+    import shutil
+    import subprocess
+
+    with labdb.reader() as conn:
+        row = conn.execute(
+            "SELECT pr_url FROM tree_diffs WHERE slug = ? AND pr_url IS NOT NULL "
+            "ORDER BY applied_at DESC NULLS LAST LIMIT 1",
+            [slug],
+        ).fetchone()
+    if row is None or not row[0]:
+        return False, (
+            f"no PR URL recorded in tree_diffs for slug {slug!r} — has "
+            "lab-finalize-pr run yet?"
+        )
+    pr_url = row[0]
+    if not shutil.which("gh"):
+        return False, (
+            "`gh` CLI is not on PATH; cannot verify PR merge state. "
+            f"Inspect {pr_url} manually."
+        )
+    try:
+        proc = subprocess.run(
+            ["gh", "pr", "view", pr_url, "--json", "state,mergedAt,mergeCommit"],
+            check=False, capture_output=True, text=True, timeout=30,
+        )
+    except Exception as exc:  # noqa: BLE001
+        return False, f"`gh pr view {pr_url}` raised {exc!r}"
+    if proc.returncode != 0:
+        return False, (
+            f"`gh pr view {pr_url}` exit={proc.returncode}: "
+            f"{proc.stderr.strip()[:200]}"
+        )
+    try:
+        data = _json.loads(proc.stdout or "{}")
+    except _json.JSONDecodeError as exc:
+        return False, f"`gh pr view {pr_url}` returned invalid JSON: {exc!r}"
+    state = (data.get("state") or "").upper()
+    if state == "MERGED" and data.get("mergedAt"):
+        return True, f"merged at {data['mergedAt']}"
+    return False, f"PR {pr_url} state={state!r} (mergedAt={data.get('mergedAt')!r})"
 
 
 @exp_app.command("synthesize")

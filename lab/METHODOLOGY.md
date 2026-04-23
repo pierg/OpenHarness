@@ -255,6 +255,32 @@ this section pins their semantic meaning.
   this is at least visible; future tightening (an explicit
   per-cluster floor) is DEFERRED.
 
+### Verdict ↔ PR lifecycle (the trunk-must-be-on-`main` invariant)
+
+A verdict is **only ever as real as the code that backs it**.
+`lab/configs.md` and `trunk.yaml` are committed to `main` directly
+by the daemon, so they describe an aspirational tree the moment a
+verdict applies; the supporting code lives on the experiment branch
+`lab/<slug>` until its PR merges. The methodology pins the
+following invariant:
+
+> Whenever `lab/configs.md` (or `trunk.yaml`) on `main` references
+> a node, the code that defines that node must also be on `main`.
+
+Each verdict honours the invariant differently:
+
+| Verdict     | Code path           | When does code land on `main`? |
+|-------------|---------------------|--------------------------------|
+| `AddBranch` | branch is added to `## Branches` in `lab/configs.md` immediately. | `lab-finalize-pr` opens the PR with `gh pr merge --auto --squash --delete-branch` enabled, so it lands as soon as required CI passes. |
+| `Graduate`  | trunk swap is **STAGED**; `trunk.yaml` and `## Trunk` only change when a human runs `lab graduate confirm <slug>`. | `lab-finalize-pr` opens the PR but **does not** enable auto-merge. `lab graduate confirm` refuses until the PR shows `state=MERGED`; the override flag `--skip-pr-merge-check` is recorded in the audit row when used. |
+| `Reject` / `NoOp` | nothing on `main` references the branch. | Branch is deleted; the SHA is recorded in `tree_diffs.branch_sha` and surfaced in the journal Branch bullet (`head=<sha7>`) so the deleted work can be resurrected with `git fetch origin <sha>:retro/<slug>`. |
+
+The autonomous daemon enforces a soft variant of the invariant by
+**idling whenever any AddBranch PR is still open** (the pre-tick
+check in `runner.loop`). This protects the next experiment's
+preflight from forking off a `main` whose `lab/configs.md` already
+describes branches whose code hasn't landed.
+
 ---
 
 ## 7. Replication — when do we re-run an entire experiment?
