@@ -374,13 +374,87 @@ def test_tree_page_renders_with_pr_badge_template_available() -> None:
 
 def test_sidebar_reflects_new_six_page_ia() -> None:
     # The sidebar shipped with the redesign exposes exactly the six
-    # IA endpoints. The audit power-user surface remains.
+    # IA endpoints in the primary nav. The audit power-user surface
+    # remains as a primary entry.
     r = _client().get("/")
     assert r.status_code == 200
     body = r.text
     for href in ('href="/"', 'href="/tree"', 'href="/runs"',
                  'href="/tasks"', 'href="/log"', 'href="/audit"'):
         assert href in body, f"sidebar link {href} missing"
+
+
+def test_sidebar_more_views_reaches_every_secondary_page() -> None:
+    # Regression for "/roadmap is not visible from the side bar" — the
+    # 'More views' disclosure underneath the primary IA must include
+    # every secondary surface so each is reachable in one click.
+    r = _client().get("/")
+    assert r.status_code == 200
+    body = r.text
+    for href in (
+        'href="/components"',
+        'href="/components-perf"',
+        'href="/ideas"',
+        'href="/roadmap"',
+        'href="/daemon"',
+        'href="/pending"',
+        'href="/spawns"',
+        'href="/experiments"',
+    ):
+        assert href in body, f"'More views' link {href} missing from sidebar"
+
+
+def test_more_views_is_open_when_active_page_is_secondary() -> None:
+    # The disclosure should auto-open when the operator lands on a
+    # secondary page so they immediately see where they are. We test
+    # this by hitting /roadmap and looking for the ``open`` attribute
+    # on the <details> element.
+    r = _client().get("/roadmap")
+    assert r.status_code == 200
+    body = r.text
+    # Pick a window around the disclosure summary text.
+    needle = "More views"
+    idx = body.find(needle)
+    assert idx > 0, "'More views' summary missing"
+    # The <details ... open> tag opens before the summary text. Look
+    # for it in the 200-char window before the needle.
+    window = body[max(0, idx - 200):idx]
+    assert "<details" in window
+    assert "open" in window, "details element should be open on secondary page"
+
+
+def test_every_get_route_returns_200_on_a_fresh_db() -> None:
+    # End-to-end reachability sweep. Walk every non-parameterised GET
+    # route registered on the app and assert it renders cleanly.
+    # Parameterised routes (``/runs/{id}``, ``/components/{id}``,
+    # ``/tasks/{checksum}``, etc.) and the JSON ``/api/*`` /  ``/_hx/*``
+    # endpoints are skipped — they're exercised by their own targeted
+    # tests.
+    from openharness.lab.web.app import create_app
+    app = create_app()
+    skip_prefixes = ("/api", "/_hx", "/static")
+    skip_exact = {"/openapi.json", "/docs", "/redoc",
+                  "/docs/oauth2-redirect"}
+    paths: list[str] = []
+    for r in app.routes:
+        path = getattr(r, "path", None)
+        if not path:
+            continue
+        if "{" in path:
+            continue  # parameterised — handled by other tests
+        if path.startswith(skip_prefixes) or path in skip_exact:
+            continue
+        if "GET" not in (getattr(r, "methods", None) or set()):
+            continue
+        paths.append(path)
+    assert paths, "expected at least one renderable GET route"
+    c = _client()
+    for path in paths:
+        resp = c.get(path)
+        assert resp.status_code == 200, (
+            f"{path} returned {resp.status_code}; "
+            f"body[:200]={resp.text[:200]!r}"
+        )
 
 
 # Sanity: the open-mode auth still allows writes from loopback. We

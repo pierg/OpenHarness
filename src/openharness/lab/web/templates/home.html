@@ -21,7 +21,10 @@
   <section class="xl:col-span-2 bg-white border border-slate-200 rounded-lg p-5">
     <div class="flex items-baseline justify-between mb-4">
       <h2 class="font-semibold">Now</h2>
-      <a href="/log" class="text-xs text-slate-500 hover:underline">activity log ›</a>
+      <nav class="text-xs text-slate-500 flex gap-x-4">
+        <a href="/daemon" class="hover:underline">daemon detail ›</a>
+        <a href="/log" class="hover:underline">activity log ›</a>
+      </nav>
     </div>
     <div hx-get="/_hx/daemon-control-bar"
          hx-trigger="load, every 10s, lab-daemon-changed from:body, lab-daemon-state-changed from:body"
@@ -55,7 +58,10 @@
         <span class="ml-2 text-xs bg-amber-200 text-amber-900 rounded-full px-2 py-0.5">{{ pending.total }}</span>
       {% endif %}
     </h2>
-    <span class="text-xs text-slate-400">Auto-refresh every 30 s</span>
+    <nav class="text-xs text-slate-400 flex items-baseline gap-x-4">
+      <a href="/pending" class="hover:underline text-slate-500">pending detail ›</a>
+      <span>Auto-refresh every 30 s</span>
+    </nav>
   </div>
   <div hx-get="/_hx/you-owe"
        hx-trigger="load, every 30s, lab-pending-changed from:body, lab-tree-changed from:body"

@@ -2,7 +2,20 @@
 {% block title %}Tree · OpenHarness lab{% endblock %}
 {% block crumbs %}<a href="/" class="hover:underline">Home</a> / Tree{% endblock %}
 {% block content %}
-<h1 class="text-xl font-semibold mb-4">Configuration tree</h1>
+<div class="flex flex-wrap items-baseline gap-3 mb-4">
+  <h1 class="text-xl font-semibold">Configuration tree</h1>
+  {# Cross-links to the catalogs that the tree is composed from.
+     These pages are also reachable from the sidebar's "More views"
+     disclosure but having them inline here keeps the operator from
+     having to context-switch when chasing a branch back to its
+     component or roadmap entry. #}
+  <nav class="ml-auto text-xs text-slate-500 flex flex-wrap gap-x-4 gap-y-1">
+    <a href="/components" class="hover:underline">Components catalog ›</a>
+    <a href="/components-perf" class="hover:underline">Perf matrix ›</a>
+    <a href="/roadmap" class="hover:underline">Roadmap queue ›</a>
+    <a href="/ideas" class="hover:underline">Ideas inbox ›</a>
+  </nav>
+</div>
 
 <section class="bg-white border border-emerald-300 rounded-lg p-5 mb-6">
   <div class="text-xs text-emerald-700 font-semibold uppercase">Trunk</div>

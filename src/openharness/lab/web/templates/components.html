@@ -2,7 +2,13 @@
 {% block title %}Components · OpenHarness lab{% endblock %}
 {% block crumbs %}<a href="/" class="hover:underline">Home</a> / Components{% endblock %}
 {% block content %}
-<h1 class="text-xl font-semibold mb-4">Components catalog</h1>
+<div class="flex flex-wrap items-baseline gap-3 mb-4">
+  <h1 class="text-xl font-semibold">Components catalog</h1>
+  <nav class="ml-auto text-xs text-slate-500 flex flex-wrap gap-x-4">
+    <a href="/components-perf" class="hover:underline">Perf matrix ›</a>
+    <a href="/tree" class="hover:underline">Configuration tree ›</a>
+  </nav>
+</div>
 
 <div id="cmd-result" class="mb-4"></div>
 

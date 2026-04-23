@@ -16,7 +16,13 @@
 <header class="flex flex-wrap items-baseline gap-3 mb-4">
   <h1 class="text-xl font-semibold">Activity log</h1>
   <span class="text-xs text-slate-500">{{ rows|length }} rows · newest first</span>
-  <a href="/audit" class="ml-auto text-xs text-slate-500 hover:underline">audit detail ›</a>
+  {# Cross-links to the deeper, source-specific surfaces. The log
+     consolidates them, but operators sometimes need the un-merged
+     view (e.g. raw codex stdout from /spawns/log/<name>). #}
+  <nav class="ml-auto text-xs text-slate-500 flex flex-wrap gap-x-4">
+    <a href="/spawns" class="hover:underline">spawn detail ›</a>
+    <a href="/audit" class="hover:underline">audit detail ›</a>
+  </nav>
 </header>
 
 <form method="get" class="flex flex-wrap items-center gap-3 mb-4 text-sm bg-white border border-slate-200 rounded-md px-4 py-3">

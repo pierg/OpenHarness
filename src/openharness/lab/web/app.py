@@ -358,7 +358,7 @@ def create_app() -> FastAPI:
             cell_lookup: dict[tuple[str, str], Any] = {(r.component_id, r.task_cluster): r for r in rows}
             return _render(
                 request, "components_perf.html",
-                _reader=reader, nav_active="components",
+                _reader=reader, nav_active="components-perf",
                 rows=rows,
                 components_axis=components_set,
                 clusters_axis=clusters_set,
