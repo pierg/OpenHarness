@@ -45,7 +45,9 @@ Relative to trunk `basic_30_8192` (10.7% pass, 3/28), both extended budgets impr
 | `coq_theorem_proving` | 0/1 | 0/1 | +0.0 |
 ### Linked follow-ups
 
-_(pending)_
+-   [`loop-guard-on-basic-near-miss`](roadmap.md#loop-guard-on-basic-near-miss) — tests whether the dominant no-progress loops on this near-miss slice are recoverable without another budget increase.
+-   [`stronger-model-baseline`](roadmap.md#stronger-model-baseline) — tests whether the broad wash after extra budget means the remaining failures are capability-bound rather than budget-bound.
+-   [`artifact-first-output-policy`](ideas.md#artifact-first-output-policy) — abstract follow-up for the 15 trials that made partial progress but never wrote the required output artifact.
 
 ## 2026-04-17 — tb2-baseline-full-sweep
 

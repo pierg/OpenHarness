@@ -62,6 +62,18 @@
 -   **Cost:** ~$2 (2 legs × 22 trials × ~$0.05/trial).
 -   **When to run:** before or alongside `planner-executor-cluster-confirmation` to calibrate how much we should trust the cluster-level deltas it produces.
 
+#### loop-guard-on-basic-near-miss
+
+-   **Hypothesis:** tests whether the 64/84 repeated_failed_command or timeout_no_recovery failures in extended-budget-paired-on-trunk are recoverable by steering basic off no-progress loops instead of buying more turns
+-   **Source:** lab-reflect-and-plan@2026-04-23
+-   **Cost:** ~$3-5
+
+#### stronger-model-baseline
+
+-   **Hypothesis:** tests whether the 24/28 all-leg failures that ignored extra budget are capability-bound rather than budget-bound by swapping trunk basic to gemini-2.5-pro on the same near-miss slice
+-   **Source:** lab-reflect-and-plan@2026-04-23
+-   **Cost:** ~$10-20
+
 ## Deferred
 
 > Entries that have been considered and intentionally pushed out of

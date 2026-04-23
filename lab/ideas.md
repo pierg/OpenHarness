@@ -114,3 +114,27 @@ _(none)_
 ## Rejected
 
 _(none)_
+
+#### artifact-first-output-policy
+
+-   **Motivation:** 15 trials in extended-budget-paired-on-trunk made partial progress but never wrote the required output artifact, so the run spent budget without producing the thing the verifier actually scores
+-   **Sketch:** Add a runtime or prompt policy that creates or updates the required output artifact early and forces a verifier-aware recheck before more analysis. Test it first with a paired ablation on file-output-heavy tasks such as db-wal-recovery, password-recovery, and write-compressor.
+-   **Auto-proposed by:** lab-reflect-and-plan@2026-04-23
+
+#### loop-guard-on-creates-new-file
+
+-   **Motivation:** Across 249 creates_new_file trials from the current two experiments, pass rate was only 14.5% and the dominant failure shape was no-progress looping (136 repeated_failed_command, 80 timeout_no_recovery) rather than clean verifier misses.
+-   **Sketch:** Paired ablation on the existing basic agent with the loop-guard runtime atom off vs on, restricted to creates_new_file tasks that were all-leg failures or near-misses in tb2-baseline and extended-budget. Measure whether the guard converts loop-heavy runs into artifact-producing attempts without the broad cost increase seen from longer budgets.
+-   **Auto-proposed by:** cross-experiment-critic@2026-04-23
+
+#### timeout-aware-retry-on-needs-network
+
+-   **Motivation:** The needs_network slice is still broadly unresolved: across 177 trials the pass rate was 15.8%, with 102 repeated_failed_command and 62 timeout_no_recovery tags concentrated in service startup, download, and long-build tasks.
+-   **Sketch:** Implement the executor timeout-aware retry / background-polling path as a paired ablation, then run it on a needs_network + high_env_complexity slice drawn from the current bench. This isolates whether the failures are mostly bash-timeout recoverability problems rather than generic model weakness or missing external tools.
+-   **Auto-proposed by:** cross-experiment-critic@2026-04-23
+
+#### verifier-completion-gate-on-long-budget
+
+-   **Motivation:** In extended-budget-paired-on-trunk, the 120-turn/32k leg matched the 60-turn/16k leg on passes, cost 3.1x more, and showed 4x as many hallucinated_success tags as the trunk budget, so more search mostly amplified false completion rather than finding new wins.
+-   **Sketch:** Add a verifier-completion gate that blocks success claims until the required output paths or end-to-end checks have been revalidated, then replay the extended-budget slice with the gate enabled on the long-budget leg. The comparison should answer whether the remaining long-budget spend is rescuing real work or just prolonging premature success states.
+-   **Auto-proposed by:** cross-experiment-critic@2026-04-23
