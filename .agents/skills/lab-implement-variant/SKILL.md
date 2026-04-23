@@ -53,6 +53,14 @@ The orchestrator passes you via CLI arguments:
   Use it to compute commit list and files-touched (``git rev-list
   --reverse <base-sha>..HEAD`` and ``git diff --name-only
   <base-sha>..HEAD``).
+- `--repair-context=<path>` *(optional, only on auto-repair retries)*
+  — absolute path to a small markdown file the orchestrator wrote
+  describing your previous attempt's failure (typically a REFUSE
+  message). Read it FIRST when present; see [Repair mode](#repair-mode)
+  below. May coexist with all the other args.
+- `--repair-attempt=<n>` *(optional, only on auto-repair retries)*
+  — 1-indexed retry number for the implement phase. Capped at
+  `MAX_REPAIRS_PER_PHASE + 1` (today: 2).
 
 ## Output
 
@@ -185,8 +193,69 @@ is marked `failed` and the run phase is **not** spawned.
 - If you cannot complete the implementation (missing context,
   ambiguous design, validation that fails repeatedly), refuse
   with a clear one-paragraph reason and exit without committing.
-  The orchestrator counts the refusal toward the auto-demote
-  threshold and (after enough refusals) demotes the entry.
+  On the first attempt the orchestrator will spawn ONE auto-repair
+  retry with your refusal message in `--repair-context`; only after
+  that retry also fails does the entry get auto-demoted. So write
+  the refusal as a precise blocker — the next attempt may be able
+  to act on it (see [Repair mode](#repair-mode)).
+
+## Repair mode
+
+When the orchestrator passes `--repair-context=<path>` (always
+together with `--repair-attempt=<n>`), this is a retry — your
+previous attempt failed (or refused). Behaviour:
+
+1. **Read the repair-context file FIRST**, before re-reading the
+   design or the worktree. It contains the prior failure
+   message(s) verbatim, newest first.
+2. **Diagnose** the failure cause:
+    - "validation crashed at runtime" — fix the bug, re-run the
+      smoke validation, commit. Standard implement workflow.
+    - "design contract is unsatisfiable as literally specified"
+      — the most common case (e.g. design says "exactly 15 tasks"
+      but only 28 qualify, or "use spec foo" but `foo.yaml`
+      doesn't exist). Use the **design-amendment channel** below
+      rather than another bare REFUSE.
+    - "your previous code touched the wrong files" — start a
+      fresh commit chain (you can `git reset --hard <base-sha>`
+      first if the prior commits were spurious; the orchestrator
+      will recompute `commits` and `files_touched` from the new
+      `git log`).
+3. **Design-amendment channel.** When the design itself is the
+   blocker, write `runs/lab/state/<slug>/design_amendment.md`
+   *next to* `design.md`. The amendment is a strictly bounded
+   contract patch:
+   - It MUST preserve the **hypothesis verbatim** (no silently
+     swapping what the experiment is testing).
+   - It MUST preserve the **leg count and the axis-of-comparison**
+     (no folding 3 legs into 2; no adding a confound).
+   - It MAY relax exact slice sizes ("`n_tasks=15`" → "all
+     qualifying tasks, expected ~15-30"), substitute a near-miss
+     predicate for the available equivalent, or correct a wrong
+     file path / spec name.
+   - It must include: a one-paragraph "What changed and why"
+     citing the failure message, plus an updated copy of just
+     the affected sections of `design.md` (typically `## Slice`
+     and/or `## Files to touch`).
+   - Once written, proceed using the **amended** contract for
+     the rest of the implement phase. Reference
+     `design_amendment.md` in `implement.json` under a new
+     `"design_amendment": "<path>"` key so phase 3 / 4 can see it.
+4. **Refuse a SECOND time only as a last resort.** If the prior
+   failure named an unbuildable dependency and there is genuinely
+   no path forward, REFUSE with a precise one-paragraph blocker.
+   The orchestrator treats a second consecutive refusal as
+   terminal for this phase and lets the demote gate take over.
+5. **Don't repeat the previous mistake.** If the previous attempt
+   refused for "missing 15-task list" and nothing in the
+   environment has changed, refusing again for the same reason is
+   the wrong move — write the amendment.
+
+The repair-context file is a hint, not a script. Read it, decide
+what to actually do, and either fix the bug or write the
+amendment plus implementation. The smoke validation gate still
+applies — a repair attempt that doesn't run smoke is rejected
+the same way a first attempt would be.
 
 ## Anti-patterns
 

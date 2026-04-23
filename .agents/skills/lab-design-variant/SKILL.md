@@ -54,6 +54,13 @@ The orchestrator passes you via CLI arguments:
   exactly what the entry says at the moment preflight ran.
 - `--design-path=<path>` — the absolute path to write the output
   `design.md` to (pre-created by the orchestrator).
+- `--repair-context=<path>` *(optional, only on auto-repair retries)*
+  — absolute path to a small markdown file the orchestrator wrote
+  describing the previous attempt's failure. Read it FIRST when
+  present; see [Repair mode](#repair-mode) below.
+- `--repair-attempt=<n>` *(optional, only on auto-repair retries)*
+  — 1-indexed retry number for the current phase. Capped at
+  `MAX_REPAIRS_PER_PHASE + 1` (today: 2). Useful for log lines.
 
 ## Output
 
@@ -240,6 +247,49 @@ That's it. No git commits, no journal edits, no codex spawns. The
 orchestrator notices `design.md` exists, marks `design: ok` in
 `phases.json`, and hands off to `lab-implement-variant`.
 
+## Repair mode
+
+When the orchestrator passes `--repair-context=<path>` (always
+together with `--repair-attempt=<n>`), this is a retry — the
+previous attempt's output caused a downstream phase to fail.
+Behaviour:
+
+1. **Read the repair-context file FIRST**, before re-reading the
+   roadmap or the codebase. It contains the prior failure
+   message(s) verbatim, newest first.
+2. **Diagnose** the failure cause:
+    - "design too rigid" — the previous design encoded a literal
+      number / exact list / exact predicate that the implement
+      phase couldn't satisfy. Soften it: prefer a *predicate*
+      (e.g. "the qualifying tasks in `<prior instance>` where
+      `basic` hit `n_turns=30`") plus an *expected count range*
+      to a single hardcoded number. The implement phase will
+      materialise the actual count.
+    - "design referenced wrong files / wrong APIs" — the previous
+      design pointed at code that doesn't exist as described. Use
+      Grep / SemanticSearch in the worktree to confirm the right
+      symbols before writing.
+    - "idea genuinely unbuildable" — REFUSE again with a concrete
+      one-paragraph blocker. The orchestrator counts that and
+      auto-demotes if the budget is exhausted; this is the right
+      outcome for bad ideas.
+3. **Write a fresh `design.md`** that addresses the failure. Do
+   NOT rewrite the same rigid contract that just failed; if you
+   genuinely can't do better, REFUSE.
+4. **Preserve the hypothesis verbatim.** A repair attempt is
+   allowed to relax the slice or the file list; it is NOT allowed
+   to silently change what the experiment is testing.
+5. **Note the repair in `## Risks / open questions`** with a one-
+   line entry like "repair-attempt=2: relaxed exact `n=15` to
+   predicate-based slice (count is whatever the predicate yields,
+   ~15-30) because the prior recorded artifacts contain no
+   canonical 15-task subset."
+
+The repair-context file is a hint, not a script. Read the prior
+failure carefully, decide what to actually do, and write a clean
+design that an implement phase with no memory of the prior round
+could satisfy on the first try.
+
 ## Anti-patterns
 
 - **Don't speculate about results.** This file describes what to
@@ -251,4 +301,6 @@ orchestrator notices `design.md` exists, marks `design: ok` in
 - **Don't re-justify the idea.** If the idea is bad, the right
   move is to refuse with a one-paragraph note and let the
   orchestrator demote the entry. Don't pad `design.md` with
+  defensive prose.
+th
   defensive prose.

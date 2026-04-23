@@ -68,6 +68,27 @@ PHASE_ORDER: tuple[PhaseName, ...] = (
 PhaseStatus = Literal["pending", "running", "ok", "failed", "skipped"]
 
 
+# Per-phase auto-repair budget. After a phase fails, the orchestrator
+# is allowed to spawn the same skill ``MAX_REPAIRS_PER_PHASE`` more
+# times with **repair context** (the prior failure messages) injected
+# as a CLI argument. After that budget is exhausted, the failure
+# becomes sticky and the existing daemon-state consecutive-failure
+# counter takes over (and may auto-demote the entry).
+#
+# Rationale: most "design too rigid → implement REFUSE" failures are
+# *contract ambiguities* that one self-correction round can resolve
+# (the skill reads its own prior failure and either fixes the
+# contract or escalates with a precise blocker). Without this
+# budget the operator has to babysit every contract mismatch.
+MAX_REPAIRS_PER_PHASE: int = 1
+
+
+_PRIOR_FAILURE_CAP: int = 3
+"""Keep at most the last N failure messages on each phase. Bounds
+``phases.json`` size and avoids forwarding stale, unresolved errors
+into a fresh repair attempt's prompt context."""
+
+
 # ---------------------------------------------------------------------------
 # Per-phase record
 # ---------------------------------------------------------------------------
@@ -82,6 +103,13 @@ class PhaseRecord:
     implement stores ``commits`` and ``validations``; run stores the
     ``instance_id``; finalize stores ``pr_url``). The runner reads
     these via the typed accessors below — no magic strings.
+
+    ``failure_count`` and ``prior_failures`` drive the auto-repair
+    loop: every ``mark_failed`` call appends the new error and
+    increments the counter, ``mark_running`` deliberately does NOT
+    clear them so the next attempt can read its own history, and
+    ``mark_ok`` (success) zeroes them. The counter is what the
+    runner consults to decide "repair attempt or give up".
     """
 
     status: PhaseStatus = "pending"
@@ -89,6 +117,8 @@ class PhaseRecord:
     finished_at: str | None = None
     error: str | None = None
     payload: dict[str, Any] = field(default_factory=dict)
+    failure_count: int = 0
+    prior_failures: list[str] = field(default_factory=list)
 
 
 # ---------------------------------------------------------------------------
@@ -194,6 +224,8 @@ def _from_dict(data: dict[str, Any]) -> SlugPhases:
                 finished_at=rec.get("finished_at"),
                 error=rec.get("error"),
                 payload=dict(rec.get("payload") or {}),
+                failure_count=int(rec.get("failure_count") or 0),
+                prior_failures=list(rec.get("prior_failures") or []),
             )
     return SlugPhases(
         slug=data["slug"],
@@ -246,7 +278,12 @@ def load_or_init(slug: str, *, needs_variant: bool = True) -> SlugPhases:
 
 
 def mark_running(slug: str, phase: PhaseName) -> SlugPhases:
-    """Flip a phase to ``running`` and stamp ``started_at``."""
+    """Flip a phase to ``running`` and stamp ``started_at``.
+
+    Deliberately preserves ``failure_count`` and ``prior_failures`` —
+    a repair attempt needs that history visible so the runner can
+    decide budget and the skill can read it via repair-context.
+    """
     state = load_or_init(slug)
     rec = state.get(phase)
     rec.status = "running"
@@ -263,12 +300,20 @@ def mark_ok(
     *,
     payload: dict[str, Any] | None = None,
 ) -> SlugPhases:
-    """Flip a phase to ``ok``, stamp ``finished_at``, merge ``payload``."""
+    """Flip a phase to ``ok``, stamp ``finished_at``, merge ``payload``.
+
+    Success terminates the failure history: ``failure_count`` and
+    ``prior_failures`` are zeroed so a future failure of the same
+    phase (after the operator manually re-resets it) starts a fresh
+    repair budget.
+    """
     state = load_or_init(slug)
     rec = state.get(phase)
     rec.status = "ok"
     rec.finished_at = _now_iso()
     rec.error = None
+    rec.failure_count = 0
+    rec.prior_failures = []
     if payload:
         rec.payload.update(payload)
     save(state)
@@ -299,12 +344,29 @@ def mark_failed(
     error: str,
     payload: dict[str, Any] | None = None,
 ) -> SlugPhases:
-    """Flip a phase to ``failed`` with an operator-readable error string."""
+    """Flip a phase to ``failed`` with an operator-readable error string.
+
+    Side-effects on the auto-repair fields:
+
+    -   Increments ``failure_count``.
+    -   Appends the truncated ``error`` to ``prior_failures``,
+        capped at :data:`_PRIOR_FAILURE_CAP` (oldest dropped). This
+        is what gets fed into the next attempt's repair-context
+        prompt block.
+
+    Both fields survive across ``mark_running`` and only reset on
+    ``mark_ok`` (success) or ``reset_phase`` (operator escape hatch).
+    """
     state = load_or_init(slug)
     rec = state.get(phase)
     rec.status = "failed"
     rec.finished_at = _now_iso()
-    rec.error = error[:1000]
+    truncated = error[:1000]
+    rec.error = truncated
+    rec.failure_count += 1
+    rec.prior_failures.append(truncated)
+    if len(rec.prior_failures) > _PRIOR_FAILURE_CAP:
+        rec.prior_failures = rec.prior_failures[-_PRIOR_FAILURE_CAP:]
     if payload:
         rec.payload.update(payload)
     save(state)
