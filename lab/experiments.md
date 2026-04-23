@@ -6,7 +6,7 @@
 -   **Trunk at run-time:** [`trunk`](../src/openharness/agents/configs/trunk.yaml)
 -   **Hypothesis:** the 22.5% baseline is meaningfully budget-bound on the near-miss slice; raising `max_turns` from 30 → 60 → 120 (with `max_tokens` scaled 8192 → 16384 → 32768) lifts pass-rate by ≥10pp on tasks that pinned `n_turns=30` in `tb2-baseline-full-sweep`.
 -   **Run:** [`runs/experiments/extended-budget-paired-on-trunk-20260423-184410`](../runs/experiments/extended-budget-paired-on-trunk-20260423-184410)
--   **Branch:** `lab/extended-budget-paired-on-trunk`
+-   **Branch:** `lab/extended-budget-paired-on-trunk` — not opened (reject: verdict rejected by critique; head=`dd03751`)
 
 ### Aggregate
 | Leg | Agent | Trials | Passed | Failed | Pass rate | Cost (USD) |
