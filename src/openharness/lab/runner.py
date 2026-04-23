@@ -413,6 +413,132 @@ def _summary_truncate(text: str, *, n: int = 200) -> str:
     return text if len(text) <= n else text[: n - 1] + "…"
 
 
+# ---------------------------------------------------------------------------
+# Auto-repair: turn a failed phase's prior errors into a small markdown
+# file the next spawn can read via ``--repair-context=<path>``.
+#
+# Why a file (and not just CLI arg-stuffing)?
+#  - Codex spawns log every CLI arg verbatim into the prompt header
+#    AND the audit log. A multi-paragraph repair block bloats the
+#    log and makes the prompt brittle to shell-escaping bugs.
+#  - The skill's SKILL.md can reference the file by name, document
+#    the format once, and treat it as just another input.
+#  - The artifact survives in ``runs/lab/state/<slug>/`` so an
+#    operator can read EXACTLY what context the repair attempt got.
+# ---------------------------------------------------------------------------
+
+
+def _repair_context_path(slug: str, phase: phase_state.PhaseName) -> Path:
+    """Where ``_write_repair_context`` writes / where the spawn reads from."""
+    return phase_state.slug_dir(slug) / f"repair-{phase}.md"
+
+
+def _format_repair_context(
+    *,
+    slug: str,
+    phase: phase_state.PhaseName,
+    prior_failures: list[str],
+    attempt_number: int,
+    max_attempts: int,
+) -> str:
+    """Render the repair-context markdown the skill will read.
+
+    Kept intentionally short: the model reads a handful of these per
+    spawn, and verbose context dilutes the actual failure signal.
+    Order = newest first so the most relevant message lands at the
+    top of the model's attention budget.
+    """
+    lines: list[str] = [
+        f"# Repair context — `{slug}` / `{phase}`",
+        "",
+        f"This is **repair attempt {attempt_number} of {max_attempts}** "
+        "for this phase. The previous attempt(s) failed with the messages "
+        "below (newest first).",
+        "",
+        "Your job, in order:",
+        "",
+        "1. Read the failure(s) and identify the root cause.",
+        "2. If the failure is *your* fault (a real bug in the artefact "
+        "you produced), fix it and proceed normally.",
+        "3. If the failure is a **contract ambiguity** — the design / "
+        "roadmap asks for something that cannot be satisfied as "
+        "literally specified — write a `design_amendment.md` (next "
+        "to `design.md` in the same directory) explaining the "
+        "minimal amendment, then proceed using the amended contract. "
+        "The amendment MUST preserve the hypothesis and the axis "
+        "count; it may relax exact slice sizes, swap a near-miss "
+        "predicate for the available equivalent, etc.",
+        "4. If the failure indicates the idea is genuinely unbuildable "
+        "with current code, REFUSE again with a one-paragraph "
+        "blocker that names exactly what is missing — the "
+        "orchestrator will then exhaust the repair budget and "
+        "escalate via auto-demote, which is the right outcome.",
+        "",
+        "Do **not** repeat the previous failure's mistake. If you "
+        "REFUSE a second time for the same reason, the orchestrator "
+        "treats that as terminal.",
+        "",
+    ]
+    for i, msg in enumerate(reversed(prior_failures), start=1):
+        lines.append(f"## Prior failure {i}")
+        lines.append("")
+        lines.append("```")
+        lines.append(msg.strip())
+        lines.append("```")
+        lines.append("")
+    return "\n".join(lines)
+
+
+def _maybe_write_repair_context(
+    slug: str,
+    phase: phase_state.PhaseName,
+    state: phase_state.SlugPhases,
+) -> tuple[Path, int] | None:
+    """Materialise the repair-context file iff the phase has prior failures.
+
+    Returns ``(path, attempt_number)`` for the caller to splice into
+    the spawn's CLI args, or ``None`` if this is a clean first
+    attempt (no prior failures).
+    """
+    rec = state.get(phase)
+    if not rec.prior_failures:
+        return None
+    path = _repair_context_path(slug, phase)
+    attempt_number = rec.failure_count + 1  # 1-indexed for humans
+    text = _format_repair_context(
+        slug=slug,
+        phase=phase,
+        prior_failures=rec.prior_failures,
+        attempt_number=attempt_number,
+        max_attempts=phase_state.MAX_REPAIRS_PER_PHASE + 1,
+    )
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text)
+    return path, attempt_number
+
+
+def _repair_args(slug: str, phase: phase_state.PhaseName, state: phase_state.SlugPhases) -> list[str]:
+    """Return the CLI flags that inject repair-context into a skill spawn.
+
+    Empty list when the phase has no prior failures (the common
+    fast-path on the first attempt). Otherwise two flags:
+
+        --repair-context=<path>     # written by _maybe_write_repair_context
+        --repair-attempt=<N>        # 1-indexed, capped at MAX_REPAIRS+1
+
+    The skill's SKILL.md treats these as optional inputs: if absent,
+    behave normally; if present, prepend the repair workflow.
+    """
+    info = _maybe_write_repair_context(slug, phase, state)
+    if info is None:
+        return []
+    path, attempt_number = info
+    return [
+        f"--repair-context={path}",
+        f"--repair-attempt={attempt_number}",
+    ]
+
+
 def _commit_lab_changes(
     *,
     slug: str,
@@ -522,6 +648,7 @@ def _phase_design(
 
     ds.update_tick(phase="design", note="lab-design-variant")
     phase_state.mark_running(entry.slug, "design")
+    repair_args = _repair_args(entry.slug, "design", state)
     res = codex_adapter.run(
         "lab-design-variant",
         [
@@ -535,6 +662,7 @@ def _phase_design(
             # the markdown file (the read-only sandbox can still read it;
             # this is a convenience for clarity in the agent's context).
             f"--roadmap-body={entry.body}",
+            *repair_args,
         ],
         cfg=cx,
         expected_orchestrator_pid=os.getpid(),
@@ -590,6 +718,7 @@ def _phase_implement(
 
     ds.update_tick(phase="implement", note="lab-implement-variant")
     phase_state.mark_running(entry.slug, "implement")
+    repair_args = _repair_args(entry.slug, "implement", state)
     res = codex_adapter.run(
         "lab-implement-variant",
         [
@@ -598,6 +727,7 @@ def _phase_implement(
             f"--design-path={design_path or ''}",
             f"--implement-json={implement_path}",
             f"--base-sha={pre.get('base_sha', '')}",
+            *repair_args,
         ],
         cfg=cx,
         expected_orchestrator_pid=os.getpid(),
@@ -967,6 +1097,7 @@ def _phase_finalize(
         finalize_data = json.loads(finalize_path.read_text())
         logger.info("finalize.json already present for %s; reusing", entry.slug)
     else:
+        repair_args = _repair_args(entry.slug, "finalize", state)
         res = codex_adapter.run(
             "lab-finalize-pr",
             [
@@ -976,6 +1107,7 @@ def _phase_finalize(
                 f"--verdict={verdict_kind}",
                 f"--instance-id={instance_id or ''}",
                 f"--finalize-json={finalize_path}",
+                *repair_args,
             ],
             cfg=cx,
             expected_orchestrator_pid=os.getpid(),
@@ -1105,12 +1237,39 @@ def _process_entry(entry: RoadmapEntry, cfg: OrchestratorConfig) -> TickResult:
             summary=f"all phases already ok for {entry.slug}",
         )
 
-    # Reset only the phase we're about to retry — earlier ``ok``
-    # records survive untouched, so we don't replay design when only
-    # implement was failing.
-    if state.get(next_phase).status == "failed":
-        logger.info("retrying %s: clearing prior failed record", next_phase)
-        state = phase_state.reset_phase(entry.slug, next_phase)
+    # If the next phase is already failed, decide whether to attempt
+    # an auto-repair retry or surface the failure to the demote gate.
+    #
+    # The repair budget is per-phase (see
+    # :data:`phase_state.MAX_REPAIRS_PER_PHASE`). On a repair attempt
+    # we DELIBERATELY do not call ``reset_phase`` — the
+    # ``failure_count`` and ``prior_failures`` fields must survive so
+    # the phase handler can splice them into the spawn's
+    # ``--repair-context`` argument. ``mark_running`` (called by the
+    # handler) clears only ``status`` / ``error`` / timestamps.
+    failed_rec = state.get(next_phase)
+    if failed_rec.status == "failed":
+        budget = phase_state.MAX_REPAIRS_PER_PHASE
+        if failed_rec.failure_count > budget:
+            logger.warning(
+                "%s for %s exhausted repair budget (%d failures, max=%d); "
+                "leaving sticky-failed for the demote gate",
+                next_phase, entry.slug, failed_rec.failure_count, budget,
+            )
+            err = failed_rec.error or "(no error message recorded)"
+            return TickResult(
+                ok=False, outcome="error",
+                summary=(
+                    f"{next_phase} failed after {failed_rec.failure_count} "
+                    f"attempt(s); repair budget exhausted: "
+                    f"{_summary_truncate(err, n=160)}"
+                ),
+            )
+        logger.info(
+            "retrying %s for %s (repair attempt %d of %d)",
+            next_phase, entry.slug,
+            failed_rec.failure_count + 1, budget + 1,
+        )
 
     for phase_name, handler in _PHASE_DISPATCH:
         rec = state.get(phase_name)
