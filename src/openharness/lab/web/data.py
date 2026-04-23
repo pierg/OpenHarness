@@ -38,6 +38,8 @@ from openharness.lab.web.models import (
     JournalEntryView,
     LegSummary,
     PendingActions,
+    PhaseView,
+    PipelineView,
     ProcessNode,
     RoadmapEntryView,
     SpawnRow,
@@ -184,6 +186,159 @@ class LabReader:
             lock_path=str(ORCHESTRATOR_LOCK_PATH),
             last_log_line=last_line,
             log_path=log_path,
+        )
+
+    def pipeline_view(self) -> PipelineView | None:
+        """Return the "what is the daemon doing right now" snapshot.
+
+        Priority for picking the slug to surface:
+
+        1. ``daemon_state.active_tick.slug`` — the in-flight tick. The
+           returned :class:`PipelineView` has ``is_active=True`` and
+           the ``current_phase`` field set from the live tick.
+        2. The most recently touched ``runs/lab/state/<slug>/`` dir —
+           so the operator still sees pipeline history when the
+           daemon is idle. ``is_active`` is False; ``current_phase``
+           is the first non-``ok``/``skipped`` phase, or ``None`` if
+           the slug closed cleanly.
+        3. ``None`` — daemon has never run anything on this host
+           (fresh checkout). The cockpit renders an empty state.
+
+        Always returns six phase rows in canonical order so the strip
+        in :file:`_daemon_pipeline.html` can render unconditionally.
+        Skipped phases (e.g. design+implement on a baseline) carry
+        ``status="skipped"`` so they render dimmed rather than
+        omitted, which would make the strip's geometry shift between
+        runs and confuse the eye.
+        """
+        from openharness.lab import daemon_state as _ds
+        from openharness.lab import phase_state as _ps
+        from openharness.lab import preflight as _pf
+
+        state = _ds.load()
+        active = state.active_tick
+
+        slug: str | None = None
+        is_active = False
+        if active is not None:
+            slug = active.slug
+            is_active = True
+        else:
+            # Idle: find the newest per-slug state directory so the
+            # operator still sees what just happened.
+            for s in _ps.all_slugs():
+                slug = s
+                break
+
+        if slug is None:
+            return None
+
+        slug_state = _ps.load(slug)
+        # `lab phases reset --all` may have removed the file mid-tick;
+        # surface a minimal pipeline so the strip still renders rather
+        # than 500-ing the cockpit.
+        if slug_state is None:
+            slug_state = _ps.SlugPhases(slug=slug)
+
+        current_phase: str | None = None
+        if is_active and active is not None:
+            current_phase = active.phase
+        else:
+            current_phase = slug_state.first_unfinished()
+
+        phases: list[PhaseView] = []
+        for name in _ps.PHASE_ORDER:
+            rec = slug_state.phases.get(name)
+            if rec is None:
+                phases.append(PhaseView(
+                    name=name, status="pending",
+                    started_at=None, finished_at=None,
+                    duration_sec=None, error=None, summary=None,
+                    is_active=(current_phase == name and is_active),
+                ))
+                continue
+            started = _parse_ts(rec.started_at) if rec.started_at else None
+            finished = _parse_ts(rec.finished_at) if rec.finished_at else None
+            duration = (
+                (finished - started).total_seconds()
+                if started and finished else None
+            )
+            # Keep summary short — the strip cell only has room for one
+            # line. Per-phase keys are documented in `phase_state.py`.
+            summary: str | None = None
+            payload = rec.payload or {}
+            if name == "preflight" and payload.get("worktree"):
+                base = payload.get("base_sha") or ""
+                summary = f"@ {str(base)[:8]}" if base else "worktree ready"
+            elif name == "implement" and payload.get("commits"):
+                n = len(payload.get("commits") or [])
+                summary = f"{n} commit{'' if n == 1 else 's'}"
+            elif name == "run" and payload.get("instance_id"):
+                summary = f"instance {str(payload['instance_id'])[:18]}"
+            elif name == "critique" and payload.get("verdict"):
+                summary = f"verdict: {payload['verdict']}"
+            elif name == "finalize" and payload.get("pr_url"):
+                pr = str(payload["pr_url"]).rsplit("/", 1)[-1]
+                summary = f"PR #{pr}"
+            elif rec.status == "skipped":
+                summary = str(payload.get("skip_reason") or "skipped")
+            phases.append(PhaseView(
+                name=name,
+                status=rec.status,
+                started_at=started,
+                finished_at=finished,
+                duration_sec=duration,
+                error=rec.error,
+                summary=summary,
+                is_active=(current_phase == name and is_active),
+            ))
+
+        # Hypothesis from the roadmap (best-effort: the slug may have
+        # already been promoted to Done by the time the operator looks).
+        hypothesis: str | None = None
+        try:
+            up_next, _suggested, _done = self.roadmap()
+            for r in up_next:
+                if r.slug == slug:
+                    hypothesis = r.hypothesis or None
+                    break
+        except Exception:  # noqa: BLE001 — markdown read is best-effort
+            hypothesis = None
+
+        # Worktree path: prefer active-tick (it's the live truth),
+        # otherwise reconstruct via the preflight helper so the
+        # "Remove worktree" button on the idle view still works.
+        worktree_path: str | None = None
+        if active is not None and active.worktree_path:
+            worktree_path = active.worktree_path
+        else:
+            try:
+                wt = _pf._worktree_path_for(slug)
+                if wt.exists():
+                    worktree_path = str(wt)
+            except Exception:  # noqa: BLE001
+                worktree_path = None
+        branch = f"lab/{slug}" if worktree_path else None
+
+        spawn_log_basename: str | None = None
+        if active is not None and active.log_path:
+            spawn_log_basename = active.log_path.rsplit("/", 1)[-1]
+
+        return PipelineView(
+            slug=slug,
+            hypothesis=hypothesis,
+            is_active=is_active,
+            needs_variant=slug_state.needs_variant,
+            worktree_path=worktree_path,
+            branch=branch,
+            spawn_pid=active.spawn_pid if active else None,
+            spawn_log_path=active.log_path if active else None,
+            spawn_log_basename=spawn_log_basename,
+            note=active.note if active else None,
+            started_at=active.started_at if active else _parse_ts(slug_state.started_at) if slug_state.started_at else None,
+            last_updated_at=_parse_ts(slug_state.last_updated_at) if slug_state.last_updated_at else None,
+            current_phase=current_phase,
+            phases=phases,
         )
 
     def daemon_state(self):

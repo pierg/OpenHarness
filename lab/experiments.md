@@ -1,44 +1,5 @@
 # Experiments
 
-## 2026-04-22 — reflection-context-compaction-smoke
-
--   **Type:** paired-ablation
--   **Trunk at run-time:** [`trunk`](../src/openharness/agents/configs/trunk.yaml)
--   **Hypothesis:** truncating tool stdout above some threshold lets `reflection` complete on the smoke slice within wall-clock and at <500 k input tokens per trial.
--   **Run:** [`runs/experiments/reflection-context-compaction-smoke-20260422-213746`](../runs/experiments/reflection-context-compaction-smoke-20260422-213746)
--   **Branch:** `lab/reflection-context-compaction-smoke` — not opened (no_op: Inconclusive: Δ pass-rate = +0.0pp (trunk 50.0% vs mutation 50.0%); 0 positive cluster(s) (threshold 2); Δ $/pass = -6%.)
-
-### Aggregate
-| Leg | Agent | Trials | Passed | Failed | Pass rate | Cost (USD) |
-|-----|-------|-------:|-------:|-------:|----------:|-----------:|
-| `reflection_compacted` | `reflection_context_compaction` | 2 | 1 | 1 | 50.0% | $1.79 |
-| `reflection_control` | `reflection` | 2 | 1 | 1 | 50.0% | $1.68 |
-### Mutation impact
--   **Best leg:** `reflection_compacted` (50.0%, $1.79)
--   **Worst leg:** `reflection_control` (50.0%, $1.68)
--   **Spread:** +0.0 pp
--   _(experiment-critic JSON missing a `mutation_impact` field; this is a DB-only fallback.)_
-### Failure modes
-
-_(pending)_
-
-### Tree effect
--   **Verdict:** **No-op** — recorded for trend analysis
--   **Target:** `reflection`
--   **Pair:** trunk leg `reflection_compacted` vs mutation `reflection_control`
--   **Δ pass-rate:** +0.00 pp
--   **Δ $/pass:** -6.1%
--   **Confidence:** 0.00
--   **Rationale:** Inconclusive: Δ pass-rate = +0.0pp (trunk 50.0% vs mutation 50.0%); 0 positive cluster(s) (threshold 2); Δ $/pass = -6%.
-
-| Cluster | trunk pass | mut pass | Δ pp |
-|---------|-----------:|---------:|-----:|
-| `bash_pipeline` | 1/1 | 1/1 | +0.0 |
-| `regex_programming` | 0/1 | 0/1 | +0.0 |
-### Linked follow-ups
-
-_(pending)_
-
 ## 2026-04-17 — tb2-baseline-full-sweep
 
 -   **Type:** broad-sweep
@@ -85,5 +46,5 @@ _(pending)_
 -   [`planner-executor-cluster-confirmation`](roadmap.md#planner-executor-cluster-confirmation) — focused re-test of the add_branch use-when on its 3 positive clusters with n>=5 (current verdict rests on n=1/3/7).
 -   [`react-tentative-cluster-retest`](roadmap.md#react-tentative-cluster-retest) — flip react's no_op (1 positive cluster, threshold 2) into a clean verdict on its winning cluster.
 -   [`extended-budget-paired-on-trunk`](roadmap.md#extended-budget-paired-on-trunk) — cheapest test of whether the 22.5% baseline is budget-bound vs capability-bound on a near-miss slice.
--   [`loop-guard-on-planner-executor`](ideas.md#loop-guard-on-planner-executor) — auto-proposed; depends on `loop-guard-tb2-paired` landing first.
+-   [`loop-guard-on-planner-executor`](ideas.md#loop-guard-on-planner-executor) — auto-proposed; depends on `loop-guard-paired-ablation` landing first.
 -   [`tool-result-summariser-paired`](ideas.md#tool-result-summariser-paired) — auto-proposed; sibling of `reflection-context-compaction`.

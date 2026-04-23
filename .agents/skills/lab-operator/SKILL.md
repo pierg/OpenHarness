@@ -21,10 +21,13 @@ description: >
 
 The autonomous lab is one daemon (`uv run lab daemon`) that drives
 a deterministic **6-phase pipeline** per roadmap entry — preflight
-(git worktree) → design (codex skill, read-only) → implement
-(codex skill, worktree-write) → run (`uv run exec`) → critique
-(trial/experiment-critic spawns) → finalize (codex skill, push
-branch + open PR). Per-slug state lives in
+(git worktree) → design (codex skill, writes design.md only) →
+implement (codex skill, worktree-write; runs `--profile smoke` for
+wiring validation before committing) → run (`uv run exec` on the
+full slice declared in `design.md > ## Slice > Full`) → critique
+(trial/experiment-critic spawns; `tree_ops.evaluate` enforces an
+n>=5 per-leg verdict floor) → finalize (codex skill, push branch +
+open PR). Per-slug state lives in
 `runs/lab/state/<slug>/phases.json` so any phase can be resumed
 after a restart.
 
@@ -370,13 +373,13 @@ reply, even if the user only asked one question. Two patterns:
 > Last spawn: `trial-critic` exit 0, 32s ago, on
 > `cancel-async-tasks__rGqDyp4` in `tb2-baseline-…`.
 > DB: 267 trials, 234 critiqued, 0 misconfigurations.
-> Pending: 1 staged graduate (`loop-guard-tb2-paired` →
+> Pending: 1 staged graduate (`loop-guard-paired-ablation` →
 > `loop-guard`); run `lab-graduate-component` to confirm.
 
 **After "start it" / "restart it":**
 > Started in tmux session `openharness-lab` (pid 23456).
-> First entry on the queue: `loop-guard-tb2-paired`
-> (cost ~$0.50 smoke). Attach with `uv run lab daemon attach`.
+> First entry on the queue: `loop-guard-paired-ablation`
+> (cost ~$10-20 full slice). Attach with `uv run lab daemon attach`.
 
 The user shouldn't have to ask "and how's it going?" after every
 action — bake the status into the reply.

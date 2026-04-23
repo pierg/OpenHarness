@@ -106,7 +106,7 @@ class HarborBackend(Backend):
         # Forward experiment context to the agent so it can enrich Langfuse
         # traces with experiment_id / leg_id / agent_id / dataset and attach
         # every trace of an experiment to a single Langfuse session for
-        # rollups in the dashboard.
+        # rollups in Langfuse / the lab web UI.
         merged_env.setdefault("OPENHARNESS_EXPERIMENT_ID", ctx.spec.id)
         merged_env.setdefault("OPENHARNESS_INSTANCE_ID", ctx.instance_id)
         merged_env.setdefault("OPENHARNESS_LEG_ID", leg.leg_id)

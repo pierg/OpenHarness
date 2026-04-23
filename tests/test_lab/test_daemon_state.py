@@ -417,28 +417,51 @@ def client(isolated_lab: Path):
 
 
 def test_daemon_page_renders_cockpit_panels(client) -> None:
-    """`/daemon` includes all five cockpit sections."""
+    """`/daemon` renders the redesigned pipeline-centric cockpit.
+
+    After the redesign, the page is built around three top-level
+    panels (control bar, pipeline strip, recent ticks) plus an
+    Approval queue card and a collapsed Diagnostics section. We
+    smoke-test for one anchor in each of the still-visible panels.
+    """
     resp = client.get("/daemon")
     assert resp.status_code == 200
     body = resp.text
-    for marker in ("Mode:", "Current tick", "Approval queue", "Recent ticks"):
+    for marker in ("Mode", "Approval queue", "Recent ticks", "Diagnostics"):
         assert marker in body, f"missing {marker!r} on /daemon"
 
 
 def test_daemon_partials_round_trip(client) -> None:
-    """Each `/_hx/daemon-*` partial returns 200 + non-empty content."""
+    """Each `/_hx/daemon-*` partial returns 200 + non-empty content.
+
+    Includes both the legacy partials (kept for backwards compat with
+    external dashboards) and the redesigned cockpit partials
+    (control-bar, pipeline). Catches the regression where someone
+    removes a route while a template still references it.
+    """
     for path in (
+        # Legacy partials — the cockpit no longer mounts them but
+        # external dashboards / tests may still target them.
         "/_hx/daemon-mode",
         "/_hx/daemon-active-tick",
+        # Always-on cockpit partials.
         "/_hx/daemon-approvals",
         "/_hx/daemon-history",
         "/_hx/daemon-failures",
+        # Redesigned cockpit partials.
+        "/_hx/daemon-control-bar",
+        "/_hx/daemon-pipeline",
     ):
         resp = client.get(path)
         assert resp.status_code == 200, f"{path} → {resp.status_code}"
     # daemon-failures is empty when there are no failures (sentinel
     # for "don't render the section"); the others always have body.
     assert client.get("/_hx/daemon-mode").text.strip() != ""
+    assert client.get("/_hx/daemon-control-bar").text.strip() != ""
+    # The pipeline partial returns the empty-state card when no
+    # phase_state exists yet — it must still produce HTML so the
+    # cockpit's hx-swap target never goes blank.
+    assert "No pipeline yet" in client.get("/_hx/daemon-pipeline").text
 
 
 def test_whitelist_includes_all_daemon_commands(client) -> None:
@@ -461,6 +484,13 @@ def test_whitelist_includes_all_daemon_commands(client) -> None:
         "daemon-reset-all-failures",
         "daemon-clear-history",
         "runs-prune",
+        # Per-slug pipeline + worktree controls added with the
+        # cockpit redesign; the pipeline panel renders buttons that
+        # POST these whitelist entries, so dropping one would leave
+        # dead UI behind.
+        "phases-reset",
+        "phases-reset-one",
+        "worktree-remove",
     }
     missing = expected - COMMANDS.keys()
     assert not missing, f"missing whitelist entries: {missing}"

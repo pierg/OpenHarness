@@ -13,15 +13,15 @@
 
 | ID | Status | Description | Used by | Evidence |
 |----|--------|-------------|---------|----------|
-| `loop-guard` | proposed | detects no-progress turns (repeated tool calls, empty assistant) and steers toward recovery | — | [idea](ideas.md#loop-guard), queued: [loop-guard-tb2-paired](roadmap.md#loop-guard-tb2-paired) |
-| `context-compaction` | proposed | truncates large tool-stdout blocks above a threshold | — | [idea](ideas.md#reflection-context-compaction), queued: [reflection-context-compaction-smoke](roadmap.md#reflection-context-compaction-smoke) |
+| `loop-guard` | proposed | detects no-progress turns (repeated tool calls, empty assistant) and steers toward recovery | — | [idea](ideas.md#loop-guard), queued: [loop-guard-paired-ablation](roadmap.md#loop-guard-paired-ablation) |
+| `context-compaction` | proposed | truncates large tool-stdout blocks above a threshold | — | [idea](ideas.md#reflection-context-compaction) (no roadmap entry yet — re-queue under the original `reflection-context-compaction` idea on a meaningful slice) |
 
 ## Tools
 
 | ID | Status | Description | Used by | Evidence |
 |----|--------|-------------|---------|----------|
 | `coding-tools` | validated | `bash + read_file + write_file + edit_file + glob + grep + think` — the standard executor toolbelt | `basic`, `planner_executor.executor`, `react.acter`, `reflection.worker` | [tb2-baseline-full-sweep](experiments.md#2026-04-17--tb2-baseline-full-sweep) |
-| `planner-tools-readonly` | experimental | `read_file + glob + grep` — read-only orient toolbelt for a planner subagent | `planner_executor.planner` | [tb2-baseline-full-sweep](experiments.md#2026-04-17--tb2-baseline-full-sweep); ablation queued: [grounded-planner-tools-ablation](roadmap.md#grounded-planner-tools-ablation) |
+| `planner-tools-readonly` | experimental | `read_file + glob + grep` — read-only orient toolbelt for a planner subagent | `planner_executor.planner` | [tb2-baseline-full-sweep](experiments.md#2026-04-17--tb2-baseline-full-sweep); ablation folded into [planner-executor-cluster-confirmation](roadmap.md#planner-executor-cluster-confirmation) as Leg C (`planner_executor` with `tools: []`) |
 
 ## Prompt
 

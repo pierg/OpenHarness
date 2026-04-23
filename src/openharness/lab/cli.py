@@ -720,30 +720,6 @@ def cmd_roadmap_done(
     typer.echo(f"moved roadmap entry {slug!r} → ## Done")
 
 
-# ===== dashboard launcher ===================================================
-
-
-@app.command()
-def dashboard(
-    port: int = typer.Option(8501, "--port"),
-    host: str = typer.Option("127.0.0.1", "--host"),
-) -> None:
-    """Launch the Streamlit dashboard (read-only)."""
-    import subprocess
-
-    app_path = Path(__file__).resolve().parents[3] / "lab" / "dashboard" / "app.py"
-    if not app_path.is_file():
-        err_console.print(f"[red]Dashboard app not found at {app_path}[/red]")
-        raise typer.Exit(1)
-    cmd = [
-        "streamlit", "run", str(app_path),
-        "--server.port", str(port),
-        "--server.address", host,
-        "--browser.gatherUsageStats", "false",
-    ]
-    raise typer.Exit(subprocess.call(cmd))
-
-
 @app.command()
 def webui(
     port: int = typer.Option(8765, "--port", help="HTTP port to bind."),

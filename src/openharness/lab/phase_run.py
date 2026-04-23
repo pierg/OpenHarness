@@ -17,7 +17,7 @@ The run output (``runs/experiments/<instance-id>/`` plus log files)
 lands in the **main repo's** ``runs/`` directory regardless of where
 ``uv run exec`` is launched from. We force this with ``--root`` so:
 
--   The existing lab infra (``ingest``, critic spawns, dashboards)
+-   The existing lab infra (``ingest``, critic spawns, web UI)
     keeps working without per-worktree path patches.
 -   ``runs/`` is gitignored in main, so the output never accidentally
     pollutes the worktree's branch.

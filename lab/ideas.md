@@ -65,6 +65,38 @@
 -   **Motivation:** Cross-task patterns (e.g. "how to read a Dockerfile before editing") aren't reused.
 -   **Sketch:** Indexed store of post-run reflections keyed by task signature; planner pulls top-k before producing a plan.
 
+### Framework
+
+> Improvements to the experimentation framework itself (the `lab/`
+> + `tree_ops.evaluate` machinery), not to any single agent. These
+> tighten the scientific contract pinned in
+> [`METHODOLOGY.md`](METHODOLOGY.md) — each one is referenced from
+> a specific section there as DEFERRED.
+
+#### cluster-combined-slice-shape
+
+-   **Motivation:** `tb2` clusters are tiny (42 of 56 categories have n=1; only `python_data` and `python_ml` clear the §6 floor as single-cluster slices at `n_attempts=1`). The current `cluster: <names>` shape silently treats multi-cluster lists as separate slices when it should treat them as one combined slice, making cluster-based confirmations awkward.
+-   **Sketch:** Add `cluster_combined: <names>` to `## Slice` shapes (METHODOLOGY §2). Spec-side, this resolves to a single `task_filter:` over the union; verdict-side, `tree_ops.evaluate` reports both per-cluster Δpp (current behaviour) AND a combined Δpp on the union (new). Lets `planner-executor-cluster-confirmation` declare `cluster_combined: python_data, system_administration, security_certificates` and clear the floor at `n_attempts=2` (n=22/leg) without per-cluster gymnastics.
+-   **Referenced from:** METHODOLOGY §2, Appendix B.
+
+#### adaptive-repetitions
+
+-   **Motivation:** Blanket `paired-double` (n_attempts=2) doubles cost on every cell, even cells where leg A passes 1/1 and leg B passes 1/1 (no information gained from re-rolling). On cells where legs disagree (1/1 vs 0/1) or where pass-rate falls in [0.3, 0.7], a third or fourth re-roll is high-value.
+-   **Sketch:** Add a "phase 3.5" between `phase_run` and `phase_critique` that examines per-cell results from phase 3, identifies borderline cells per the rule above, and queues re-runs (capped by `max=k` from the spec) on just those cells. Target cost: ~1.2-1.4× single-shot vs 2× for paired-double. Implementation: extend the spec to declare `adaptive: max=3`; phase 3.5 runs `uv run exec <spec> --profile retop --tasks <list>`; ingest merges the new trials into the same `instance_id`.
+-   **Referenced from:** METHODOLOGY §4.
+
+#### historical-control-shape
+
+-   **Motivation:** Every experiment currently re-runs its control fresh. For runtime-flag ablations on byte-identical existing branches (e.g. `loop-guard` on `planner_executor`), the control trials already exist in `runs/lab/trials.duckdb` from a prior run. Borrowing them cuts spend ~50% AND wall-clock ~50% on those experiments.
+-   **Sketch:** Add `control: historical: <instance_id>/<leg_id>` and `control: historical+replay: ...` modes to `## Slice` (METHODOLOGY §5). Implement phase blocks the run unless drift guards pass: control config hash, bench version pin, verifier hash, model pin (vendor + checkpoint), and `n_attempts` all byte-match. Trunk-graduation invalidates historical references to the old trunk (DB marks them stale; design phase rejects them). The `+replay` variant adds a third leg that re-runs the borrowed config on the slice to bound regression-to-the-mean noise (recommended for derived slices like `near-miss`).
+-   **Referenced from:** METHODOLOGY §5.
+
+#### graduate-replication-gate
+
+-   **Motivation:** A `Graduate` TreeDiff swaps trunk — the highest-stakes mutation in the lab. Today `lab graduate confirm <slug>` is the sole gate (human approval, no replication required). One bad luck run could land a regressing config on trunk, contaminating every downstream experiment until detected.
+-   **Sketch:** `lab graduate confirm <slug>` requires one full-experiment replication on the same slice with a fresh random seed before the trunk swap commits. Replication's verdict must agree (`Graduate` or `AddBranch` with Δ ≥ +3pp) for the swap to honor. Adds ~1× experiment cost per graduate, but graduates are rare (≤ 1/month at current cadence) and trunk integrity is worth it. Implementation: extend `lab graduate confirm` to spawn a fresh phase-3 run with a different `seed:` value, ingest, evaluate, and gate the swap on the second verdict.
+-   **Referenced from:** METHODOLOGY §7.
+
 ## Trying
 
 _(none)_

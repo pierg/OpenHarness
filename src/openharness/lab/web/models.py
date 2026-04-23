@@ -33,6 +33,62 @@ class DaemonStatus:
 
 
 @dataclass(eq=False, slots=True)
+class PhaseView:
+    """One step inside the orchestrator's 6-phase pipeline.
+
+    Mirrors :class:`openharness.lab.phase_state.PhaseRecord` plus the
+    fields the cockpit's pipeline strip needs to render a status pill
+    without re-parsing JSON in Jinja.
+
+    ``status`` is one of ``pending`` / ``running`` / ``ok`` / ``failed``
+    / ``skipped``. ``summary`` is a single-line human-readable digest
+    of ``payload`` — for example "3 commits", "instance=20260422…", or
+    "PR #123" — so the cockpit can show what each phase produced
+    without expanding to the raw JSON.
+    """
+
+    name: str
+    status: str
+    started_at: datetime | None
+    finished_at: datetime | None
+    duration_sec: float | None
+    error: str | None
+    summary: str | None
+    is_active: bool
+
+
+@dataclass(eq=False, slots=True)
+class PipelineView:
+    """The "what is the daemon doing right now" snapshot.
+
+    Built by :meth:`LabReader.pipeline_view`. When the daemon is in
+    flight, ``slug`` is the active tick and ``is_active`` is true; when
+    the daemon is idle, the most recently advanced slug is surfaced
+    so the operator still sees a meaningful narrative ("here's where
+    the last run got to").
+
+    Always carries six :class:`PhaseView` rows in
+    :data:`openharness.lab.phase_state.PHASE_ORDER` so the template
+    can render the strip without conditional bookkeeping.
+    """
+
+    slug: str
+    hypothesis: str | None
+    is_active: bool
+    needs_variant: bool
+    worktree_path: str | None
+    branch: str | None
+    spawn_pid: int | None
+    spawn_log_path: str | None
+    spawn_log_basename: str | None
+    note: str | None
+    started_at: datetime | None
+    last_updated_at: datetime | None
+    current_phase: str | None
+    phases: list[PhaseView]
+
+
+@dataclass(eq=False, slots=True)
 class ProcessNode:
     """One node in the live process tree under the orchestrator daemon.
 

@@ -172,7 +172,7 @@ know "we should explore X").
 uv run lab roadmap suggest <slug> \
   --hypothesis "<one sentence — what this run will tell us>" \
   --source "lab-reflect-and-plan@$(date +%Y-%m-%d)" \
-  [--cost "~$X smoke / ~Y full"]
+  [--cost "~$X for the full slice"]
 ```
 
 The CLI:
@@ -245,8 +245,8 @@ Reflecting on `loop-guard-tb2-paired` (verdict: add_branch, target_id=loop-guard
   use_when=cluster ∈ {build, python_async}, confidence=0.92).
 
 Wrote 2 ### Suggested entries to lab/roadmap.md:
-  - loop-guard-on-build-cluster-targeted   (~$0.30 smoke)
-  - loop-guard-on-needs-network-cluster    (~$0.25 smoke; sibling cluster check)
+  - loop-guard-on-build-cluster-targeted   (~$2 full cluster slice)
+  - loop-guard-on-needs-network-cluster    (~$2 full cluster slice; sibling)
 
 Wrote 1 ## Auto-proposed idea to lab/ideas.md:
   - loop-guard-on-trunk-swap-rebaseline    (only relevant after the next graduate)

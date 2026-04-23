@@ -2,9 +2,12 @@
 
 Operating guide for the autonomous lab loop. Conceptual model
 (three artifacts, invariants, mutation diagram) lives in
-[`README.md`](README.md); per-skill instructions live in
-[`.agents/skills/`](../.agents/skills/). This file covers what
-the daemon does each tick, how to operate it, the file-ownership
+[`README.md`](README.md); the **scientific methodology contract**
+(slice / legs / repetitions / control / verdict thresholds — what
+makes an experiment well-formed) lives in
+[`METHODOLOGY.md`](METHODOLOGY.md); per-skill instructions live in
+[`.agents/skills/`](../.agents/skills/). This file covers what the
+daemon does each tick, how to operate it, the file-ownership
 matrix, the DB queries you'll re-run, and what to check when
 something breaks.
 
@@ -44,36 +47,48 @@ loads-or-initialises `phases.json`, then walks the phases:
     need a code change (see `_BASELINE_IDEA_IDS`).
 
 2.  **Phase 1 — design** (codex skill: `lab-design-variant`,
-    sandbox `read-only`). Reads the idea + roadmap entry +
-    relevant codebase context and produces
-    `runs/lab/state/<slug>/design.md`: a concise design doc with
-    the proposed change, files to touch, validation strategy, and
-    risks. **No code edits** — this phase exists so a cheap
-    read-only pass can catch "we shouldn't even build this" before
-    we spend implementation tokens. Skipped for baseline entries.
+    sandbox `workspace-write` scoped to writing
+    `runs/lab/state/<slug>/design.md`). Reads the idea + roadmap
+    entry + relevant codebase context and produces a concise design
+    doc with the proposed change, files to touch, **slice
+    declaration** (smoke + full), validation strategy, and risks.
+    **No source edits** — only the design doc. This phase exists so
+    a cheap pass can catch "we shouldn't even build this" before we
+    spend implementation tokens. Skipped for baseline entries.
 
 3.  **Phase 2 — implement** (codex skill:
     `lab-implement-variant`, sandbox `workspace-write` scoped to
     the worktree). Reads `design.md`, **edits the worktree** to
-    realise the variant, runs the local validations the design
-    promised (typically `uv run pytest <focused>` and any
-    component-specific smoke), and **commits** the changes. Writes
-    `runs/lab/state/<slug>/implement.json` summarising the commits
-    landed, validations run, and files touched. Skipped for
-    baseline entries (worktree's HEAD is already the right code).
+    realise the variant, runs the static validations (`uv run lab
+    components --validate`, `uv run plan <spec>`, focused
+    `pytest`), then **runs a smoke exec**: `uv run exec <spec>
+    --profile smoke` against 1–4 fast cached tasks per leg. Smoke
+    is **wiring-validation-only** — pass-rate doesn't matter, but
+    a leg in `ERRORED` status or any uncaught exception fails the
+    phase. Commits the changes and writes
+    `runs/lab/state/<slug>/implement.json` summarising commits,
+    static validations, the **smoke** outcome (`spec_name`,
+    `profile`, `instance_id`, `legs[*].{trials_run, trials_passed,
+    errored}`, `errors`), and files touched. The runner refuses to
+    advance to phase 3 if the `smoke` block is missing or reports
+    errors. Skipped for baseline entries (worktree's HEAD is
+    already the right code).
 
 4.  **Phase 3 — run** (deterministic; `phase_run.py`). Resolves the
-    experiment YAML from the worktree, appends the journal stub to
-    `lab/experiments.md` (`## YYYY-MM-DD — <slug>` with placeholder
-    Branch / Run bullets), then launches `uv run exec <spec>` as
-    a **detached subprocess** (`Popen(..., start_new_session=True)`)
-    so a daemon restart doesn't kill the in-flight run. Crucially
-    the spawn passes `--root <parent-repo>` so all artifacts land in
-    the parent repo's `runs/experiments/<id>/`, not scattered across
-    worktrees. The phase polls
-    `runs/experiments/<id>/results/summary.md` (4 h default) and
-    rewrites the journal entry's `**Run:**` bullet to point at the
-    real instance id via `lab experiments set-run-path`.
+    experiment YAML from the worktree and runs the **full slice**
+    declared in `design.md > ## Slice > Full` (always with no
+    `--profile`; the smoke profile is exclusive to phase 2).
+    Appends the journal stub to `lab/experiments.md` (`## YYYY-MM-DD
+    — <slug>` with placeholder Branch / Run bullets), then launches
+    `uv run exec <spec>` as a **detached subprocess** (`Popen(...,
+    start_new_session=True)`) so a daemon restart doesn't kill the
+    in-flight run. Crucially the spawn passes `--root <parent-repo>`
+    so all artifacts land in the parent repo's
+    `runs/experiments/<id>/`, not scattered across worktrees. The
+    phase polls `runs/experiments/<id>/results/summary.md` (4 h
+    default) and rewrites the journal entry's `**Run:**` bullet to
+    point at the real instance id via `lab experiments
+    set-run-path`.
 
 5.  **Phase 4 — critique** (deterministic + critic spawns; same
     sequence as before, just promoted to a phase boundary):
@@ -100,7 +115,13 @@ loads-or-initialises `phases.json`, then walks the phases:
         Linked follow-ups`; `uv run lab tree apply <slug>` runs
         `tree_ops.evaluate`, writes `### Tree effect`, and either
         auto-applies (AddBranch / Reject / NoOp) or stages
-        (Graduate) the diff.
+        (Graduate) the diff. **Verdict floor and thresholds** are
+        pinned in [`METHODOLOGY.md`](METHODOLOGY.md) §6 — if any
+        leg has fewer trials than `MIN_TRIALS_PER_LEG_FOR_VERDICT`
+        (5), `tree_ops.evaluate` short-circuits to `no_op:
+        insufficient_data` with the under-sampled legs named in
+        the rationale; the journal still records the trend but no
+        tree mutation is applied.
     -   Spawn **`lab-reflect-and-plan`** (tree-aware planner) and
         **`lab-plan-next`** (move the entry to `## Done` with a
         link to the journal entry).
@@ -219,7 +240,7 @@ Falls back to a detached `nohup` writing to
 ls -lt runs/lab/logs/ | head            # newest spawn logs first
 uv run lab query "SELECT skill, exit_code, duration_sec
                   FROM spawns ORDER BY started_at DESC LIMIT 20"
-uv run lab dashboard                    # Streamlit, http://127.0.0.1:8501
+uv run lab webui                        # FastAPI + HTMX, http://127.0.0.1:8765
 ```
 
 ### Backfilling an existing experiment
@@ -328,9 +349,9 @@ FROM spawns GROUP BY skill ORDER BY n DESC;
 SELECT trial_id, component_id, kind, detail FROM misconfigurations LIMIT 50;
 ```
 
-The Streamlit dashboard already shows the first three of these;
-extend `lab/dashboard/app.py` as you find queries you re-run by
-hand.
+The lab web UI (`uv run lab webui`, especially `/experiments/{id}`)
+covers the common leg / per-task views; use `uv run lab query` for
+anything you still need ad hoc.
 
 ## Codex tunings per skill
 

@@ -56,8 +56,8 @@ __all__ = [
 
 UnitId = Literal["openharness-lab", "openharness-daemon"]
 
-# Stable display order — webui first because it's how operators get
-# *to* the dashboard at all; daemon second because it's the workload.
+# Stable display order — webui first because it's how operators reach
+# the console; daemon second because it's the workload.
 UNITS: list[UnitId] = ["openharness-lab", "openharness-daemon"]
 
 _UNIT_DESC: dict[UnitId, str] = {

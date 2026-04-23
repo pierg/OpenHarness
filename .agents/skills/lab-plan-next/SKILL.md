@@ -74,7 +74,10 @@ touching the human queue. Humans:
 -   **Hypothesis:** one sentence on what we expect to learn.
 -   **Plan:** one paragraph — agents, dataset slice, what varies vs the current baseline.
 -   **Depends on:** `<other-slug>`   _(omit if nothing)_
--   **Cost:** ~$X, ~Y hours wall-clock   _(omit if smoke / unknown)_
+-   **Cost:** ~$X, ~Y hours wall-clock for the full slice (the
+    implement phase always runs a small `--profile smoke`
+    validation first; that cost is negligible and not tracked
+    here).
 ```
 
 Slug convention: `<idea-id>-<short-context>` (e.g.

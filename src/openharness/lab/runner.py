@@ -634,6 +634,64 @@ def _phase_implement(
         )
         return TickResult(ok=False, outcome="error", summary=msg)
 
+    # Smoke validation gate. The implement skill must run a smoke
+    # exec (e.g. `uv run exec <spec> --profile smoke`) and report
+    # the outcome here. Missing smoke block, errors, or any leg in
+    # ERRORED state blocks the (much more expensive) full run.
+    smoke = implement_data.get("smoke")
+    if not isinstance(smoke, dict):
+        msg = (
+            "implement.json missing required `smoke` block "
+            "(implement phase MUST run `uv run exec <spec> --profile smoke` "
+            "and record the outcome before phase 3 can run)"
+        )
+        phase_state.mark_failed(
+            entry.slug, "implement", error=msg, payload=implement_data,
+        )
+        return TickResult(ok=False, outcome="error", summary=msg)
+    smoke_errors = smoke.get("errors") or []
+    if smoke_errors:
+        msg = (
+            f"implement smoke run reported {len(smoke_errors)} error(s): "
+            f"{_summary_truncate(str(smoke_errors), n=200)}"
+        )
+        phase_state.mark_failed(
+            entry.slug, "implement", error=msg, payload=implement_data,
+        )
+        return TickResult(ok=False, outcome="error", summary=msg)
+    legs = smoke.get("legs") or []
+    if not legs:
+        msg = "implement smoke block has no legs[] — wiring almost certainly broken"
+        phase_state.mark_failed(
+            entry.slug, "implement", error=msg, payload=implement_data,
+        )
+        return TickResult(ok=False, outcome="error", summary=msg)
+    errored_legs = [
+        leg.get("leg_id") or "(?)"
+        for leg in legs
+        if isinstance(leg, dict) and leg.get("errored")
+    ]
+    if errored_legs:
+        msg = f"implement smoke ERRORED on legs: {errored_legs}"
+        phase_state.mark_failed(
+            entry.slug, "implement", error=msg, payload=implement_data,
+        )
+        return TickResult(ok=False, outcome="error", summary=msg)
+    no_trial_legs = [
+        leg.get("leg_id") or "(?)"
+        for leg in legs
+        if isinstance(leg, dict) and not int(leg.get("trials_run") or 0) > 0
+    ]
+    if no_trial_legs:
+        msg = (
+            f"implement smoke ran zero trials on legs: {no_trial_legs} — "
+            "smoke must complete at least one trial per leg"
+        )
+        phase_state.mark_failed(
+            entry.slug, "implement", error=msg, payload=implement_data,
+        )
+        return TickResult(ok=False, outcome="error", summary=msg)
+
     phase_state.mark_ok(entry.slug, "implement", payload=implement_data)
     return None
 

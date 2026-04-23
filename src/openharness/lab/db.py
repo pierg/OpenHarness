@@ -2,8 +2,8 @@
 
 The lab DB lives at `runs/lab/trials.duckdb`. There is exactly one
 writer (the orchestrator daemon, plus humans/agents invoking the `uv
-run lab` CLI) and any number of readers (the Streamlit dashboard, ad
-hoc queries). DuckDB locks the file for the writer process, so readers
+run lab` CLI) and any number of readers (the lab web UI, ad hoc
+queries). DuckDB locks the file for the writer process, so readers
 MUST connect with `read_only=True` — see `connect_read_only`.
 
 Migrations are SQL files in `migrations/`, applied lexically and
@@ -74,7 +74,7 @@ def apply_migrations(conn: duckdb.DuckDBPyConnection) -> list[str]:
 def connect(*, db_path: Path | None = None, read_only: bool = False) -> duckdb.DuckDBPyConnection:
     """Open the lab DB. Auto-creates the parent directory and runs migrations.
 
-    Set `read_only=True` for the dashboard and any concurrent reader so the
+    Set `read_only=True` for the web UI and any concurrent reader so the
     orchestrator's writer connection isn't blocked.
     """
     path = db_path or LAB_DB_PATH
