@@ -28,9 +28,11 @@ Two human-curated planning surfaces feed the loop:
 > **Audit-only files.** The five files above contain *only*
 > high-signal content. They do not document themselves. The
 > mental model lives here ([`README.md`](README.md)); the
-> operations runbook lives in [`OPERATIONS.md`](OPERATIONS.md);
-> per-skill instructions live under
-> [`.agents/skills/`](../.agents/skills/).
+> **scientific methodology contract** (slice / legs / repetitions
+> / control / verdict thresholds) lives in
+> [`METHODOLOGY.md`](METHODOLOGY.md); the operations runbook lives
+> in [`OPERATIONS.md`](OPERATIONS.md); per-skill instructions live
+> under [`.agents/skills/`](../.agents/skills/).
 
 ## How experiments mutate the tree
 
@@ -86,13 +88,19 @@ Key invariants:
     (or the [`lab-graduate-component`](../.agents/skills/lab-graduate-component/SKILL.md)
     skill in Cursor).
 4.  The default experiment is a paired ablation (trunk leg + 1
-    mutation leg). Multi-leg broad-sweeps are opt-in and used for
-    re-baselining.
+    mutation leg). Multi-leg shapes (3-leg multi-arm, broad-sweeps)
+    are opt-in and used when the question's structure demands them.
+    The scientific contract — slice shapes, leg counts, repetitions,
+    control, verdict thresholds — is pinned in
+    [`METHODOLOGY.md`](METHODOLOGY.md) and is the source of truth
+    for whether an experiment is well-formed.
 
-See [`OPERATIONS.md`](OPERATIONS.md) for the daemon's tick, the
-file-ownership matrix, the codex auth rules, the per-skill model
-profiles, and the operating commands. Per-skill instructions live
-in [`.agents/skills/`](../.agents/skills/).
+See [`METHODOLOGY.md`](METHODOLOGY.md) for the experimental-design
+contract every skill, every spec, and `tree_ops.evaluate` must
+satisfy. See [`OPERATIONS.md`](OPERATIONS.md) for the daemon's
+tick, the file-ownership matrix, the codex auth rules, the
+per-skill model profiles, and the operating commands. Per-skill
+instructions live in [`.agents/skills/`](../.agents/skills/).
 
 
 ## How the skills compose into one closed loop

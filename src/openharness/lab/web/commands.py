@@ -823,6 +823,75 @@ COMMANDS: dict[str, CommandSpec] = {
         confirm_text="Wipe the tick history? This cannot be undone.",
         events=["lab-daemon-state-changed"],
     ),
+    # -- per-slug pipeline reset / cleanup ---------------------------------
+    #
+    # These mirror `lab phases reset` and `lab preflight remove`, so the
+    # operator can recover a stuck slug from the cockpit without dropping
+    # to a shell. Both are slug-scoped — there's no "reset every slug"
+    # button on purpose: that's a 2 s typo away from nuking weeks of state.
+    "phases-reset": CommandSpec(
+        cmd_id="phases-reset",
+        label="Reset all phases",
+        description=(
+            "Delete the entire runs/lab/state/<slug>/phases.json so the "
+            "next tick re-runs the pipeline from preflight. Use when a "
+            "slug is so stuck the cleanest option is a clean slate."
+        ),
+        argv_template=["phases", "reset", "{slug}"],
+        params=[
+            ParamSpec(name="slug", pattern=_SAFE_TOKEN, label="Slug"),
+        ],
+        confirm_text=(
+            "Reset every phase for this slug? The next tick will re-run "
+            "preflight, design, implement, run, critique, and finalize "
+            "from scratch."
+        ),
+        danger=True,
+        events=["lab-daemon-state-changed"],
+    ),
+    "phases-reset-one": CommandSpec(
+        cmd_id="phases-reset-one",
+        label="Reset one phase",
+        description=(
+            "Drop the record for a single phase so the next tick re-runs "
+            "just that step. Earlier phases' OK records survive untouched."
+        ),
+        argv_template=["phases", "reset", "{slug}", "--phase", "{phase}"],
+        params=[
+            ParamSpec(name="slug", pattern=_SAFE_TOKEN, label="Slug"),
+            ParamSpec(
+                name="phase",
+                pattern=re.compile(
+                    r"^(?:preflight|design|implement|run|critique|finalize)$"
+                ),
+                label="Phase",
+            ),
+        ],
+        confirm_text=(
+            "Re-run this phase on the next tick? "
+            "Earlier OK phases stay; later phases re-run too."
+        ),
+        events=["lab-daemon-state-changed"],
+    ),
+    "worktree-remove": CommandSpec(
+        cmd_id="worktree-remove",
+        label="Remove worktree",
+        description=(
+            "Delete ../OpenHarness.worktrees/lab-<slug>/ and its lab/<slug> "
+            "branch. Idempotent. Use to free disk after a tick crashed "
+            "before phase 5 (which normally cleans up on its own)."
+        ),
+        argv_template=["preflight", "remove", "{slug}"],
+        params=[
+            ParamSpec(name="slug", pattern=_SAFE_TOKEN, label="Slug"),
+        ],
+        confirm_text=(
+            "Permanently delete the worktree and lab/<slug> branch? "
+            "Any uncommitted changes inside the worktree will be lost."
+        ),
+        danger=True,
+        events=["lab-daemon-state-changed", "lab-process-tree-changed"],
+    ),
     # -- on-disk run cleanup -----------------------------------------------
     #
     # `runs prune` and friends. Strict regex on age_hours so a typo

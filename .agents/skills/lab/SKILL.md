@@ -230,9 +230,15 @@ at the end (do not edit the existing two).
 
 -   **Idea:** [`<idea-id>`](ideas.md#<idea-id>)   _(or: baseline snapshot / infrastructure)_
 -   **Hypothesis:** one sentence on what we expect to learn.
--   **Plan:** one paragraph — agents, slice, what varies vs the current trunk.
+-   **Plan:** one paragraph — agents, full slice (`full-bench` |
+    `cluster: <names>` | `near-miss` | `regression: <task_ids>`),
+    what varies vs the current trunk. Smoke is implicit: every
+    experiment runs a small `--profile smoke` validation in the
+    implement phase before the full slice runs in the run phase.
+    Do **not** create separate `*-smoke` / `*-full-sweep` roadmap
+    entries.
 -   **Depends on:** `<other-slug>`   _(omit if nothing)_
--   **Cost:** ~$X, ~Y hours wall-clock   _(omit if smoke / unknown)_
+-   **Cost:** ~$X, ~Y hours wall-clock for the full slice.
 ```
 
 When moved to `## Done`, **append two bullets**: `**Ran:**` and
@@ -256,7 +262,9 @@ into the main queue.
 ```markdown
 ## YYYY-MM-DD — <slug>
 
--   **Type:** paired-ablation | broad-sweep | smoke
+-   **Type:** paired-ablation | broad-sweep   _(no `smoke` —
+    smoke runs are implementation-validation only and never
+    produce journal entries; only full-slice runs do)_
 -   **Trunk at run-time:** [`trunk@<sha>`](../src/openharness/agents/configs/trunk.yaml)
 -   **Mutation:** <one-liner>          (omit for broad-sweep)
 -   **Hypothesis:** one sentence.
@@ -392,7 +400,7 @@ uv run lab write-experiment-critique <run_dir>             --json -
 uv run lab write-task-features      <task_checksum>        --json -
 uv run lab write-cross-experiment   <spawn_id>             --json -
 
-uv run lab dashboard                               # Streamlit, opens DB read-only
+uv run lab webui                                   # operator console (FastAPI + HTMX)
 ```
 
 The CLI refuses unsafe edits (unknown slug, duplicate id, missing

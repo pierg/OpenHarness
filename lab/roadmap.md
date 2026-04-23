@@ -2,49 +2,88 @@
 
 ## Up next
 
-### reflection-context-compaction-smoke
+> **Methodology contract.** Every entry below declares its
+> **Slice** (METHODOLOGY §2), **Legs** (§3), **Repetitions** (§4),
+> and **Control** (§5) explicitly so the design phase can be
+> audited before code is written. The implement phase always runs
+> a small `--profile smoke` exec for wiring validation; the run
+> phase always runs the full slice. There are no separate `-smoke`
+> / `-full-sweep` roadmap entries.
 
--   **Idea:** [`reflection-context-compaction`](ideas.md#reflection-context-compaction)
--   **Hypothesis:** truncating tool stdout above some threshold lets `reflection` complete on the smoke slice within wall-clock and at <500 k input tokens per trial.
--   **Plan:** implement opt-in compaction behind an `AgentConfig` flag, then `exec rerun <latest-smoke-instance> -l reflection` on the smoke slice. If green, add `reflection` back to `experiments/tb2-baseline.yaml`'s `agents:` list and rerun the full sweep with the compaction default flipped on.
+### extended-budget-paired-on-trunk
+
+-   **Idea:** [`extended-budget`](ideas.md#extended-budget)
+-   **Hypothesis:** the 22.5% baseline is meaningfully budget-bound on the near-miss slice; raising `max_turns` from 30 → 60 → 120 (with `max_tokens` scaled 8192 → 16384 → 32768) lifts pass-rate by ≥10pp on tasks that pinned `n_turns=30` in `tb2-baseline-full-sweep`.
+-   **Slice:** `near-miss` — 15 tasks where `basic` hit `n_turns=30` in `tb2-baseline-20260417-234913`. `n_tasks/leg=15`, `n_trials/leg=15` (single-shot).
+-   **Legs:** 3-leg multi-arm (METHODOLOGY §3 — variable has > 2 levels). Leg A: `basic` @ 30/8192 (current trunk). Leg B: `basic` @ 60/16384. Leg C: `basic` @ 120/32768. **Differs in exactly one axis** (the budget pair).
+-   **Repetitions:** `single-shot` — pure config tweak (deterministic mechanism), slice ~ floor (15 trials/leg vs floor 5).
+-   **Control:** `fresh` — required by selection bias on the near-miss slice (METHODOLOGY §5 RTM warning).
+-   **Why first:** cheapest experiment in the queue, answers a foundational question that informs every future variant ("is the 22.5% baseline budget-bound or capability-bound?"). Pure YAML tweak — no implementation work.
+-   **Cost:** ~$2-3 (3 legs × 15 trials × ~$0.05/trial).
+
+### planner-executor-cluster-confirmation
+
+-   **Idea:** confirms the live `AddBranch` from `tb2-baseline-full-sweep`; folds in the `grounded-planner-tools` ablation as Leg C for marginal cost.
+-   **Hypothesis:** (a) the `add_branch` predicate `{python_data, system_administration, security_certificates}` for `planner_executor` survives a re-run with adequate per-cluster `n` (the original verdict rests on n=7/3/1); (b) the planner subagent's read-only tools materially contribute to the win — removing them on Leg C demonstrates the dependency.
+-   **Slice:** `cluster_combined: python_data, system_administration, security_certificates` (DEFERRED slice shape — until it lands, declare as `cluster: python_data, system_administration, security_certificates` and rely on `paired-double` to clear the floor). `n_tasks/leg = 7+3+1 = 11`. `n_trials/leg = 22` (with `n_attempts=2`).
+-   **Legs:** 3-leg multi-arm (METHODOLOGY §3 — two questions share the slice). Leg A: `basic` (trunk). Leg B: `planner_executor` (current YAML). Leg C: `planner_executor` with planner subagent `tools: []`. Each pairwise contrast differs in exactly one axis.
+-   **Repetitions:** `paired-double` (n_attempts=2) — small slice (11 tasks), planner has stochastic internal state (sampled plan), and the original verdict rests on n=1/3/7 so we want noise-bounded per-cell estimates.
+-   **Control:** `fresh`.
+-   **Why second:** retires the highest-value piece of methodological debt (the n=1/3/7 wobble); folds in `grounded-planner-tools` for ~50% extra cost; gates every future planner_executor variant.
 -   **Depends on:** `tb2-baseline-full-sweep`
--   **Cost:** smoke ~$0.50.
+-   **Cost:** ~$5-8 (3 legs × 22 trials × ~$0.07-0.10/trial).
 
-### loop-guard-tb2-paired
+### loop-guard-paired-ablation
 
 -   **Idea:** [`loop-guard`](ideas.md#loop-guard)
--   **Hypothesis:** enabling the loop-guard runtime mechanism on the baseline cuts wasted turns on tasks where Gemini repeats tool calls or emits empty assistant turns.
--   **Plan:** paired ablation on the smoke slice first, then full sweep if smoke is positive. Vary `LoopGuardConfig.enabled` true vs false on `planner_executor`. Hold everything else constant.
--   **Depends on:** `tb2-baseline-full-sweep`
--   **Cost:** smoke ~$0.50; full ~$15-25 if it advances.
-
-### grounded-planner-tools-ablation
-
--   **Idea:** [`grounded-planner-tools`](ideas.md#grounded-planner-tools)
--   **Hypothesis:** the read-only planner tools currently wired into `planner_executor.yaml` actually move the pass rate vs a tools-less planner.
--   **Plan:** paired ablation on `planner_executor` only. Leg A: current YAML. Leg B: planner subagent with `tools: []` plus a prompt edit acknowledging the constraint. Smoke slice first.
--   **Depends on:** `tb2-baseline-full-sweep`
--   **Cost:** smoke ~$0.20; full ~$10-15.
+-   **Hypothesis:** enabling `LoopGuardConfig.enabled` on `planner_executor` reduces wasted turns on the near-miss slice — tasks where the original `planner_executor` leg hit the turn budget without progress — by ≥5pp.
+-   **Slice:** `near-miss` — tasks where `planner_executor` hit `n_turns=30` in `tb2-baseline-20260417-234913` (TBD: extract exact list during design phase; expect ~15-25 tasks). `n_tasks/leg ≈ 20`, `n_trials/leg ≈ 40` (with `n_attempts=2`).
+-   **Legs:** 2-leg paired ablation. Leg A: `planner_executor` (loop-guard off — byte-identical to current YAML). Leg B: `planner_executor` (loop-guard on). **Trunk-anchor caveat:** the design phase MUST verify that `tree_ops.evaluate` accepts a non-trunk anchor without complaining; if it doesn't, add `basic` (trunk) as Leg C purely so the comparator has a trunk reference.
+-   **Repetitions:** `paired-double` (n_attempts=2) — loop-guard's nudges fire stochastically on observed empty turns / repeated calls; cell variance is its core characteristic.
+-   **Control:** `fresh` — required by selection bias on the near-miss slice.
+-   **Why third:** stronger evidence after #1 tells us if budget alone explains near-miss failures, and after #2 confirms the planner_executor predicate.
+-   **Depends on:** `tb2-baseline-full-sweep`, `extended-budget-paired-on-trunk` (informative but not blocking)
+-   **Cost:** ~$5-10 (2 legs × ~40 trials × ~$0.07/trial; planner_executor cost band).
 
 ### Suggested
 
-#### planner-executor-cluster-confirmation
+> Auto-proposed by `lab-reflect-and-plan`. Promote to a `### <slug>`
+> entry under `## Up next` (above this `### Suggested` subsection)
+> to queue for the daemon.
 
--   **Hypothesis:** A focused re-run of trunk vs planner_executor on the three positive clusters {security_certificates, system_administration, python_data} with n>=5 per cluster confirms the use-when predicate isn't an artefact of n=1/3/7 from tb2-baseline-full-sweep.
--   **Source:** lab-reflect-and-plan@2026-04-18
--   **Cost:** smoke ~$1.50; full not needed (this IS the focused full)
+#### trunk-noise-floor-calibration
 
-#### react-tentative-cluster-retest
+-   **Hypothesis:** measures pure stochastic swing on the planner-executor confirmation slice — running `basic` (trunk) twice on the same 11-task `cluster_combined` slice with `n_attempts=2` shows how much delta is just noise. If the pure-noise swing exceeds the AddBranch threshold (5pp/cluster), the §6 verdict floor is too lax for cluster-based decisions and should be tightened.
+-   **Slice:** same 11 tasks as `planner-executor-cluster-confirmation`. `n_tasks/leg=11`, `n_trials/leg=22`.
+-   **Legs:** 2-leg. Leg A: `basic`. Leg B: `basic` (byte-identical). Both run independently (no shared seed).
+-   **Repetitions:** `paired-double` (n_attempts=2).
+-   **Control:** `fresh`.
+-   **Source:** lab-reflect-and-plan@2026-04-22 (methodology revision)
+-   **Cost:** ~$2 (2 legs × 22 trials × ~$0.05/trial).
+-   **When to run:** before or alongside `planner-executor-cluster-confirmation` to calibrate how much we should trust the cluster-level deltas it produces.
 
--   **Hypothesis:** Re-running trunk vs react on react's one positive cluster from tb2-baseline-full-sweep with n>=5 flips the current no_op (1 positive cluster, threshold 2, Δ $/pass +546%) into either a clean add_branch or reject. React is currently a tentative branch we cannot route to with confidence.
--   **Source:** lab-reflect-and-plan@2026-04-18
--   **Cost:** smoke ~$2.00 (react burns ~$0.25/trial × ~5 trials × 2 legs)
+## Deferred
 
-#### extended-budget-paired-on-trunk
+> Entries that have been considered and intentionally pushed out of
+> `## Up next`. Each one names *why* — usually because the outcome
+> doesn't unblock anything else on the queue, or because the
+> question has been folded into a different entry. Promote back to
+> `## Up next` only when the rationale is no longer current.
 
--   **Hypothesis:** Bumping max_turns 30→60 and max_tokens 8192→16384 on the trunk (basic) on a focused near-miss slice converts >=2 currently-failing tasks into passes, validating whether the 22.5% baseline is budget-bound or capability-bound. Cheapest possible test of the 'extended-budget' idea.
--   **Source:** lab-reflect-and-plan@2026-04-18
--   **Cost:** smoke ~$0.40 (small near-miss slice, 2 legs)
+### react-tentative-cluster-retest
+
+-   **Hypothesis:** Re-running trunk vs react on react's one positive cluster (`system_administration`, +33pp on n=3) with `paired-double` flips the current `no_op` (1 positive cluster, threshold 2, Δ $/pass +546%) into either a clean `add_branch` or `reject`.
+-   **Slice:** `cluster: system_administration`, n_attempts=2, n_trials/leg=6.
+-   **Legs:** 2-leg paired ablation (`basic` vs `react`).
+-   **Repetitions:** `paired-double`.
+-   **Control:** `fresh`.
+-   **Why deferred:** outcome doesn't unblock anything else on the roadmap. React is already excluded from trunk; the verdict here would only confirm whether to formally `reject` (low-value action) or pin a narrow `add_branch` on a single n=3 cluster (weak signal). Promote when the queue is otherwise empty.
+-   **Source:** lab-reflect-and-plan@2026-04-18, deferred 2026-04-22 (methodology revision)
+-   **Cost:** ~$2-3.
+
+### grounded-planner-tools-ablation (FOLDED into `planner-executor-cluster-confirmation`)
+
+-   **Status:** dropped as standalone entry; the question is now answered by Leg C of `planner-executor-cluster-confirmation` (`planner_executor` with planner subagent `tools: []`). Folding in saves ~$10 of full-bench spend and keeps the comparison anchored on the slice where `planner_executor` actually routes.
 
 ## Done
 

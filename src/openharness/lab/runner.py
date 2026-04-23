@@ -530,6 +530,11 @@ def _phase_design(
             f"--worktree={pre.get('worktree', '')}",
             f"--design-path={design_path}",
             f"--hypothesis={entry.hypothesis}",
+            # Pass the full roadmap entry body so the agent has the
+            # Plan + Cost + Depends-on context without needing to re-read
+            # the markdown file (the read-only sandbox can still read it;
+            # this is a convenience for clarity in the agent's context).
+            f"--roadmap-body={entry.body}",
         ],
         cfg=cx,
         expected_orchestrator_pid=os.getpid(),
@@ -624,6 +629,64 @@ def _phase_implement(
     failed_checks = [k for k, v in validations.items() if str(v).startswith("failed")]
     if failed_checks:
         msg = f"implement validations failed: {failed_checks}"
+        phase_state.mark_failed(
+            entry.slug, "implement", error=msg, payload=implement_data,
+        )
+        return TickResult(ok=False, outcome="error", summary=msg)
+
+    # Smoke validation gate. The implement skill must run a smoke
+    # exec (e.g. `uv run exec <spec> --profile smoke`) and report
+    # the outcome here. Missing smoke block, errors, or any leg in
+    # ERRORED state blocks the (much more expensive) full run.
+    smoke = implement_data.get("smoke")
+    if not isinstance(smoke, dict):
+        msg = (
+            "implement.json missing required `smoke` block "
+            "(implement phase MUST run `uv run exec <spec> --profile smoke` "
+            "and record the outcome before phase 3 can run)"
+        )
+        phase_state.mark_failed(
+            entry.slug, "implement", error=msg, payload=implement_data,
+        )
+        return TickResult(ok=False, outcome="error", summary=msg)
+    smoke_errors = smoke.get("errors") or []
+    if smoke_errors:
+        msg = (
+            f"implement smoke run reported {len(smoke_errors)} error(s): "
+            f"{_summary_truncate(str(smoke_errors), n=200)}"
+        )
+        phase_state.mark_failed(
+            entry.slug, "implement", error=msg, payload=implement_data,
+        )
+        return TickResult(ok=False, outcome="error", summary=msg)
+    legs = smoke.get("legs") or []
+    if not legs:
+        msg = "implement smoke block has no legs[] — wiring almost certainly broken"
+        phase_state.mark_failed(
+            entry.slug, "implement", error=msg, payload=implement_data,
+        )
+        return TickResult(ok=False, outcome="error", summary=msg)
+    errored_legs = [
+        leg.get("leg_id") or "(?)"
+        for leg in legs
+        if isinstance(leg, dict) and leg.get("errored")
+    ]
+    if errored_legs:
+        msg = f"implement smoke ERRORED on legs: {errored_legs}"
+        phase_state.mark_failed(
+            entry.slug, "implement", error=msg, payload=implement_data,
+        )
+        return TickResult(ok=False, outcome="error", summary=msg)
+    no_trial_legs = [
+        leg.get("leg_id") or "(?)"
+        for leg in legs
+        if isinstance(leg, dict) and not int(leg.get("trials_run") or 0) > 0
+    ]
+    if no_trial_legs:
+        msg = (
+            f"implement smoke ran zero trials on legs: {no_trial_legs} — "
+            "smoke must complete at least one trial per leg"
+        )
         phase_state.mark_failed(
             entry.slug, "implement", error=msg, payload=implement_data,
         )
@@ -765,6 +828,8 @@ def _phase_critique(
 
     # Per-trial critic fan-out.
     needing = trials_needing_critique(summary.instance_id)
+    my_pid = os.getpid()
+
     if needing:
         ds.update_tick(
             phase="critique",
@@ -773,6 +838,7 @@ def _phase_critique(
         codex_adapter.run_many(
             [("trial-critic", [trial_dir]) for _, trial_dir in needing],
             cfg=cx, parent_run_dir=run_dir,
+            expected_orchestrator_pid=my_pid,
         )
 
     unseen = checksums_needing_features(summary.instance_id)
@@ -784,6 +850,7 @@ def _phase_critique(
         codex_adapter.run_many(
             [("task-features", [c]) for c in unseen],
             cfg=cx, parent_run_dir=run_dir,
+            expected_orchestrator_pid=my_pid,
         )
 
     still_needing = trials_needing_critique(summary.instance_id)
@@ -797,6 +864,7 @@ def _phase_critique(
         codex_adapter.run(
             "experiment-critic", [summary.instance_id],
             cfg=cx, parent_run_dir=run_dir,
+            expected_orchestrator_pid=my_pid,
         )
 
     cache_counts = labingest.ingest_critiques([run_dir])
@@ -843,6 +911,7 @@ def _phase_critique(
             "lab-reflect-and-plan",
             [f"--instance={summary.instance_id}"],
             cfg=cx, parent_run_dir=run_dir,
+            expected_orchestrator_pid=my_pid,
         )
     except Exception:
         logger.exception("lab-reflect-and-plan failed (non-fatal)")
@@ -851,6 +920,7 @@ def _phase_critique(
         try:
             codex_adapter.run(
                 "cross-experiment-critic", [], cfg=cx, parent_run_dir=run_dir,
+                expected_orchestrator_pid=my_pid,
             )
         except Exception:
             logger.exception("cross-experiment-critic failed (non-fatal)")
@@ -954,6 +1024,7 @@ def _phase_finalize(
              f"--ran=runs/experiments/{instance_id}" if instance_id else "",
              "--outcome=auto"],
             cfg=cx,
+            expected_orchestrator_pid=os.getpid(),
             parent_run_dir=Path(run_payload["run_dir"]) if run_payload.get("run_dir") else None,
         )
         _commit_lab_changes(
@@ -1062,6 +1133,83 @@ def _process_entry(entry: RoadmapEntry, cfg: OrchestratorConfig) -> TickResult:
     )
 
 
+# Cache for `_find_unmerged_addbranch_prs` so the daemon doesn't
+# spam the GitHub API at every poll (`gh pr view` is rate-limited).
+# Keyed by PR URL → (checked_at_monotonic, is_merged_bool).
+_PR_MERGE_CACHE: dict[str, tuple[float, bool]] = {}
+_PR_MERGE_CACHE_TTL_SEC = 90.0
+
+
+def _find_unmerged_addbranch_prs() -> list[str]:
+    """Return PR URLs of AddBranch experiments that have NOT yet merged.
+
+    `lab/configs.md` is auto-applied at critique time and committed
+    straight to `main`; the matching code lives in `lab/<slug>` and
+    only lands on `main` when its PR merges. Between those two
+    events the trunk-branch graph references files that don't exist
+    yet on `main`, so the daemon must wait before forking the next
+    experiment off `main`.
+
+    The check is best-effort: if `gh` is missing or the call fails,
+    we return ``[]`` (don't block) and log a one-line warning. The
+    safety net is the per-experiment preflight, which would notice
+    a missing file before billing the operator for a real spawn.
+    """
+    import json as _json
+    import shutil
+    import subprocess
+
+    if not shutil.which("gh"):
+        return []
+    try:
+        with labdb.reader() as conn:
+            rows = conn.execute(
+                "SELECT pr_url FROM tree_diffs "
+                "WHERE kind = 'add_branch' AND pr_url IS NOT NULL"
+            ).fetchall()
+    except Exception:  # noqa: BLE001
+        logger.exception("could not query tree_diffs for AddBranch PRs (non-fatal)")
+        return []
+
+    now = time.monotonic()
+    open_urls: list[str] = []
+    for (url,) in rows:
+        if not url:
+            continue
+        cached = _PR_MERGE_CACHE.get(url)
+        if cached and (now - cached[0]) < _PR_MERGE_CACHE_TTL_SEC:
+            if not cached[1]:
+                open_urls.append(url)
+            continue
+        try:
+            proc = subprocess.run(
+                ["gh", "pr", "view", url, "--json", "state,mergedAt"],
+                check=False, capture_output=True, text=True, timeout=20,
+            )
+        except Exception:  # noqa: BLE001
+            logger.exception("`gh pr view %s` raised; treating as unknown", url)
+            continue
+        if proc.returncode != 0:
+            logger.warning(
+                "`gh pr view %s` exit=%d: %s",
+                url, proc.returncode, proc.stderr.strip()[:200],
+            )
+            continue
+        try:
+            data = _json.loads(proc.stdout or "{}")
+        except _json.JSONDecodeError:
+            logger.warning("`gh pr view %s` returned invalid JSON", url)
+            continue
+        is_merged = (
+            (data.get("state") or "").upper() == "MERGED"
+            and bool(data.get("mergedAt"))
+        )
+        _PR_MERGE_CACHE[url] = (now, is_merged)
+        if not is_merged:
+            open_urls.append(url)
+    return open_urls
+
+
 def _select_next_entry(
     ready: list[RoadmapEntry], state: ds.DaemonState,
 ) -> RoadmapEntry | None:
@@ -1153,6 +1301,27 @@ def loop(cfg: OrchestratorConfig | None = None) -> None:
                 )
             else:
                 _idle_log("no ready roadmap entries", cfg.idle_sleep_sec)
+            _idle_wait(cfg.idle_sleep_sec)
+            continue
+
+        # Block on unmerged AddBranch PRs from prior experiments.
+        # `lab/configs.md` on `main` already references those
+        # branches as nodes in the configuration tree; if the next
+        # experiment forks `main` while the supporting code is still
+        # in an open PR, the worktree's tree resolution will refer to
+        # files that don't yet exist on the base branch. Auto-merge
+        # is enabled for AddBranch PRs (see lab-finalize-pr) so this
+        # is normally a sub-minute wait — only blocks when CI fails
+        # or a required check is slow. See lab/METHODOLOGY.md §6.
+        unmerged_open = _find_unmerged_addbranch_prs()
+        if unmerged_open:
+            preview = ", ".join(unmerged_open[:3])
+            extra = f" (+{len(unmerged_open) - 3} more)" if len(unmerged_open) > 3 else ""
+            _idle_log(
+                f"waiting on {len(unmerged_open)} unmerged AddBranch PR(s): "
+                f"{preview}{extra}",
+                cfg.idle_sleep_sec,
+            )
             _idle_wait(cfg.idle_sleep_sec)
             continue
 

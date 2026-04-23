@@ -25,7 +25,9 @@ for human confirmation (``graduate``) via
 ``uv run lab graduate confirm``.
 
 The thresholds below are module-level constants so they can be
-tuned without touching the rest of the pipeline.
+tuned without touching the rest of the pipeline. Their semantic
+meaning is pinned in ``lab/METHODOLOGY.md`` §6 — that document is
+the contract; this module is the enforcement.
 """
 
 from __future__ import annotations
@@ -63,6 +65,17 @@ REJECT_COST_PER_PASS_DELTA_PCT: float = 50.0
 # clamped to [0, 1]. Drives `lab-reflect-and-plan`'s decision on
 # whether to re-run at higher N.
 SMALLEST_MEANINGFUL_EFFECT_PP: float = 5.0
+
+# Verdict floor: an experiment whose smallest leg has fewer trials
+# than this short-circuits to ``no_op:insufficient_data`` regardless
+# of effect size. Five is the lower bound at which a delta of
+# ``SMALLEST_MEANINGFUL_EFFECT_PP`` (5pp) is even *resolvable*; below
+# that the verdict is dominated by single-trial noise. The implement
+# phase enforces a separate "smoke is for crashes, not verdicts"
+# rule (see ``lab/METHODOLOGY.md`` §8), so this floor only protects
+# against under-sampled *full* slices (e.g. a regression list that
+# turned out to be 3 tasks). Contract: ``lab/METHODOLOGY.md`` §6.
+MIN_TRIALS_PER_LEG_FOR_VERDICT: int = 5
 
 
 TreeDiffKind = Literal["graduate", "add_branch", "reject", "no_op"]
@@ -475,6 +488,45 @@ def evaluate(instance_id: str, *, db_conn: Any | None = None) -> TreeDiff:
                 rationale="only trunk leg present; nothing to mutate.",
                 instance_id=instance_id,
                 trunk_leg=trunk_leg.leg_id,
+                confidence=0.0,
+            )
+
+        # Verdict floor — refuse to draw conclusions from too-small
+        # experiments. The delta logic in _classify_pair would happily
+        # call a 1-of-2 vs 0-of-2 swing a "graduate"; we don't want
+        # that. The floor is applied per-leg (trunk + every mutation):
+        # if any one is under-sampled, the whole experiment is.
+        all_legs = [trunk_leg, *mutations]
+        smallest = min(leg.n_trials for leg in all_legs)
+        if smallest < MIN_TRIALS_PER_LEG_FOR_VERDICT:
+            shortfall = {
+                leg.leg_id: leg.n_trials
+                for leg in all_legs
+                if leg.n_trials < MIN_TRIALS_PER_LEG_FOR_VERDICT
+            }
+            primary_mutation = max(mutations, key=lambda leg: leg.n_trials)
+            rationale = (
+                f"insufficient_data: smallest leg has n={smallest} trials "
+                f"(< floor of {MIN_TRIALS_PER_LEG_FOR_VERDICT}); "
+                f"under-sampled legs: {shortfall}. "
+                "Re-run on a wider slice (the design's `## Slice > Full` "
+                "section) before drawing a verdict."
+            )
+            return TreeDiff(
+                kind="no_op",
+                target_id=primary_mutation.agent_id,
+                rationale=rationale,
+                instance_id=instance_id,
+                trunk_leg=trunk_leg.leg_id,
+                mutation_leg=primary_mutation.leg_id,
+                pass_rate_delta_pp=round(
+                    (primary_mutation.pass_rate - trunk_leg.pass_rate) * 100.0, 2
+                ),
+                cost_per_pass_delta_pct=(
+                    None
+                    if (d := _cost_per_pass_delta_pct(trunk_leg, primary_mutation)) is None
+                    else round(d, 1)
+                ),
                 confidence=0.0,
             )
 

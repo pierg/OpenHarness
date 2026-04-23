@@ -17,8 +17,7 @@ description: >
 Take an idea + roadmap entry and produce a single artifact: a
 **design document** the next phase (`lab-implement-variant`) will
 follow. You touch zero source files — this is the "think before you
-type" phase, and it runs read-only by design so failure modes are
-safe and resumable.
+type" phase so failure modes are safe and resumable.
 
 ## When to Use
 
@@ -37,18 +36,24 @@ Do **not** use this skill for:
 
 ## Inputs
 
-The orchestrator passes you (via the prompt):
+The orchestrator passes you via CLI arguments:
 
-- `slug` — the experiment slug, also the branch name and the
-  filename for the design doc.
-- `idea_id` — the idea entry in `lab/ideas.md` driving this work
-  (or the literal string ``baseline snapshot`` / ``infrastructure``
-  for entries that don't have one).
-- `worktree` — the path to the per-experiment worktree
+- `slug` (positional) — the experiment slug, also the branch name
+  and the output filename stem for the design doc.
+- `--idea=<id>` — the idea entry id in `lab/ideas.md` (or the
+  literal string ``baseline`` for entries that don't have one).
+- `--worktree=<path>` — the path to the per-experiment worktree
   (``../OpenHarness.worktrees/lab-<slug>/``). Read from it freely;
   do **not** write to it from this skill.
-- `roadmap_entry` — the markdown of the matching roadmap entry,
-  including its `**Hypothesis:**` and `**Plan:**` lines.
+- `--hypothesis=<text>` — the one-line hypothesis from the roadmap
+  entry.
+- `--roadmap-body=<markdown>` — the full body of the roadmap entry
+  (everything between the `### <slug>` header and the next entry),
+  including `**Plan:**`, `**Cost:**`, `**Depends on:**` etc. Use
+  this rather than re-reading `lab/roadmap.md` — the body here is
+  exactly what the entry says at the moment preflight ran.
+- `--design-path=<path>` — the absolute path to write the output
+  `design.md` to (pre-created by the orchestrator).
 
 ## Output
 
@@ -82,12 +87,98 @@ roadmap entry's Hypothesis verbatim if useful.>
 - **Mutation summary:** <one sentence — this becomes the journal
   entry's `Mutation:` bullet later.>
 
+## Slice
+
+The slice is the contract the run phase will execute. **You MUST
+satisfy [`lab/METHODOLOGY.md`](../../../lab/METHODOLOGY.md) §2** —
+declare a shape, cite evidence, count trials, and confirm the
+§6 verdict floor (`MIN_TRIALS_PER_LEG_FOR_VERDICT = 5`) is clearable.
+
+Two named slices, both running on the **same** experiment spec — the
+implement phase distinguishes them via the spec's `profiles:` block.
+
+- **Smoke (validation only):** 1–4 fast, cached terminal-bench tasks
+  the implement phase runs with `uv run exec <spec> --profile smoke`
+  to prove the spec resolves, every leg starts, and at least one
+  trial per leg completes without an uncaught exception. Pass / fail
+  is **not** required — only "no crash". Reuse the standard smoke
+  task list from `experiments/tb2-baseline.yaml > profiles.smoke`
+  unless the variant needs different tasks (state which and why).
+  **Smoke never produces a verdict** (METHODOLOGY §8 / §9).
+- **Full (verdict-bearing):** the meaningful slice the run phase
+  executes with `uv run exec <spec>` (no `--profile`). Pick exactly
+  one allowed shape from METHODOLOGY §2:
+    - `full-bench` — every task in `terminal-bench@2.0` (~89
+      tasks/leg). Default for any variant claiming to move the
+      aggregate pass rate. **Required for `Graduate` verdicts.**
+    - `cluster: <names>` — only the task-feature clusters this
+      variant claims to address. **You MUST cite Appendix B of
+      METHODOLOGY.md** for the cluster sizes; in `tb2` only
+      `python_data` and `python_ml` (n=7) clear the floor at
+      `n_attempts=1`. Any other cluster needs `cluster_combined:`
+      (DEFERRED, see ideas.md > Framework) or `paired-double`
+      repetitions.
+    - `near-miss` — the failing-by-≤K-turns subset of a prior run
+      (budget / compaction / loop-guard style variants). Cite the
+      prior `instance_id` and the exact selection criterion.
+      **Selection-biased** — see METHODOLOGY §5; cannot produce a
+      `Graduate` verdict.
+    - `regression: <task_ids>` — explicit task list; only when
+      targeting known failures. Cite the prior `instance_id`.
+      Cannot produce a `Graduate` verdict.
+- **Expected n_tasks per leg:** <number from the shape above>.
+- **Total n_trials per leg:** `n_tasks × n_attempts` (see ## Slice
+  > Repetitions below). Must be ≥ 5 (METHODOLOGY §6 floor).
+- **Evidence justifying the shape:** cite the prior `instance_id`
+  whose results motivate this slice (e.g. "max-turns-30 subset of
+  `tb2-baseline-20260417-234913`"), or "first measurement, no
+  prior" for genuinely new populations.
+
+## Slice > Repetitions
+
+How many times each `(leg, task)` cell runs. Bounds per-cell noise;
+does NOT extend coverage. **You MUST satisfy METHODOLOGY §4** — pick
+one mode and justify against the decision matrix there.
+
+- **Mode:** one of `single-shot` (n_attempts=1) | `paired-double`
+  (n_attempts=2) | `replication: r` (Graduate gate only, see
+  METHODOLOGY §7).
+- **Justification:** name the slice size band (small ≤ 30 / large
+  ≥ 30 trials/leg) and the mechanism noise band (high if the
+  variant has stochastic internal state — sampled plans, runtime
+  nudges, retries; low for pure config / prompt tweaks). The
+  matrix in METHODOLOGY §4 picks the mode from those two axes.
+- **Spec mapping:** the chosen `n_attempts` becomes the
+  experiment spec's global `n_attempts:` value. Per-leg overrides
+  are forbidden (METHODOLOGY §8 anti-pattern).
+
+## Slice > Control
+
+What the comparison anchor is. Today only `fresh` is enforced;
+the other shapes are documented for forward compatibility.
+
+- **Mode:** `fresh` (default — control re-runs alongside the
+  treatment in this experiment).
+- DEFERRED: `historical: <instance_id>/<leg_id>` and
+  `historical+replay: ...` borrow control trials from a prior
+  experiment, gated on drift checks. See METHODOLOGY §5 and
+  ideas.md > Framework. **Do not declare these today** — the
+  implement phase will refuse them.
+
 ## Files to touch
 
 A flat list, repo-relative. Be specific.
 
-- `experiments/<spec-name>.yaml` — new file, paired ablation, two
-  legs (trunk vs. trunk+variant).
+- `experiments/<spec-name>.yaml` — new file. Default = paired
+  ablation (two legs); use 3-leg multi-arm only when the question's
+  structure demands it (METHODOLOGY §3 — variable has > 2 levels,
+  or two independent variables share a slice for ~50% marginal
+  cost). Each leg differs from its control in **exactly one
+  axis** — confounded ablations are forbidden (METHODOLOGY §8).
+  MUST include `task_filter:` (the full slice) at the top level AND
+  a `profiles.smoke` block (the smoke slice) so the implement phase
+  can run both. The spec's `n_attempts:` is global per Slice >
+  Repetitions above.
 - `src/openharness/agents/configs/<variant>.yaml` — new agent
   config layering the variant component(s) on top of trunk.
 - `src/openharness/components/<area>/<variant>.py` — new component
@@ -111,6 +202,12 @@ declaring success:
       resolves and shows the resulting leg list).
 - [ ] `pytest tests/<area>/...` (only if a unit test exists or
       should exist for the change).
+- [ ] **Smoke run:** `uv run exec <spec-name> --profile smoke`
+      (always — confirms every leg starts, no leg ERRORs out, and
+      no trial throws an uncaught exception). The implement phase
+      blocks on this and refuses to mark itself `ok` until the
+      smoke instance lands cleanly. Pass-rate of the smoke slice
+      is **not** a validation criterion; only "no crash".
 
 ## Risks / open questions
 

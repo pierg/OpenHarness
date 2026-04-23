@@ -1,0 +1,250 @@
+{# The "what is the daemon doing right now" centerpiece.
+
+   Renders a horizontal 6-step pipeline (preflight → design → implement
+   → run → critique → finalize) as a strip of status pills, with the
+   active phase visually pulsing and finished phases collapsing their
+   duration into the cell.
+
+   Inputs:
+     pipeline   — :class:`PipelineView` or None
+     daemon_state — runtime DaemonState (used for the cancel button
+                    only — the pipeline view has its own snapshot of
+                    the relevant fields).
+
+   Empty state: when pipeline is None, render a quiet idle card that
+   tells the operator how to get something on the screen.
+
+   Action buttons (per slug, surfaced inline on the panel):
+     - Cancel tick           (only when is_active; SIGTERMs the codex spawn)
+     - Reset all phases      (drops phases.json so the next tick re-runs)
+     - Reset current phase   (drops just one record so retry-just-this-phase)
+     - Remove worktree       (idempotent; deletes ../OpenHarness.worktrees/lab-<slug>)
+     - View spawn log        (collapsed disclosure — opt-in tail of the
+                              codex stdout/stderr; out of the way by
+                              default per the operator's "not raw logs"
+                              redesign brief).
+     - View phases.json      (links to the on-disk file path) #}
+{% set PHASE_DESCRIPTIONS = {
+  "preflight": "git clean-check + worktree create",
+  "design": "lab-design-variant codex spawn (read-only)",
+  "implement": "lab-implement-variant codex spawn (worktree-write)",
+  "run": "harbor exec + poll for results/summary.md",
+  "critique": "ingest + per-trial critic + tree apply",
+  "finalize": "lab-finalize-pr codex spawn + cleanup",
+} %}
+{% set PHASE_GLYPHS = {
+  "ok": "✓",
+  "running": "▸",
+  "failed": "✕",
+  "skipped": "—",
+  "pending": "○",
+} %}
+{% if pipeline is none %}
+  <div class="flex items-center gap-4 py-6">
+    <div class="flex h-12 w-12 items-center justify-center rounded-full bg-slate-100 text-slate-400 text-xl">○</div>
+    <div>
+      <div class="text-base font-semibold text-slate-700">No pipeline yet</div>
+      <p class="text-sm text-slate-500 mt-1">
+        The daemon hasn't processed any roadmap entries on this host.
+        {% if daemon_state.mode == "manual" %}
+          Visit <a href="/roadmap" class="text-blue-600 hover:underline">/roadmap</a>
+          and click <em>Approve &amp; run</em> on an Up-next entry to kick off the first tick.
+        {% else %}
+          Promote an entry to <code class="font-mono">## Up next</code> in
+          <code class="font-mono">lab/roadmap.md</code> to feed the daemon.
+        {% endif %}
+      </p>
+    </div>
+  </div>
+{% else %}
+  {# ---- Header: slug, status, hypothesis ---- #}
+  <div class="flex flex-wrap items-baseline gap-x-4 gap-y-2 mb-4">
+    <div class="flex items-center gap-2">
+      {% if pipeline.is_active %}
+        <span class="relative flex h-2.5 w-2.5">
+          <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-70"></span>
+          <span class="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500"></span>
+        </span>
+        <span class="text-xs uppercase tracking-wide text-emerald-700 font-semibold">running</span>
+      {% else %}
+        <span class="inline-flex h-2.5 w-2.5 rounded-full bg-slate-300"></span>
+        <span class="text-xs uppercase tracking-wide text-slate-500 font-semibold">last seen</span>
+      {% endif %}
+    </div>
+    <a href="/roadmap#{{ pipeline.slug }}"
+       class="text-lg font-semibold font-mono text-slate-900 hover:underline">{{ pipeline.slug }}</a>
+    {% if pipeline.is_active and pipeline.started_at %}
+      <span class="text-xs text-slate-500">started {{ fmt_dt(pipeline.started_at) }} · {{ fmt_elapsed(pipeline.started_at) }} ago</span>
+    {% elif pipeline.last_updated_at %}
+      <span class="text-xs text-slate-500">updated {{ fmt_dt(pipeline.last_updated_at) }}</span>
+    {% endif %}
+  </div>
+  {% if pipeline.hypothesis %}
+    <p class="text-sm text-slate-600 italic mb-5 -mt-2 max-w-3xl">
+      &ldquo;{{ pipeline.hypothesis }}&rdquo;
+    </p>
+  {% endif %}
+
+  {# ---- Phase strip ---- #}
+  {# Geometry: each pill is fixed-width so the strip keeps alignment
+     across slugs. The connector lines are pseudo-elements so the
+     pills can re-flow on narrow viewports without breaking visually. #}
+  <ol class="flex items-stretch gap-1 sm:gap-2 mb-5 overflow-x-auto pb-1">
+    {% for ph in pipeline.phases %}
+      {% set base_color = {
+        "ok":       "bg-emerald-50 border-emerald-300 text-emerald-800",
+        "running":  "bg-amber-50 border-amber-400 text-amber-900 shadow-sm",
+        "failed":   "bg-rose-50 border-rose-300 text-rose-800",
+        "skipped":  "bg-slate-50 border-slate-200 text-slate-400",
+        "pending":  "bg-white border-slate-200 text-slate-400",
+      }[ph.status] %}
+      {% set glyph_color = {
+        "ok":       "bg-emerald-500 text-white",
+        "running":  "bg-amber-500 text-white",
+        "failed":   "bg-rose-500 text-white",
+        "skipped":  "bg-slate-200 text-slate-500",
+        "pending":  "bg-slate-100 text-slate-400 border border-slate-300",
+      }[ph.status] %}
+      <li class="flex-1 min-w-[7.5rem] relative">
+        <div class="flex flex-col items-stretch h-full rounded-md border {{ base_color }}
+                    {% if ph.is_active %}ring-2 ring-amber-400 ring-offset-1{% endif %}">
+          <div class="flex items-center gap-2 px-2.5 pt-2">
+            <div class="flex items-center justify-center h-6 w-6 rounded-full text-xs font-bold {{ glyph_color }}
+                        {% if ph.status == 'running' %}animate-pulse{% endif %}">
+              {{ PHASE_GLYPHS[ph.status] }}
+            </div>
+            <div class="text-[11px] uppercase tracking-wide text-slate-500">{{ loop.index }}</div>
+          </div>
+          <div class="px-2.5 pb-2 pt-1 flex-1 flex flex-col justify-between">
+            <div class="text-sm font-semibold leading-tight"
+                 title="{{ PHASE_DESCRIPTIONS[ph.name] }}">{{ ph.name }}</div>
+            <div class="mt-1 text-[11px] text-slate-500 leading-tight font-mono">
+              {% if ph.status == 'ok' and ph.duration_sec is not none %}
+                {{ '%.1f'|format(ph.duration_sec) }}s
+              {% elif ph.status == 'running' and ph.started_at %}
+                {{ fmt_elapsed(ph.started_at) }}…
+              {% elif ph.status == 'failed' %}
+                failed
+              {% elif ph.status == 'skipped' %}
+                skipped
+              {% else %}
+                &nbsp;
+              {% endif %}
+            </div>
+            {% if ph.summary %}
+              <div class="mt-0.5 text-[11px] text-slate-500 leading-tight truncate"
+                   title="{{ ph.summary }}">{{ ph.summary }}</div>
+            {% endif %}
+          </div>
+        </div>
+      </li>
+    {% endfor %}
+  </ol>
+
+  {# ---- "Now" callout — only when running ---- #}
+  {% if pipeline.is_active and pipeline.current_phase %}
+    <div class="rounded-md bg-amber-50 border border-amber-200 px-3 py-2 mb-4 text-sm">
+      <div class="flex flex-wrap items-baseline gap-x-3">
+        <span class="text-xs uppercase tracking-wide text-amber-700 font-semibold">Now</span>
+        <span class="font-mono font-semibold text-amber-900">{{ pipeline.current_phase }}</span>
+        {% if pipeline.note %}
+          <span class="text-amber-800 italic">&mdash; {{ pipeline.note }}</span>
+        {% endif %}
+      </div>
+    </div>
+  {% endif %}
+
+  {# ---- Metadata strip (compact, monospace) ---- #}
+  <dl class="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-1 text-xs text-slate-600 mb-4">
+    {% if pipeline.worktree_path %}
+      <div class="truncate">
+        <dt class="inline text-slate-400 uppercase tracking-wide">worktree:</dt>
+        <dd class="inline font-mono select-all">{{ pipeline.worktree_path }}</dd>
+      </div>
+    {% endif %}
+    {% if pipeline.branch %}
+      <div class="truncate">
+        <dt class="inline text-slate-400 uppercase tracking-wide">branch:</dt>
+        <dd class="inline font-mono select-all">{{ pipeline.branch }}</dd>
+      </div>
+    {% endif %}
+    {% if pipeline.spawn_pid %}
+      <div>
+        <dt class="inline text-slate-400 uppercase tracking-wide">spawn pid:</dt>
+        <dd class="inline font-mono">{{ pipeline.spawn_pid }}</dd>
+      </div>
+    {% endif %}
+    {% if not pipeline.needs_variant %}
+      <div>
+        <dt class="inline text-slate-400 uppercase tracking-wide">variant:</dt>
+        <dd class="inline">baseline (design + implement skipped)</dd>
+      </div>
+    {% endif %}
+  </dl>
+
+  {# ---- Action bar: per-slug operator controls ---- #}
+  {% if identity.can_write %}
+    <div class="flex flex-wrap items-center gap-2 pt-3 border-t border-slate-100">
+      {% if pipeline.is_active %}
+        <form hx-post="/api/cmd" hx-target="#cmd-result" hx-swap="innerHTML"
+              hx-confirm="Cancel the active tick and SIGTERM the codex spawn? Operator override — does NOT count toward the auto-demote gate.">
+          <input type="hidden" name="cmd_id" value="daemon-cancel">
+          <button class="text-xs px-3 py-1.5 rounded-md bg-rose-600 text-white hover:bg-rose-700 font-medium">
+            Cancel tick
+          </button>
+        </form>
+      {% endif %}
+
+      {% if pipeline.current_phase and pipeline.current_phase in (
+        "preflight", "design", "implement", "run", "critique", "finalize"
+      ) %}
+        <form hx-post="/api/cmd" hx-target="#cmd-result" hx-swap="innerHTML"
+              hx-confirm="Re-run the {{ pipeline.current_phase }} phase on the next tick? Earlier OK phases stay; later phases re-run too.">
+          <input type="hidden" name="cmd_id" value="phases-reset-one">
+          <input type="hidden" name="slug" value="{{ pipeline.slug }}">
+          <input type="hidden" name="phase" value="{{ pipeline.current_phase }}">
+          <button class="text-xs px-3 py-1.5 rounded-md border border-slate-300 text-slate-700 hover:bg-slate-50">
+            Re-run <span class="font-mono">{{ pipeline.current_phase }}</span>
+          </button>
+        </form>
+      {% endif %}
+
+      <form hx-post="/api/cmd" hx-target="#cmd-result" hx-swap="innerHTML"
+            hx-confirm="Reset every phase for {{ pipeline.slug }}? The next tick re-runs preflight → finalize from scratch.">
+        <input type="hidden" name="cmd_id" value="phases-reset">
+        <input type="hidden" name="slug" value="{{ pipeline.slug }}">
+        <button class="text-xs px-3 py-1.5 rounded-md border border-slate-300 text-slate-700 hover:bg-slate-50">
+          Reset all phases
+        </button>
+      </form>
+
+      {% if pipeline.worktree_path %}
+        <form hx-post="/api/cmd" hx-target="#cmd-result" hx-swap="innerHTML"
+              hx-confirm="Permanently delete the worktree and lab/{{ pipeline.slug }} branch? Any uncommitted changes inside the worktree will be lost.">
+          <input type="hidden" name="cmd_id" value="worktree-remove">
+          <input type="hidden" name="slug" value="{{ pipeline.slug }}">
+          <button class="text-xs px-3 py-1.5 rounded-md border border-rose-300 text-rose-700 hover:bg-rose-50">
+            Remove worktree
+          </button>
+        </form>
+      {% endif %}
+
+      <span class="ml-auto"></span>
+
+      {% if pipeline.spawn_log_basename %}
+        <details class="text-xs">
+          <summary class="cursor-pointer text-blue-700 hover:underline select-none">
+            view spawn log
+          </summary>
+          <div class="mt-2"
+               hx-get="/_hx/daemon-log/{{ pipeline.spawn_log_basename }}"
+               hx-trigger="toggle from:closest details once,
+                           every 5s from:closest details"
+               hx-swap="innerHTML">
+            <p class="text-slate-400 italic">loading…</p>
+          </div>
+        </details>
+      {% endif %}
+    </div>
+  {% endif %}
+{% endif %}

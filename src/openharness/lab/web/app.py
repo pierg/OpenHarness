@@ -397,6 +397,7 @@ def create_app() -> FastAPI:
                 services_available=labsvc.available(),
                 process_tree=reader.process_tree(),
                 daemon_state=reader.daemon_state(),
+                pipeline=reader.pipeline_view(),
             )
         except Exception:
             _close_reader(request, reader)
@@ -590,6 +591,51 @@ def create_app() -> FastAPI:
     # daemon-state.json snapshot. Reads are cheap (one JSON read +
     # tiny parse), so we don't bother caching. All four take exactly
     # the same context shape: a single `daemon_state` keyword.
+
+    @app.get("/_hx/daemon-control-bar", response_class=HTMLResponse)
+    def hx_daemon_control_bar(request: Request) -> HTMLResponse:
+        """Combined status + mode + start/stop/restart row.
+
+        Replaces the previous split between the bottom-of-page
+        ``/_hx/daemon-status`` panel and the top-of-page
+        ``/_hx/daemon-mode`` toggle. The legacy endpoints stay
+        registered so external dashboards / tests that target them
+        keep working; the cockpit just doesn't use them anymore.
+        """
+        reader = _reader_ctx(request)
+        try:
+            return _render(
+                request, "_daemon_control_bar.html",
+                _reader=reader,
+                status=reader.daemon_status(),
+                daemon_state=reader.daemon_state(),
+            )
+        except Exception:
+            _close_reader(request, reader)
+            raise
+
+    @app.get("/_hx/daemon-pipeline", response_class=HTMLResponse)
+    def hx_daemon_pipeline(request: Request) -> HTMLResponse:
+        """The 6-phase pipeline strip + per-slug action bar.
+
+        Pulls a :class:`PipelineView` for the active slug (or the
+        most-recent one when idle) and hands it to the template, so
+        the pipeline panel renders the *same* shape regardless of
+        whether the daemon is running or paused. That stability is
+        the whole point of the redesign — operators always see the
+        same widget, not "running" vs "idle" page chrome flips.
+        """
+        reader = _reader_ctx(request)
+        try:
+            return _render(
+                request, "_daemon_pipeline.html",
+                _reader=reader,
+                pipeline=reader.pipeline_view(),
+                daemon_state=reader.daemon_state(),
+            )
+        except Exception:
+            _close_reader(request, reader)
+            raise
 
     @app.get("/_hx/daemon-mode", response_class=HTMLResponse)
     def hx_daemon_mode(request: Request) -> HTMLResponse:

@@ -283,18 +283,30 @@ def client(monkeypatch: pytest.MonkeyPatch) -> TestClient:
 
 
 def test_daemon_page_renders_services_and_process_tree(client: TestClient) -> None:
+    """The redesigned daemon cockpit still surfaces services + process tree.
+
+    After the redesign these panels live inside the collapsed
+    ``Diagnostics`` <details>, so we assert against the section
+    headers + the HTMX wiring that fetches them on disclosure
+    rather than against the unit-id sidebar (which is now lazy
+    and only shows up after the panel is opened — see
+    :func:`test_hx_partials_return_200` for the unit-id check).
+    """
     r = client.get("/daemon")
     assert r.status_code == 200
     body = r.text
-    # Both new sections present.
     assert "Services" in body
     assert "Process tree" in body
-    # Both unit ids referenced (sidebar of the services panel).
-    assert "openharness-lab" in body
-    assert "openharness-daemon" in body
+    assert "Diagnostics" in body
     # Auto-refresh wiring: HTMX poll triggers for both partials.
     assert "lab-services-changed" in body
     assert "lab-processes-changed" in body
+    # The (now-lazy) services partial still ships the unit ids when
+    # fetched directly — verify here so the lazy disclosure actually
+    # has the same content as the legacy eager version.
+    services_body = client.get("/_hx/services").text
+    assert "openharness-lab" in services_body
+    assert "openharness-daemon" in services_body
 
 
 def test_hx_partials_return_200(client: TestClient) -> None:

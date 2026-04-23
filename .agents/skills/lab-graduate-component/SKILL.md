@@ -94,7 +94,22 @@ If a staged graduate exists, show the user the journal entry's
 `### Mutation impact` and `### Tree effect` blocks and ask for an
 explicit go/no-go before confirming.
 
-### 2. Confirm the swap
+### 2. Verify the experiment PR is merged
+
+The trunk swap rotates `trunk.yaml` and bumps components in
+`lab/components.md` to `validated` — both reference code that
+must already live on `main`. **Merge the PR first** (the one
+recorded in the journal entry's Branch bullet, also visible via
+`gh pr view`). When the PR has merged, the
+`graduate confirm` gate flips green automatically.
+
+If you're certain the PR is already merged but `gh pr view`
+disagrees (e.g. the URL is stale, or the PR was merged via the
+GitHub UI without auto-merge), pass `--skip-pr-merge-check` —
+this records `pr_merge_check_skipped=true` in the audit row so
+future audits can attribute the bypass.
+
+### 3. Confirm the swap
 
 ```bash
 uv run lab graduate confirm <slug> \
@@ -107,13 +122,16 @@ The CLI refuses if:
 -   The slug doesn't resolve to an instance.
 -   The fresh verdict isn't `Graduate` (e.g. a rerun of
     `experiment-critic` flipped it to `NoOp`).
+-   The experiment's PR is not yet merged (see step 2 above).
+    Override with `--skip-pr-merge-check` only when the PR was
+    merged out-of-band.
 -   `<target_id>.yaml` doesn't exist under
     `src/openharness/agents/configs/`.
 
 If it refuses, surface the error verbatim — do not "fix" the
 tree by hand.
 
-### 3. Move the idea to `## Graduated`
+### 4. Move the idea to `## Graduated`
 
 If the swap was driven by a previously-proposed idea (the common
 case), move that idea to `## Graduated`:
@@ -126,7 +144,7 @@ uv run lab idea move <idea-id> graduated \
 This is mechanically distinct from the trunk swap itself — the
 ideas file tracks lifecycle of the *proposal*, not of the trunk.
 
-### 4. Sanity checks
+### 5. Sanity checks
 
 The trunk swap is a config rotation, not a code change, so the
 test suite shouldn't be sensitive — but the next experiment will
@@ -146,7 +164,7 @@ uv run lab query "
   FROM trunk_changes ORDER BY at_ts DESC LIMIT 3"
 ```
 
-### 5. Report
+### 6. Report
 
 Finish with:
 

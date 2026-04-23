@@ -809,16 +809,18 @@ def set_journal_branch(
     branch: str,
     pr_url: str | None = None,
     rejected_reason: str | None = None,
+    discarded_sha: str | None = None,
     lab_root: Path = LAB_ROOT,
 ) -> str:
     """Replace the ``**Branch:**`` header bullet on the journal entry for ``slug``.
 
-    Three rendering modes (controlled by which arguments are set):
+    Rendering modes (controlled by which arguments are set):
 
     -   ``pr_url`` provided -> "Branch: [<branch>](<pr_url>)".
     -   ``rejected_reason`` provided -> "Branch: <branch> — not
-        opened (<reason>)". Used when verdict is Reject/NoOp and the
-        worktree was scheduled for removal.
+        opened (<reason>)". When ``discarded_sha`` is also passed the
+        short SHA is appended so a curious human can fetch the
+        deleted branch back later (`git fetch origin <sha>:retro/...`).
     -   Neither -> just "Branch: <branch>". Used for intermediate
         states (e.g. preflight finished, branch exists, no PR yet).
 
@@ -833,7 +835,12 @@ def set_journal_branch(
     if pr_url:
         rendered = f"-   **Branch:** [`{branch}`]({pr_url})"
     elif rejected_reason:
-        rendered = f"-   **Branch:** `{branch}` — not opened ({rejected_reason})"
+        suffix = ""
+        if discarded_sha:
+            suffix = f"; head=`{discarded_sha[:7]}`"
+        rendered = (
+            f"-   **Branch:** `{branch}` — not opened ({rejected_reason}{suffix})"
+        )
     else:
         rendered = f"-   **Branch:** `{branch}`"
 

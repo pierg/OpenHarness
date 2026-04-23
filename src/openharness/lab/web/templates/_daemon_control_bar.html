@@ -1,0 +1,103 @@
+{# Combined daemon control: status (running/stopped/lock-corrupted) + mode
+   (paused/manual/autonomous) + start/restart/stop, all in one row.
+
+   This replaces the previous split between the bottom-of-page
+   "Process & service health" status panel and the top-of-page mode
+   toggle. Putting them together matches how operators actually think:
+   "is it on, what mood is it in, and what do I want it to do?".
+
+   Refreshed on:
+     - lab-daemon-changed         (start/stop/restart)
+     - lab-daemon-state-changed   (mode flip / approve / cancel) #}
+<div class="flex flex-wrap items-center gap-x-5 gap-y-3">
+  {# Status indicator + pid/uptime ------------------------------------- #}
+  <div class="flex items-center gap-3">
+    {% if status.running %}
+      <div class="relative flex h-3 w-3">
+        <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-60"></span>
+        <span class="relative inline-flex rounded-full h-3 w-3 bg-emerald-500"></span>
+      </div>
+      <div class="leading-tight">
+        <div class="text-sm font-semibold text-slate-800">Daemon running</div>
+        <div class="text-xs text-slate-500">
+          pid <span class="font-mono">{{ status.pid }}</span>
+          {% if status.started_at %}· up {{ fmt_elapsed(status.started_at) }}{% endif %}
+        </div>
+      </div>
+    {% elif status.lock_corrupted %}
+      <span class="inline-flex h-3 w-3 rounded-full bg-rose-500"></span>
+      <div class="leading-tight">
+        <div class="text-sm font-semibold text-rose-700">Lock corrupted</div>
+        <div class="text-xs text-slate-500 font-mono truncate max-w-md">{{ status.lock_path }}</div>
+      </div>
+    {% else %}
+      <span class="inline-flex h-3 w-3 rounded-full bg-slate-300"></span>
+      <div class="leading-tight">
+        <div class="text-sm font-semibold text-slate-600">Daemon stopped</div>
+        <div class="text-xs text-slate-500">No orchestrator running.</div>
+      </div>
+    {% endif %}
+  </div>
+
+  {# Mode pills -------------------------------------------------------- #}
+  <div class="flex items-center gap-2">
+    <span class="text-xs uppercase tracking-wide text-slate-400">Mode</span>
+    {% for m in ["paused", "manual", "autonomous"] %}
+      {% set is_active = daemon_state.mode == m %}
+      {% if identity.can_write %}
+        <form hx-post="/api/cmd" hx-target="#cmd-result" hx-swap="innerHTML" class="contents"
+              {% if m == "autonomous" %}hx-confirm="Switch to autonomous? Daemon will pick from the top of Up next without waiting for approval."{% endif %}>
+          <input type="hidden" name="cmd_id" value="daemon-mode">
+          <input type="hidden" name="mode" value="{{ m }}">
+          <button class="text-xs rounded-full px-3 py-1 transition border
+                         {% if is_active %}
+                           {% if m == 'paused' %}bg-slate-700 text-white border-slate-700{% endif %}
+                           {% if m == 'manual' %}bg-emerald-600 text-white border-emerald-600{% endif %}
+                           {% if m == 'autonomous' %}bg-amber-600 text-white border-amber-600{% endif %}
+                         {% else %}
+                           bg-white border-slate-300 text-slate-600 hover:bg-slate-50
+                         {% endif %}"
+                  {% if is_active %}aria-current="true" disabled{% endif %}>
+            {{ m }}
+          </button>
+        </form>
+      {% else %}
+        <span class="text-xs rounded-full px-3 py-1 border
+                     {% if is_active %}bg-slate-700 text-white border-slate-700{% else %}bg-white border-slate-200 text-slate-500{% endif %}">
+          {{ m }}
+        </span>
+      {% endif %}
+    {% endfor %}
+  </div>
+
+  {# Lifecycle actions: start / restart / stop ----------------------- #}
+  {% if identity.can_write %}
+    <div class="ml-auto flex items-center gap-2">
+      {% if status.running %}
+        <form hx-post="/api/cmd" hx-target="#cmd-result" hx-swap="innerHTML"
+              hx-confirm="Restart the orchestrator? Current tick is interrupted; in-flight experiments keep running in their own processes.">
+          <input type="hidden" name="cmd_id" value="daemon-restart">
+          <button class="text-xs px-3 py-1.5 rounded-md border border-amber-300 text-amber-800 hover:bg-amber-50">
+            Restart
+          </button>
+        </form>
+        <form hx-post="/api/cmd" hx-target="#cmd-result" hx-swap="innerHTML"
+              hx-confirm="Stop the orchestrator? In-flight experiments keep running but new roadmap entries will not be picked up until you restart it.">
+          <input type="hidden" name="cmd_id" value="daemon-stop">
+          <button class="text-xs px-3 py-1.5 rounded-md border border-rose-300 text-rose-800 hover:bg-rose-50">
+            Stop
+          </button>
+        </form>
+      {% elif not status.lock_corrupted %}
+        <form hx-post="/api/cmd" hx-target="#cmd-result" hx-swap="innerHTML">
+          <input type="hidden" name="cmd_id" value="daemon-start">
+          <button class="text-xs px-3 py-1.5 rounded-md bg-emerald-600 text-white hover:bg-emerald-700">
+            Start daemon
+          </button>
+        </form>
+      {% else %}
+        <span class="text-xs text-slate-500">Clear the lock file to start.</span>
+      {% endif %}
+    </div>
+  {% endif %}
+</div>

@@ -2,72 +2,57 @@
 {% block title %}Daemon · OpenHarness lab{% endblock %}
 {% block crumbs %}<a href="/" class="hover:underline">Home</a> / Daemon{% endblock %}
 {% block content %}
-<h1 class="text-xl font-semibold mb-4">Orchestrator daemon</h1>
-
-<div id="cmd-result" class="mb-4"></div>
 
 {# ============================================================
-   COCKPIT — what is the daemon doing right now?
+   The /daemon page is the operator's "what is happening NOW"
+   cockpit. Three things, in this order:
 
-   Top three panels (mode / active tick / approvals) form the
-   "what is happening" surface; failure counters and recent
-   history are the "what just happened" surface. Existing
-   service / process / log panels stay below as the
-   infrastructure layer.
+     1. Control bar  — is the daemon on, what mood is it in,
+                        and start/restart/stop affordances.
+     2. Pipeline     — the current (or most-recent) experiment
+                        rendered as a 6-phase strip with inline
+                        operator actions (cancel, reset phase,
+                        remove worktree, view log on demand).
+     3. Recent ticks — last ~10 outcomes for context.
+
+   Everything else (raw spawn output, daemon journal, process
+   tree, services, disk cleanup, failure counters) lives below
+   in a single "Diagnostics" disclosure so the page reads as
+   "what is happening" first and "what's broken" second.
+
+   Refresh strategy:
+     - The control bar reacts to lab-daemon-changed (start/stop)
+       and lab-daemon-state-changed (mode flip / approve / cancel).
+       No timer — those events fire whenever it matters.
+     - The pipeline polls every 3s while in the foreground because
+       the phase strip + elapsed counter are the only sub-tick
+       signal the operator gets. Cost: one JSON file read.
+     - History refreshes on state-change + a 30s heartbeat for
+       the case where the page was opened just after a tick ended.
    ============================================================ #}
+<div id="cmd-result" class="mb-4"></div>
 
-{# Mode toggle — flips between paused/manual/autonomous. Refreshed
-   on `lab-daemon-state-changed` (any approve/revoke/mode/cancel/
-   reset-failures) so a CLI invocation from another shell shows up
-   here within one tick of the next state change. #}
-<section class="bg-white border border-slate-200 rounded-lg p-5 mb-6"
-         hx-get="/_hx/daemon-mode"
-         hx-trigger="lab-daemon-state-changed from:body, every 10s"
+<section class="bg-white border border-slate-200 rounded-lg p-4 mb-5"
+         hx-get="/_hx/daemon-control-bar"
+         hx-trigger="load, lab-daemon-changed from:body, lab-daemon-state-changed from:body, every 10s"
          hx-target="this" hx-swap="innerHTML">
-  {% include "_daemon_mode.html" %}
+  {% include "_daemon_control_bar.html" %}
 </section>
 
-{# Active tick — the "is the daemon doing anything right now" panel.
-   Polls every 3 s because the phase + elapsed numbers are the only
-   sub-tick visibility the operator gets. Read load is trivial. #}
-<section class="bg-white border border-slate-200 rounded-lg p-5 mb-6">
-  <div class="flex items-baseline gap-3 mb-3">
-    <h2 class="font-semibold">Current tick</h2>
-    <span class="text-xs text-slate-500">live · refreshes every 3 s</span>
-  </div>
-  <div hx-get="/_hx/daemon-active-tick"
-       hx-trigger="lab-daemon-state-changed from:body, every 3s"
-       hx-target="this" hx-swap="innerHTML">
-    {% include "_daemon_active_tick.html" %}
-  </div>
+<section class="bg-white border border-slate-200 rounded-lg p-5 mb-5"
+         hx-get="/_hx/daemon-pipeline"
+         hx-trigger="load, lab-daemon-state-changed from:body, every 3s"
+         hx-target="this" hx-swap="innerHTML">
+  {% include "_daemon_pipeline.html" %}
 </section>
 
-{# Active experiment output — what the running spawn is actually
-   doing right now (codex stdout/stderr + last final-message). When
-   the daemon is idle this falls back to the most recent finished
-   spawn so the operator can see *something* meaningful. Distinct
-   from the Daemon journal panel below, which shows the loop's own
-   logs (heartbeats, scheduling, exit-gate decisions). #}
-<section class="bg-white border border-slate-200 rounded-lg p-5 mb-6">
-  <div class="flex items-baseline gap-3 mb-3">
-    <h2 class="font-semibold">Experiment output</h2>
-    <span class="text-xs text-slate-500">
-      live spawn log — what the codex subprocess is actually saying
-    </span>
-  </div>
-  <div hx-get="/_hx/daemon-active-spawn"
-       hx-trigger="load, every 5s, lab-daemon-state-changed from:body"
-       hx-target="this" hx-swap="innerHTML">
-    <p class="text-slate-400 italic text-sm py-6 text-center">loading spawn output…</p>
-  </div>
-</section>
-
-{# Approvals queue — only really useful in manual mode but always
-   shown so the operator can see why nothing is happening. #}
-<section class="bg-white border border-slate-200 rounded-lg p-5 mb-6">
-  <div class="flex items-baseline gap-3 mb-3">
-    <h2 class="font-semibold">Approval queue</h2>
-    <span class="text-xs text-slate-500">{{ daemon_state.approved_slugs|length }} pending · refreshes on change</span>
+{# Approvals — only visually relevant in manual mode. We render the
+   panel always (so the operator notices when their queued approvals
+   are inert under autonomous/paused) but it's compact when empty. #}
+<section class="bg-white border border-slate-200 rounded-lg p-4 mb-5">
+  <div class="flex items-baseline gap-3 mb-2">
+    <h2 class="text-sm font-semibold text-slate-700">Approval queue</h2>
+    <span class="text-xs text-slate-400">{{ daemon_state.approved_slugs|length }} pending</span>
   </div>
   <div hx-get="/_hx/daemon-approvals"
        hx-trigger="lab-daemon-state-changed from:body, every 10s"
@@ -76,30 +61,10 @@
   </div>
 </section>
 
-{# Failure counters — hidden when there are none, so the panel is a
-   real signal when it appears. #}
-{% if daemon_state.entry_failures %}
-<section class="bg-white border border-amber-200 rounded-lg p-5 mb-6"
-         id="daemon-failures-section">
-  <div class="flex items-baseline gap-3 mb-3">
-    <h2 class="font-semibold">Recent failures</h2>
-    <span class="text-xs text-slate-500">auto-demote at {{ daemon_state.max_failures_before_demote }}</span>
-  </div>
-  <div hx-get="/_hx/daemon-failures"
-       hx-trigger="lab-daemon-state-changed from:body, every 10s"
-       hx-target="this" hx-swap="innerHTML">
-    {% include "_daemon_failures.html" %}
-  </div>
-</section>
-{% endif %}
-
-{# Recent ticks — last 20 outcomes. Refreshed on state change plus
-   a 30 s heartbeat to catch the case where a tick ends but the UI
-   wasn't open yet. #}
-<section class="bg-white border border-slate-200 rounded-lg p-5 mb-6">
-  <div class="flex items-baseline gap-3 mb-3">
-    <h2 class="font-semibold">Recent ticks</h2>
-    <span class="text-xs text-slate-500">last {{ [daemon_state.history|length, 20]|min }} of {{ daemon_state.history|length }} · refreshes on change</span>
+<section class="bg-white border border-slate-200 rounded-lg p-4 mb-5">
+  <div class="flex items-baseline gap-3 mb-2">
+    <h2 class="text-sm font-semibold text-slate-700">Recent ticks</h2>
+    <span class="text-xs text-slate-400">last {{ [daemon_state.history|length, 10]|min }} of {{ daemon_state.history|length }}</span>
   </div>
   <div hx-get="/_hx/daemon-history"
        hx-trigger="lab-daemon-state-changed from:body, every 30s"
@@ -108,101 +73,131 @@
   </div>
 </section>
 
-{# Disk cleanup — runs/experiments/<id>/ dirs that didn't finish
-   leave half-written trees behind. This panel is the one-click
-   "clean up unfinished experiment runs" affordance; advanced
-   options (--force, --dry-run, --age-hours=0) live on the CLI
-   to keep the safety gate visible. #}
-{% if identity.can_write %}
-<section class="bg-white border border-slate-200 rounded-lg p-5 mb-6">
-  <div class="flex items-baseline gap-3 mb-3">
-    <h2 class="font-semibold">Cleanup</h2>
-    <span class="text-xs text-slate-500">disk-side maintenance</span>
-  </div>
-  <form hx-post="/api/cmd" hx-target="#cmd-result" hx-swap="innerHTML"
-        hx-confirm="Permanently delete every unfinished experiment run directory older than the threshold? This cannot be undone."
-        class="flex flex-wrap items-end gap-3">
-    <input type="hidden" name="cmd_id" value="runs-prune">
-    <label class="flex flex-col text-xs text-slate-600">
-      <span class="mb-1">Min age (hours)</span>
-      <input type="text" name="age_hours" value="1"
-             pattern="^(?:[1-9][0-9]{0,3})(?:\.[0-9]{1,3})?$"
-             class="border border-slate-300 rounded px-2 py-1 font-mono w-24"
-             title="Dirs younger than this stay. Use the CLI with --force for anything below 1h.">
-    </label>
-    <button class="text-sm px-3 py-1.5 rounded border border-rose-300 text-rose-700 hover:bg-rose-50">
-      Prune unfinished runs
-    </button>
-    <p class="text-xs text-slate-500 basis-full">
-      Deletes <code class="font-mono">runs/experiments/&lt;id&gt;/</code>
-      directories with no <code class="font-mono">results/summary.md</code>
-      and an mtime older than the threshold. The 1 h gate prevents
-      racing live runs; for the more aggressive
-      <code class="font-mono">--force --age-hours 0</code> mode, run
-      <code class="font-mono">uv run lab runs prune</code> directly.
-    </p>
-  </form>
-</section>
-{% endif %}
-
 {# ============================================================
-   INFRASTRUCTURE LAYER — the systemd unit, raw process tree,
-   journalctl tail. These mostly serve "is the host healthy"
-   debugging rather than the "is the lab making progress"
-   question the cockpit answers.
+   DIAGNOSTICS — collapsed by default.
+
+   Everything here is "I need to debug what just broke". The
+   normal-state operator never opens it.
    ============================================================ #}
-
-<h2 class="text-lg font-semibold mb-3 mt-8">Process &amp; service health</h2>
-
-<section class="bg-white border border-slate-200 rounded-lg p-5 mb-6"
-         id="daemon-status"
-         hx-get="/_hx/daemon-status"
-         hx-trigger="lab-daemon-changed from:body, every 5s"
-         hx-swap="innerHTML">
-  {% include "_daemon_status.html" %}
-</section>
-
-<section class="bg-white border border-slate-200 rounded-lg p-5 mb-6">
-  <div class="flex items-baseline gap-3 mb-3">
-    <h2 class="font-semibold">Services</h2>
-    <span class="text-xs text-slate-500">systemd --user units · refreshes on change</span>
-  </div>
-  <div hx-get="/_hx/services"
-       hx-trigger="lab-services-changed from:body, lab-daemon-changed from:body, every 10s"
-       hx-target="this" hx-swap="innerHTML">
-    {% include "_services_panel.html" %}
-  </div>
-</section>
-
-<section class="bg-white border border-slate-200 rounded-lg p-5 mb-6">
-  <div class="flex items-baseline gap-3 mb-3">
-    <h2 class="font-semibold">Process tree</h2>
-    <span class="text-xs text-slate-500">live psutil view of the daemon's descendants</span>
-  </div>
-  <div hx-get="/_hx/process-tree"
-       hx-trigger="lab-processes-changed from:body, lab-daemon-changed from:body, every 5s"
-       hx-target="this" hx-swap="innerHTML">
-    {% include "_process_tree.html" %}
-  </div>
-</section>
-
-<section class="bg-white border border-slate-200 rounded-lg p-5">
-  <div class="flex items-baseline gap-3 mb-3">
-    <h2 class="font-semibold">Daemon journal</h2>
-    <span class="text-xs text-slate-500">
-      what the orchestrator loop is doing — last 300 lines · refreshes every 5 s
+<details class="bg-white border border-slate-200 rounded-lg p-4 mb-5">
+  <summary class="cursor-pointer text-sm font-semibold text-slate-700 select-none flex items-center gap-2">
+    <svg class="h-4 w-4 text-slate-500 transition-transform" viewBox="0 0 20 20" fill="currentColor">
+      <path fill-rule="evenodd" d="M5.23 7.21a.75.75 0 011.06.02L10 11.168l3.71-3.938a.75.75 0 111.08 1.04l-4.25 4.5a.75.75 0 01-1.08 0l-4.25-4.5a.75.75 0 01.02-1.06z" clip-rule="evenodd"/>
+    </svg>
+    Diagnostics
+    <span class="text-xs font-normal text-slate-400 ml-2">
+      raw logs, process tree, services, cleanup
     </span>
+  </summary>
+
+  <div class="mt-4 space-y-5">
+    {# Failure counters surface here only when there are any — the
+       header is hidden when the panel is empty so the section reads
+       as "no problems" rather than "ignored counter". #}
+    {% if daemon_state.entry_failures %}
+    <div class="border border-amber-200 bg-amber-50/50 rounded-md p-3">
+      <div class="flex items-baseline gap-3 mb-2">
+        <h3 class="text-sm font-semibold text-amber-900">Failure counters</h3>
+        <span class="text-xs text-amber-700">auto-demote at {{ daemon_state.max_failures_before_demote }}</span>
+      </div>
+      <div hx-get="/_hx/daemon-failures"
+           hx-trigger="lab-daemon-state-changed from:body, every 10s"
+           hx-target="this" hx-swap="innerHTML">
+        {% include "_daemon_failures.html" %}
+      </div>
+    </div>
+    {% endif %}
+
+    {# Live spawn output — moved here from the previous cockpit's hero
+       slot per the redesign brief ("not the raw output logs"). Still
+       lazy-polls when expanded, but the dark terminal pane no longer
+       dominates the page. #}
+    <details class="border border-slate-200 rounded-md p-3">
+      <summary class="cursor-pointer text-sm font-semibold text-slate-700 select-none">
+        Live spawn output
+        <span class="text-xs font-normal text-slate-400">— codex stdout/stderr from the active or most-recent tick</span>
+      </summary>
+      <div class="mt-3"
+           hx-get="/_hx/daemon-active-spawn"
+           hx-trigger="toggle from:closest details once,
+                       every 5s from:closest details,
+                       lab-daemon-state-changed from:body">
+        <p class="text-slate-400 italic text-sm py-3 text-center">loading…</p>
+      </div>
+    </details>
+
+    <details class="border border-slate-200 rounded-md p-3">
+      <summary class="cursor-pointer text-sm font-semibold text-slate-700 select-none">
+        Daemon journal
+        <span class="text-xs font-normal text-slate-400">— journalctl --user -u openharness-daemon</span>
+      </summary>
+      <div class="mt-3"
+           hx-get="/_hx/daemon-journal"
+           hx-trigger="toggle from:closest details once,
+                       every 5s from:closest details,
+                       lab-daemon-changed from:body">
+        <p class="text-slate-400 italic text-sm py-3 text-center">loading…</p>
+      </div>
+    </details>
+
+    <details class="border border-slate-200 rounded-md p-3">
+      <summary class="cursor-pointer text-sm font-semibold text-slate-700 select-none">
+        Process tree
+        <span class="text-xs font-normal text-slate-400">— live psutil view of the daemon's descendants</span>
+      </summary>
+      <div class="mt-3"
+           hx-get="/_hx/process-tree"
+           hx-trigger="toggle from:closest details once,
+                       every 5s from:closest details,
+                       lab-processes-changed from:body,
+                       lab-daemon-changed from:body">
+        <p class="text-slate-400 italic text-sm py-3 text-center">loading…</p>
+      </div>
+    </details>
+
+    <details class="border border-slate-200 rounded-md p-3">
+      <summary class="cursor-pointer text-sm font-semibold text-slate-700 select-none">
+        Services
+        <span class="text-xs font-normal text-slate-400">— systemd --user units</span>
+      </summary>
+      <div class="mt-3"
+           hx-get="/_hx/services"
+           hx-trigger="toggle from:closest details once,
+                       every 10s from:closest details,
+                       lab-services-changed from:body,
+                       lab-daemon-changed from:body">
+        <p class="text-slate-400 italic text-sm py-3 text-center">loading…</p>
+      </div>
+    </details>
+
+    {% if identity.can_write %}
+    <details class="border border-rose-200 rounded-md p-3 bg-rose-50/30">
+      <summary class="cursor-pointer text-sm font-semibold text-rose-800 select-none">
+        Disk cleanup
+        <span class="text-xs font-normal text-rose-500">— prune unfinished experiment runs</span>
+      </summary>
+      <form hx-post="/api/cmd" hx-target="#cmd-result" hx-swap="innerHTML"
+            hx-confirm="Permanently delete every unfinished experiment run directory older than the threshold? This cannot be undone."
+            class="mt-3 flex flex-wrap items-end gap-3">
+        <input type="hidden" name="cmd_id" value="runs-prune">
+        <label class="flex flex-col text-xs text-slate-600">
+          <span class="mb-1">Min age (hours)</span>
+          <input type="text" name="age_hours" value="1"
+                 pattern="^(?:[1-9][0-9]{0,3})(?:\.[0-9]{1,3})?$"
+                 class="border border-slate-300 rounded px-2 py-1 font-mono w-24">
+        </label>
+        <button class="text-xs px-3 py-1.5 rounded-md border border-rose-300 text-rose-700 hover:bg-rose-100">
+          Prune unfinished runs
+        </button>
+        <p class="text-xs text-slate-500 basis-full">
+          Deletes <code class="font-mono">runs/experiments/&lt;id&gt;/</code>
+          directories with no <code class="font-mono">results/summary.md</code>
+          and an mtime older than the threshold. The 1 h gate prevents
+          racing live runs.
+        </p>
+      </form>
+    </details>
+    {% endif %}
   </div>
-  {# Live tail of the daemon's systemd journal. Under systemd, the
-     daemon's stdout goes to journald (NOT to runs/lab/orchestrator.out),
-     so this is the canonical "what is the loop doing right now"
-     surface. The legacy /_hx/daemon-tail (which read orchestrator.out)
-     used to be confusing because it silently fell back to the newest
-     spawn log; this panel replaces it. #}
-  <div hx-get="/_hx/daemon-journal"
-       hx-trigger="load, every 5s, lab-daemon-changed from:body, lab-daemon-state-changed from:body"
-       hx-target="this" hx-swap="innerHTML">
-    <p class="text-slate-400 italic text-sm py-6 text-center">loading journal…</p>
-  </div>
-</section>
+</details>
 {% endblock %}
