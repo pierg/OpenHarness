@@ -194,23 +194,7 @@ def _spawn_exec(
         args += ["--profile", profile]
     log_path.parent.mkdir(parents=True, exist_ok=True)
     run_dir.parent.mkdir(parents=True, exist_ok=True)
-    # Merge .env from the repo root so services like Langfuse are
-    # available to the experiment subprocess even when the daemon was
-    # started without sourcing .env (e.g. from a systemd unit or a
-    # bare Python invocation rather than scripts/exp/start.sh).
-    env = {**os.environ, "PYTHONUNBUFFERED": "1"}
-    dotenv_path = REPO_ROOT / ".env"
-    if dotenv_path.is_file():
-        for raw in dotenv_path.read_text().splitlines():
-            raw = raw.strip()
-            if not raw or raw.startswith("#") or "=" not in raw:
-                continue
-            k, _, v = raw.partition("=")
-            k = k.strip()
-            # Never override already-set vars; the parent daemon's env
-            # wins. This preserves intentional overrides set before launch.
-            if k and k not in os.environ:
-                env[k] = v.strip()
+    env = _exec_env(worktree)
     log_fp = open(log_path, "ab", buffering=0)
     try:
         proc = subprocess.Popen(
@@ -231,6 +215,57 @@ def _spawn_exec(
         proc.pid, worktree, log_path, run_dir,
     )
     return proc
+
+
+def _exec_env(worktree: Path) -> dict[str, str]:
+    """Environment for ``uv run exec`` launched from an experiment worktree.
+
+    The daemon itself commonly runs inside the parent checkout's
+    ``.venv``. If that ``VIRTUAL_ENV`` / ``PATH`` leaks into a worktree
+    experiment, Harbor may import the parent checkout and miss new
+    components/configs that exist only on the experiment branch. Let
+    ``uv run`` choose the worktree project environment instead.
+    """
+    # Merge .env from the repo root so services like Langfuse are
+    # available to the experiment subprocess even when the daemon was
+    # started without sourcing .env (e.g. from a systemd unit or a
+    # bare Python invocation rather than scripts/exp/start.sh).
+    env = {**os.environ, "PYTHONUNBUFFERED": "1"}
+    dotenv_path = REPO_ROOT / ".env"
+    if dotenv_path.is_file():
+        for raw in dotenv_path.read_text().splitlines():
+            raw = raw.strip()
+            if not raw or raw.startswith("#") or "=" not in raw:
+                continue
+            k, _, v = raw.partition("=")
+            k = k.strip()
+            # Never override already-set vars; the parent daemon's env
+            # wins. This preserves intentional overrides set before launch.
+            if k and k not in os.environ:
+                env[k] = v.strip()
+
+    env.pop("VIRTUAL_ENV", None)
+    env.pop("VIRTUAL_ENV_PROMPT", None)
+    parent_venv_bin = (REPO_ROOT / ".venv" / "bin").resolve()
+    worktree_venv_bin = (worktree / ".venv" / "bin").resolve()
+    filtered: list[str] = []
+    for raw_entry in env.get("PATH", "").split(os.pathsep):
+        if not raw_entry:
+            continue
+        try:
+            entry = Path(raw_entry).resolve()
+        except OSError:
+            filtered.append(raw_entry)
+            continue
+        if entry == parent_venv_bin:
+            continue
+        if entry == worktree_venv_bin:
+            continue
+        filtered.append(raw_entry)
+    if worktree_venv_bin.is_dir():
+        filtered.insert(0, str(worktree_venv_bin))
+    env["PATH"] = os.pathsep.join(filtered)
+    return env
 
 
 # ---------------------------------------------------------------------------
