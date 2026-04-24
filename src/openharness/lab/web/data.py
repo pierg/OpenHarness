@@ -60,6 +60,7 @@ from openharness.lab.web.models import (
     TrialRow,
     TrunkChangeRow,
     TurnCard,
+    UsageSummaryRow,
     VerifierReport,
     VerifierTest,
 )
@@ -115,6 +116,15 @@ class LabReader:
         cur = self._conn.execute(sql, params or [])  # type: ignore[attr-defined]
         cols = [d[0] for d in cur.description]
         return [dict(zip(cols, row)) for row in cur.fetchall()]
+
+    def _table_columns(self, table: str) -> set[str]:
+        if self._conn is None:
+            return set()
+        try:
+            return {str(r[1]) for r in self._q(f"PRAGMA table_info('{table}')")}
+        except Exception as exc:  # noqa: BLE001 — DB cache may predate migrations
+            log.warning("failed to inspect %s columns: %s", table, exc)
+            return set()
 
     # ---- DB info ---------------------------------------------------------
 
@@ -256,19 +266,22 @@ class LabReader:
         for name in _ps.PHASE_ORDER:
             rec = slug_state.phases.get(name)
             if rec is None:
-                phases.append(PhaseView(
-                    name=name, status="pending",
-                    started_at=None, finished_at=None,
-                    duration_sec=None, error=None, summary=None,
-                    is_active=(current_phase == name and is_active),
-                ))
+                phases.append(
+                    PhaseView(
+                        name=name,
+                        status="pending",
+                        started_at=None,
+                        finished_at=None,
+                        duration_sec=None,
+                        error=None,
+                        summary=None,
+                        is_active=(current_phase == name and is_active),
+                    )
+                )
                 continue
             started = _parse_ts(rec.started_at) if rec.started_at else None
             finished = _parse_ts(rec.finished_at) if rec.finished_at else None
-            duration = (
-                (finished - started).total_seconds()
-                if started and finished else None
-            )
+            duration = (finished - started).total_seconds() if started and finished else None
             # Keep summary short — the strip cell only has room for one
             # line. Per-phase keys are documented in `phase_state.py`.
             summary: str | None = None
@@ -284,18 +297,11 @@ class LabReader:
             elif name == "critique" and payload.get("verdict_kind"):
                 summary = f"verdict: {payload['verdict_kind']}"
             elif name == "replan" and rec.status == "ok":
-                summary = (
-                    payload.get("summary")
-                    or "roadmap updated"
-                )
+                summary = payload.get("summary") or "roadmap updated"
             elif name == "finalize" and payload.get("merged"):
                 pr_urls = payload.get("pr_urls")
                 if isinstance(pr_urls, list) and pr_urls:
-                    summary = (
-                        "merged 1 PR"
-                        if len(pr_urls) == 1
-                        else f"merged {len(pr_urls)} PRs"
-                    )
+                    summary = "merged 1 PR" if len(pr_urls) == 1 else f"merged {len(pr_urls)} PRs"
                 elif payload.get("pr_url"):
                     pr = str(payload["pr_url"]).rsplit("/", 1)[-1]
                     summary = f"merged PR #{pr}"
@@ -303,16 +309,18 @@ class LabReader:
                     summary = "merged to main"
             elif rec.status == "skipped":
                 summary = str(payload.get("skip_reason") or "skipped")
-            phases.append(PhaseView(
-                name=name,
-                status=rec.status,
-                started_at=started,
-                finished_at=finished,
-                duration_sec=duration,
-                error=rec.error,
-                summary=summary,
-                is_active=(current_phase == name and is_active),
-            ))
+            phases.append(
+                PhaseView(
+                    name=name,
+                    status=rec.status,
+                    started_at=started,
+                    finished_at=finished,
+                    duration_sec=duration,
+                    error=rec.error,
+                    summary=summary,
+                    is_active=(current_phase == name and is_active),
+                )
+            )
 
         # Hypothesis from the roadmap (best-effort: the slug may have
         # already been promoted to Done by the time the operator looks).
@@ -356,8 +364,14 @@ class LabReader:
             spawn_log_path=active.log_path if active else None,
             spawn_log_basename=spawn_log_basename,
             note=active.note if active else None,
-            started_at=active.started_at if active else _parse_ts(slug_state.started_at) if slug_state.started_at else None,
-            last_updated_at=_parse_ts(slug_state.last_updated_at) if slug_state.last_updated_at else None,
+            started_at=active.started_at
+            if active
+            else _parse_ts(slug_state.started_at)
+            if slug_state.started_at
+            else None,
+            last_updated_at=_parse_ts(slug_state.last_updated_at)
+            if slug_state.last_updated_at
+            else None,
             current_phase=current_phase,
             phases=phases,
         )
@@ -377,6 +391,7 @@ class LabReader:
         smoke-test surface narrower).
         """
         from openharness.lab import daemon_state as _ds
+
         return _ds.load()
 
     def tail_log(self, path: Path, n: int = 200) -> list[str]:
@@ -434,23 +449,29 @@ class LabReader:
         for proc in all_procs:
             try:
                 with proc.oneshot():
-                    info = proc.as_dict(attrs=[
-                        "pid", "ppid", "name", "username", "status",
-                        "create_time", "cpu_percent", "memory_info",
-                        "cmdline",
-                    ])
+                    info = proc.as_dict(
+                        attrs=[
+                            "pid",
+                            "ppid",
+                            "name",
+                            "username",
+                            "status",
+                            "create_time",
+                            "cpu_percent",
+                            "memory_info",
+                            "cmdline",
+                        ]
+                    )
             except (psutil.NoSuchProcess, psutil.AccessDenied):
                 # Process died between enumeration and inspection.
                 continue
             cmd = info.get("cmdline") or [info.get("name") or ""]
             full = " ".join(cmd) if cmd else (info.get("name") or "")
-            short = full if len(full) <= cmdline_max else full[:cmdline_max - 1] + "…"
+            short = full if len(full) <= cmdline_max else full[: cmdline_max - 1] + "…"
             mem = info.get("memory_info")
             mem_mb = (mem.rss / (1024 * 1024)) if mem is not None else 0.0
             ts = info.get("create_time")
-            started = (
-                datetime.fromtimestamp(ts, tz=timezone.utc) if ts else None
-            )
+            started = datetime.fromtimestamp(ts, tz=timezone.utc) if ts else None
             pid = int(info["pid"])
             is_root = pid == daemon_pid
             nodes[pid] = ProcessNode(
@@ -503,9 +524,22 @@ class LabReader:
     def recent_spawns(self, limit: int = 50) -> list[SpawnRow]:
         if not self._db_available:
             return []
+        cols = self._table_columns("spawns")
+        if "spawn_id" not in cols:
+            return []
+
+        def col(name: str) -> str:
+            return name if name in cols else f"NULL AS {name}"
+
         rows = self._qd(
-            """
-            SELECT spawn_id, skill, started_at, finished_at, exit_code,
+            f"""
+            SELECT spawn_id, skill, {col("provider")}, {col("model")},
+                   started_at, finished_at, exit_code,
+                   {col("input_tokens")},
+                   {col("cached_input_tokens")},
+                   {col("output_tokens")},
+                   {col("reasoning_output_tokens")},
+                   {col("total_tokens")},
                    cost_usd_estimate, log_path, args, notes
             FROM spawns
             ORDER BY started_at DESC NULLS LAST
@@ -514,6 +548,95 @@ class LabReader:
             [limit],
         )
         return [_row_to_spawn(r) for r in rows]
+
+    def usage_summary(self) -> list[UsageSummaryRow]:
+        if not self._db_available:
+            return []
+
+        out: list[UsageSummaryRow] = []
+        spawn_cols = self._table_columns("spawns")
+        if "spawn_id" in spawn_cols:
+            if "total_tokens" in spawn_cols:
+                out.extend(
+                    _row_to_usage(r)
+                    for r in self._qd(
+                        """
+                    SELECT 'pipeline' AS source,
+                           provider,
+                           model,
+                           COALESCE(skill, 'unknown') AS step,
+                           COUNT(*) AS calls,
+                           SUM(input_tokens) AS input_tokens,
+                           SUM(cached_input_tokens) AS cached_input_tokens,
+                           SUM(output_tokens) AS output_tokens,
+                           SUM(reasoning_output_tokens) AS reasoning_output_tokens,
+                           SUM(total_tokens) AS total_tokens,
+                           SUM(cost_usd_estimate) AS cost_usd
+                    FROM spawns
+                    WHERE provider IS NOT NULL
+                       OR model IS NOT NULL
+                       OR total_tokens IS NOT NULL
+                       OR cost_usd_estimate IS NOT NULL
+                    GROUP BY provider, model, COALESCE(skill, 'unknown')
+                    ORDER BY cost_usd DESC NULLS LAST,
+                             total_tokens DESC NULLS LAST,
+                             step
+                    """
+                    )
+                )
+            else:
+                out.extend(
+                    _row_to_usage(r)
+                    for r in self._qd(
+                        """
+                    SELECT 'pipeline' AS source,
+                           NULL AS provider,
+                           NULL AS model,
+                           COALESCE(skill, 'unknown') AS step,
+                           COUNT(*) AS calls,
+                           NULL AS input_tokens,
+                           NULL AS cached_input_tokens,
+                           NULL AS output_tokens,
+                           NULL AS reasoning_output_tokens,
+                           NULL AS total_tokens,
+                           SUM(cost_usd_estimate) AS cost_usd
+                    FROM spawns
+                    WHERE cost_usd_estimate IS NOT NULL
+                    GROUP BY COALESCE(skill, 'unknown')
+                    ORDER BY cost_usd DESC NULLS LAST, step
+                    """
+                    )
+                )
+
+        trial_cols = self._table_columns("trials")
+        if {"trial_id", "model"}.issubset(trial_cols):
+            out.extend(
+                _row_to_usage(r)
+                for r in self._qd(
+                    """
+                SELECT 'agent trials' AS source,
+                       'openharness' AS provider,
+                       model,
+                       'agent trial' AS step,
+                       COUNT(*) AS calls,
+                       SUM(input_tokens) AS input_tokens,
+                       SUM(cache_tokens) AS cached_input_tokens,
+                       SUM(output_tokens) AS output_tokens,
+                       NULL AS reasoning_output_tokens,
+                       SUM(total_tokens) AS total_tokens,
+                       SUM(cost_usd) AS cost_usd
+                FROM trials
+                WHERE model IS NOT NULL
+                   OR total_tokens IS NOT NULL
+                   OR cost_usd IS NOT NULL
+                GROUP BY model
+                ORDER BY cost_usd DESC NULLS LAST,
+                         total_tokens DESC NULLS LAST,
+                         model
+                """
+                )
+            )
+        return out
 
     def failed_spawns_since(self, since: datetime) -> int:
         if not self._db_available:
@@ -547,9 +670,7 @@ class LabReader:
         else:
             rows = self._qd(sql)
 
-        verdicts = {r["instance_id"]: _row_to_diff(r) for r in self._qd(
-            "SELECT * FROM tree_diffs"
-        )}
+        verdicts = {r["instance_id"]: _row_to_diff(r) for r in self._qd("SELECT * FROM tree_diffs")}
         return [
             ExperimentSummary(
                 instance_id=str(r["instance_id"]),
@@ -647,7 +768,9 @@ class LabReader:
             for r in rows
         ]
 
-    def task_pass_matrix(self, instance_id: str) -> tuple[list[str], list[str], dict[tuple[str, str], TrialRow]]:
+    def task_pass_matrix(
+        self, instance_id: str
+    ) -> tuple[list[str], list[str], dict[tuple[str, str], TrialRow]]:
         """Return (tasks, legs, cell_lookup) for the per-task heatmap."""
         trials = self.trials(instance_id)
         tasks = sorted({t.task_name for t in trials})
@@ -709,9 +832,7 @@ class LabReader:
         if rows:
             return str(rows[0][0])
 
-        rows = self._q(
-            "SELECT instance_id FROM tree_diffs WHERE slug = ?", [slug]
-        )
+        rows = self._q("SELECT instance_id FROM tree_diffs WHERE slug = ?", [slug])
         if rows and rows[0][0]:
             return str(rows[0][0])
 
@@ -735,8 +856,7 @@ class LabReader:
 
         # Fall-through: substring match on experiment_id.
         rows = self._q(
-            "SELECT instance_id, experiment_id FROM experiments "
-            "ORDER BY created_at DESC"
+            "SELECT instance_id, experiment_id FROM experiments ORDER BY created_at DESC"
         )
         for inst_id, eid in rows:
             if eid and slug.startswith(f"{eid}-"):  # type: ignore[operator]
@@ -782,8 +902,9 @@ class LabReader:
         out["resolved_instance_id"] = instance_id
         return out
 
-    def tree_diffs(self, *, applied: bool | None = None,
-                   kind: str | None = None, limit: int = 100) -> list[TreeDiffRow]:
+    def tree_diffs(
+        self, *, applied: bool | None = None, kind: str | None = None, limit: int = 100
+    ) -> list[TreeDiffRow]:
         if not self._db_available:
             return []
         sql = "SELECT * FROM tree_diffs WHERE 1=1"
@@ -800,7 +921,9 @@ class LabReader:
 
     # ---- markdown surfaces ---------------------------------------------
 
-    def roadmap(self) -> tuple[list[RoadmapEntryView], list[SuggestedEntryView], list[DoneEntryView]]:
+    def roadmap(
+        self,
+    ) -> tuple[list[RoadmapEntryView], list[SuggestedEntryView], list[DoneEntryView]]:
         path = LAB_ROOT / "roadmap.md"
         if not path.is_file():
             return [], [], []
@@ -847,8 +970,10 @@ class LabReader:
         auto = [i for i in self.ideas() if i.section == "Auto-proposed"]
         misconf = 0
         if self._db_available:
-            rows = self._q("SELECT count(*) FROM misconfigurations WHERE created_at >= ?",
-                           [datetime.now(timezone.utc) - recent_window])
+            rows = self._q(
+                "SELECT count(*) FROM misconfigurations WHERE created_at >= ?",
+                [datetime.now(timezone.utc) - recent_window],
+            )
             misconf = int(rows[0][0]) if rows else 0  # type: ignore[arg-type]
         failed = self.failed_spawns_since(datetime.now(timezone.utc) - recent_window)
         return PendingActions(
@@ -949,6 +1074,10 @@ class LabReader:
             status=_opt_str(r.get("status")),
             error_phase=_opt_str(r.get("error_phase")),
             cost_usd=_opt_float(r.get("cost_usd")),
+            input_tokens=_opt_int(r.get("input_tokens")),
+            cache_tokens=_opt_int(r.get("cache_tokens")),
+            output_tokens=_opt_int(r.get("output_tokens")),
+            total_tokens=_opt_int(r.get("total_tokens")),
             duration_sec=_opt_float(r.get("duration_sec")),
             n_turns=_opt_int(r.get("n_turns")),
             trial_dir=str(trial_dir),
@@ -1202,22 +1331,24 @@ class LabReader:
             if cached is None:
                 cached = _pr_cache_refresh(url)
             number = _pr_number_from_url(url)
-            out.append(PRStateRow(
-                slug=str(r["slug"]),
-                instance_id=str(r["instance_id"]),
-                kind=str(r["kind"]),
-                pr_url=url,
-                pr_number=number,
-                state=cached.state,
-                is_merged=cached.is_merged,
-                mergeable=cached.mergeable,
-                checks_status=cached.checks_status,
-                auto_merge_enabled=cached.auto_merge_enabled,
-                title=cached.title,
-                head_sha=cached.head_sha,
-                checked_at=cached.checked_at,
-                error=cached.error,
-            ))
+            out.append(
+                PRStateRow(
+                    slug=str(r["slug"]),
+                    instance_id=str(r["instance_id"]),
+                    kind=str(r["kind"]),
+                    pr_url=url,
+                    pr_number=number,
+                    state=cached.state,
+                    is_merged=cached.is_merged,
+                    mergeable=cached.mergeable,
+                    checks_status=cached.checks_status,
+                    auto_merge_enabled=cached.auto_merge_enabled,
+                    title=cached.title,
+                    head_sha=cached.head_sha,
+                    checked_at=cached.checked_at,
+                    error=cached.error,
+                )
+            )
         return out
 
     # ---- daemon idle reason ---------------------------------------------
@@ -1263,8 +1394,7 @@ class LabReader:
                 up_next, _suggested, done = self.roadmap()
                 done_slugs = {d.slug for d in done}
                 ready_slugs = [
-                    r.slug for r in up_next
-                    if all(d in done_slugs for d in r.depends_on)
+                    r.slug for r in up_next if all(d in done_slugs for d in r.depends_on)
                 ]
             except Exception:  # noqa: BLE001
                 ready_slugs = []
@@ -1337,9 +1467,7 @@ class LabReader:
         from openharness.lab import daemon_state as _ds
         from openharness.lab.web import commands as _labcmd
 
-        wanted = set(kinds) if kinds else {
-            "cmd", "tick", "spawn", "verdict", "trunk-swap"
-        }
+        wanted = set(kinds) if kinds else {"cmd", "tick", "spawn", "verdict", "trunk-swap"}
         out: list[ActivityLogEntry] = []
 
         if "cmd" in wanted:
@@ -1349,33 +1477,32 @@ class LabReader:
                     continue
                 exit_code = r.get("exit_code")
                 cmd_id = str(r.get("cmd_id") or "?")
-                out.append(ActivityLogEntry(
-                    at_ts=ts,
-                    kind="cmd",
-                    actor=str(r.get("actor") or "?"),
-                    title=cmd_id,
-                    detail=(
-                        f"exit={exit_code}" if exit_code is not None else None
-                    ),
-                    success=(exit_code == 0) if exit_code is not None else None,
-                ))
+                out.append(
+                    ActivityLogEntry(
+                        at_ts=ts,
+                        kind="cmd",
+                        actor=str(r.get("actor") or "?"),
+                        title=cmd_id,
+                        detail=(f"exit={exit_code}" if exit_code is not None else None),
+                        success=(exit_code == 0) if exit_code is not None else None,
+                    )
+                )
 
         if "tick" in wanted:
             try:
                 state = _ds.load()
                 for h in reversed(state.history):
-                    out.append(ActivityLogEntry(
-                        at_ts=h.ended_at,
-                        kind="tick",
-                        actor="daemon",
-                        title=f"{h.slug} → {h.outcome}",
-                        detail=(
-                            f"phase={h.phase_reached} "
-                            f"dur={h.duration_sec:.1f}s"
-                        ),
-                        slug=h.slug,
-                        success=(h.outcome == "ok"),
-                    ))
+                    out.append(
+                        ActivityLogEntry(
+                            at_ts=h.ended_at,
+                            kind="tick",
+                            actor="daemon",
+                            title=f"{h.slug} → {h.outcome}",
+                            detail=(f"phase={h.phase_reached} dur={h.duration_sec:.1f}s"),
+                            slug=h.slug,
+                            success=(h.outcome == "ok"),
+                        )
+                    )
             except Exception:  # noqa: BLE001
                 pass
 
@@ -1383,50 +1510,51 @@ class LabReader:
             for s in self.recent_spawns(limit=limit):
                 if s.finished_at is None:
                     continue
-                out.append(ActivityLogEntry(
-                    at_ts=s.finished_at,
-                    kind="spawn",
-                    actor="daemon",
-                    title=s.skill,
-                    detail=(
-                        f"exit={s.exit_code}"
-                        + (f" cost={s.cost_usd_estimate:.2f}"
-                           if s.cost_usd_estimate else "")
-                    ),
-                    success=(s.exit_code == 0) if s.exit_code is not None else None,
-                ))
+                out.append(
+                    ActivityLogEntry(
+                        at_ts=s.finished_at,
+                        kind="spawn",
+                        actor="daemon",
+                        title=s.skill,
+                        detail=(
+                            f"exit={s.exit_code}"
+                            + (f" cost={s.cost_usd_estimate:.2f}" if s.cost_usd_estimate else "")
+                        ),
+                        success=(s.exit_code == 0) if s.exit_code is not None else None,
+                    )
+                )
 
         if "verdict" in wanted and self._db_available:
             for d in self.tree_diffs(limit=limit):
-                out.append(ActivityLogEntry(
-                    at_ts=d.applied_at or datetime.now(timezone.utc),
-                    kind="verdict",
-                    actor=d.applied_by or "?",
-                    title=f"{d.slug}: {d.kind}",
-                    detail=(
-                        ("pending merge" if not d.applied else "merged to main")
-                        + (f" → {d.target_id}" if d.target_id else "")
-                    ),
-                    slug=d.slug,
-                    instance_id=d.instance_id,
-                    href=f"/runs/{d.instance_id}",
-                ))
+                out.append(
+                    ActivityLogEntry(
+                        at_ts=d.applied_at or datetime.now(timezone.utc),
+                        kind="verdict",
+                        actor=d.applied_by or "?",
+                        title=f"{d.slug}: {d.kind}",
+                        detail=(
+                            ("pending merge" if not d.applied else "merged to main")
+                            + (f" → {d.target_id}" if d.target_id else "")
+                        ),
+                        slug=d.slug,
+                        instance_id=d.instance_id,
+                        href=f"/runs/{d.instance_id}",
+                    )
+                )
 
         if "trunk-swap" in wanted:
             for tc in self.trunk_history(limit=limit):
-                out.append(ActivityLogEntry(
-                    at_ts=tc.at_ts,
-                    kind="trunk-swap",
-                    actor=tc.applied_by,
-                    title=f"trunk → {tc.to_id}",
-                    detail=(
-                        f"from {tc.from_id}" if tc.from_id else "initial"
-                    ),
-                    instance_id=tc.instance_id,
-                    href=(
-                        f"/runs/{tc.instance_id}" if tc.instance_id else None
-                    ),
-                ))
+                out.append(
+                    ActivityLogEntry(
+                        at_ts=tc.at_ts,
+                        kind="trunk-swap",
+                        actor=tc.applied_by,
+                        title=f"trunk → {tc.to_id}",
+                        detail=(f"from {tc.from_id}" if tc.from_id else "initial"),
+                        instance_id=tc.instance_id,
+                        href=(f"/runs/{tc.instance_id}" if tc.instance_id else None),
+                    )
+                )
 
         out.sort(key=lambda e: e.at_ts, reverse=True)
         return out[:limit]
@@ -1459,22 +1587,24 @@ class LabReader:
             passed = _opt_bool(r.get("passed"))
             status = _opt_str(r.get("status"))
             glyph, border = _cell_glyph(passed, status)
-            out.append(CellRow(
-                task_name=str(r["task_name"]),
-                task_checksum=_opt_str(r.get("task_checksum")),
-                leg_id=str(r["leg_id"]),
-                cluster=str(r["cluster"]),
-                trial_id=str(r["trial_id"]),
-                passed=passed,
-                score=_opt_float(r.get("score")),
-                status=status,
-                cost_usd=_opt_float(r.get("cost_usd")),
-                duration_sec=_opt_float(r.get("duration_sec")),
-                n_turns=_opt_int(r.get("n_turns")),
-                trial_dir=str(r.get("trial_dir") or ""),
-                status_glyph=glyph,
-                border_color=border,
-            ))
+            out.append(
+                CellRow(
+                    task_name=str(r["task_name"]),
+                    task_checksum=_opt_str(r.get("task_checksum")),
+                    leg_id=str(r["leg_id"]),
+                    cluster=str(r["cluster"]),
+                    trial_id=str(r["trial_id"]),
+                    passed=passed,
+                    score=_opt_float(r.get("score")),
+                    status=status,
+                    cost_usd=_opt_float(r.get("cost_usd")),
+                    duration_sec=_opt_float(r.get("duration_sec")),
+                    n_turns=_opt_int(r.get("n_turns")),
+                    trial_dir=str(r.get("trial_dir") or ""),
+                    status_glyph=glyph,
+                    border_color=border,
+                )
+            )
         return out
 
     def cluster_deltas(
@@ -1502,19 +1632,21 @@ class LabReader:
             tasks = sorted({c.task_name for c in in_cluster})
             n_tasks = len(tasks)
             for i, a in enumerate(legs):
-                for b in legs[i + 1:]:
+                for b in legs[i + 1 :]:
                     pa, pb = _paired_pass_rate(in_cluster, a, b, tasks)
                     delta_pp: float | None = None
                     if pa is not None and pb is not None:
                         delta_pp = (pa - pb) * 100.0
-                    out.append(ClusterDeltaRow(
-                        cluster=cluster,
-                        n_tasks=n_tasks,
-                        leg_a=a,
-                        leg_b=b,
-                        delta_pp=delta_pp,
-                        warning=n_tasks < min_tasks_warning,
-                    ))
+                    out.append(
+                        ClusterDeltaRow(
+                            cluster=cluster,
+                            n_tasks=n_tasks,
+                            leg_a=a,
+                            leg_b=b,
+                            delta_pp=delta_pp,
+                            warning=n_tasks < min_tasks_warning,
+                        )
+                    )
         return out
 
     # ---- tree visualisation --------------------------------------------
@@ -1528,36 +1660,44 @@ class LabReader:
         snapshot = self.tree()
         prs_by_branch = {pr.slug: pr for pr in self.pr_states()}
         nodes: list[TreeVizNode] = []
-        nodes.append(TreeVizNode(
-            node_id=snapshot.trunk_id,
-            role="trunk",
-            mutation="(trunk)",
-            sketch=snapshot.trunk_anchor,
-        ))
+        nodes.append(
+            TreeVizNode(
+                node_id=snapshot.trunk_id,
+                role="trunk",
+                mutation="(trunk)",
+                sketch=snapshot.trunk_anchor,
+            )
+        )
         for b in snapshot.branches:
-            nodes.append(TreeVizNode(
-                node_id=b.branch_id,
-                role="branch",
-                mutation=b.mutation,
-                use_when=b.use_when,
-                last_verified=b.last_verified,
-                pr=prs_by_branch.get(b.branch_id),
-            ))
+            nodes.append(
+                TreeVizNode(
+                    node_id=b.branch_id,
+                    role="branch",
+                    mutation=b.mutation,
+                    use_when=b.use_when,
+                    last_verified=b.last_verified,
+                    pr=prs_by_branch.get(b.branch_id),
+                )
+            )
         for r in snapshot.rejected:
-            nodes.append(TreeVizNode(
-                node_id=r.branch_id,
-                role="rejected",
-                reason=r.reason,
-                sketch=r.evidence,
-                pr=prs_by_branch.get(r.branch_id),
-            ))
+            nodes.append(
+                TreeVizNode(
+                    node_id=r.branch_id,
+                    role="rejected",
+                    reason=r.reason,
+                    sketch=r.evidence,
+                    pr=prs_by_branch.get(r.branch_id),
+                )
+            )
         for p in snapshot.proposed:
-            nodes.append(TreeVizNode(
-                node_id=p.branch_id,
-                role="proposed",
-                sketch=p.sketch,
-                use_when=p.linked_idea,
-            ))
+            nodes.append(
+                TreeVizNode(
+                    node_id=p.branch_id,
+                    role="proposed",
+                    sketch=p.sketch,
+                    use_when=p.linked_idea,
+                )
+            )
         return nodes
 
 
@@ -1586,6 +1726,7 @@ _PR_CACHE_TTL_SEC = 90.0
 def _pr_cache_lookup(url: str) -> _PRCacheEntry | None:
     """Return a cached entry if still fresh; else None."""
     import time as _time
+
     rec = _PR_CACHE.get(url)
     if rec is None:
         return None
@@ -1614,20 +1755,25 @@ def _pr_cache_refresh(url: str) -> _PRCacheEntry:
         return entry
     try:
         proc = subprocess.run(
-            ["gh", "pr", "view", url, "--json",
-             "state,mergedAt,mergeable,title,headRefOid,"
-             "autoMergeRequest,statusCheckRollup"],
-            check=False, capture_output=True, text=True, timeout=20,
+            [
+                "gh",
+                "pr",
+                "view",
+                url,
+                "--json",
+                "state,mergedAt,mergeable,title,headRefOid,autoMergeRequest,statusCheckRollup",
+            ],
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=20,
         )
     except Exception as exc:  # noqa: BLE001
         entry.error = f"gh raised: {exc!r}"
         _PR_CACHE[url] = (_time.monotonic(), entry)
         return entry
     if proc.returncode != 0:
-        entry.error = (
-            f"gh exit={proc.returncode}: "
-            f"{(proc.stderr or '').strip()[:160]}"
-        )
+        entry.error = f"gh exit={proc.returncode}: {(proc.stderr or '').strip()[:160]}"
         _PR_CACHE[url] = (_time.monotonic(), entry)
         return entry
     try:
@@ -1638,17 +1784,16 @@ def _pr_cache_refresh(url: str) -> _PRCacheEntry:
         return entry
 
     entry.state = (str(data.get("state") or "")).upper() or None
-    entry.is_merged = (
-        entry.state == "MERGED" and bool(data.get("mergedAt"))
-    )
+    entry.is_merged = entry.state == "MERGED" and bool(data.get("mergedAt"))
     entry.mergeable = _opt_str(data.get("mergeable"))
     entry.title = _opt_str(data.get("title"))
     entry.head_sha = _opt_str(data.get("headRefOid"))
     entry.auto_merge_enabled = bool(data.get("autoMergeRequest"))
     rollup = data.get("statusCheckRollup")
     if isinstance(rollup, list) and rollup:
-        states = [str(r.get("conclusion") or r.get("status") or "")
-                  for r in rollup if isinstance(r, dict)]
+        states = [
+            str(r.get("conclusion") or r.get("status") or "") for r in rollup if isinstance(r, dict)
+        ]
         if any(s == "FAILURE" for s in states):
             entry.checks_status = "FAILURE"
         elif any(s in ("PENDING", "IN_PROGRESS", "QUEUED") for s in states):
@@ -1682,14 +1827,14 @@ def _cell_glyph(passed: bool | None, status: str | None) -> tuple[str, str]:
 
 
 def _paired_pass_rate(
-    cells: list[CellRow], leg_a: str, leg_b: str, tasks: list[str],
+    cells: list[CellRow],
+    leg_a: str,
+    leg_b: str,
+    tasks: list[str],
 ) -> tuple[float | None, float | None]:
     """Return (pass-rate-A, pass-rate-B) over tasks where BOTH ran."""
     by_key = {(c.leg_id, c.task_name): c for c in cells}
-    paired = [
-        (by_key.get((leg_a, t)), by_key.get((leg_b, t)))
-        for t in tasks
-    ]
+    paired = [(by_key.get((leg_a, t)), by_key.get((leg_b, t))) for t in tasks]
     paired_present = [(a, b) for a, b in paired if a is not None and b is not None]
     if not paired_present:
         return None, None
@@ -1713,7 +1858,7 @@ def _split_top_section(text: str, name: str) -> str | None:
     parts = re.split(r"(?m)^## ", text)
     for sec in parts:
         if sec.startswith(name):
-            return sec[len(name):].lstrip("\n")
+            return sec[len(name) :].lstrip("\n")
     return None
 
 
@@ -1722,7 +1867,7 @@ def _split_subsection(body: str, name: str) -> str | None:
     parts = re.split(r"(?m)^### ", body)
     for sec in parts:
         if sec.startswith(name + "\n") or sec.rstrip() == name:
-            return sec[len(name):].lstrip("\n")
+            return sec[len(name) :].lstrip("\n")
     return None
 
 
@@ -1730,7 +1875,9 @@ def _parse_bullets(body: str) -> dict[str, str]:
     return {m.group(1).strip(): m.group(2).strip() for m in _BULLET_RE.finditer(body)}
 
 
-def _parse_roadmap(text: str) -> tuple[list[RoadmapEntryView], list[SuggestedEntryView], list[DoneEntryView]]:
+def _parse_roadmap(
+    text: str,
+) -> tuple[list[RoadmapEntryView], list[SuggestedEntryView], list[DoneEntryView]]:
     up_next_body = _split_top_section(text, "Up next") or ""
     done_body = _split_top_section(text, "Done") or ""
 
@@ -1755,16 +1902,18 @@ def _parse_roadmap(text: str) -> tuple[list[RoadmapEntryView], list[SuggestedEnt
         bullets = _parse_bullets(body)
         depends_on = re.findall(r"`([^`]+)`", bullets.get("Depends on", ""))
         idea_match = re.search(r"\[`([^`]+)`\]", bullets.get("Idea", ""))
-        up_next.append(RoadmapEntryView(
-            slug=slug,
-            idea_id=idea_match.group(1) if idea_match else (bullets.get("Idea") or None),
-            hypothesis=bullets.get("Hypothesis", ""),
-            plan=bullets.get("Plan", ""),
-            depends_on=depends_on,
-            cost=bullets.get("Cost") or None,
-            body_md=body,
-            deps_satisfied=False,  # filled in by reader
-        ))
+        up_next.append(
+            RoadmapEntryView(
+                slug=slug,
+                idea_id=idea_match.group(1) if idea_match else (bullets.get("Idea") or None),
+                hypothesis=bullets.get("Hypothesis", ""),
+                plan=bullets.get("Plan", ""),
+                depends_on=depends_on,
+                cost=bullets.get("Cost") or None,
+                body_md=body,
+                deps_satisfied=False,  # filled in by reader
+            )
+        )
 
     suggested: list[SuggestedEntryView] = []
     sug_matches = list(_SUGGESTED_ENTRY_RE.finditer(sug_body))
@@ -1774,13 +1923,15 @@ def _parse_roadmap(text: str) -> tuple[list[RoadmapEntryView], list[SuggestedEnt
         end = sug_matches[i + 1].start() if i + 1 < len(sug_matches) else len(sug_body)
         body = sug_body[start:end].strip()
         bullets = _parse_bullets(body)
-        suggested.append(SuggestedEntryView(
-            slug=slug,
-            hypothesis=bullets.get("Hypothesis", ""),
-            source=bullets.get("Source") or None,
-            cost=bullets.get("Cost") or None,
-            body_md=body,
-        ))
+        suggested.append(
+            SuggestedEntryView(
+                slug=slug,
+                hypothesis=bullets.get("Hypothesis", ""),
+                source=bullets.get("Source") or None,
+                cost=bullets.get("Cost") or None,
+                body_md=body,
+            )
+        )
 
     done: list[DoneEntryView] = []
     done_matches = list(_ROADMAP_ENTRY_RE.finditer(done_body))
@@ -1790,12 +1941,14 @@ def _parse_roadmap(text: str) -> tuple[list[RoadmapEntryView], list[SuggestedEnt
         end = done_matches[i + 1].start() if i + 1 < len(done_matches) else len(done_body)
         body = done_body[start:end].strip()
         bullets = _parse_bullets(body)
-        done.append(DoneEntryView(
-            slug=slug,
-            body_md=body,
-            ran_link=bullets.get("Ran") or None,
-            outcome=bullets.get("Outcome") or None,
-        ))
+        done.append(
+            DoneEntryView(
+                slug=slug,
+                body_md=body,
+                ran_link=bullets.get("Ran") or None,
+                outcome=bullets.get("Outcome") or None,
+            )
+        )
 
     return up_next, suggested, done
 
@@ -1838,18 +1991,18 @@ def _parse_ideas(text: str) -> list[IdeaEntryView]:
                 # Cross-refs are any **Foo:** bullets we didn't classify as
                 # motivation/sketch (e.g. **Trying in:** [...]).
                 cross_refs = [
-                    f"**{k}:** {v}"
-                    for k, v in bullets.items()
-                    if k not in {"Motivation", "Sketch"}
+                    f"**{k}:** {v}" for k, v in bullets.items() if k not in {"Motivation", "Sketch"}
                 ]
-                out.append(IdeaEntryView(
-                    idea_id=idea_id,
-                    section=section,
-                    theme=theme,
-                    motivation=bullets.get("Motivation") or None,
-                    sketch=bullets.get("Sketch") or None,
-                    cross_refs=cross_refs,
-                ))
+                out.append(
+                    IdeaEntryView(
+                        idea_id=idea_id,
+                        section=section,
+                        theme=theme,
+                        motivation=bullets.get("Motivation") or None,
+                        sketch=bullets.get("Sketch") or None,
+                        cross_refs=cross_refs,
+                    )
+                )
     return out
 
 
@@ -1893,18 +2046,20 @@ def _parse_journal(text: str) -> list[JournalEntryView]:
             if m_id:
                 instance_id = m_id.group(1)
 
-        out.append(JournalEntryView(
-            slug=slug,
-            date=date,
-            type_=type_,
-            trunk_at_runtime=trunk,
-            mutation=mutation,
-            hypothesis=hypothesis,
-            run_link=run_link,
-            body_md=body,
-            sections=sections,
-            instance_id=instance_id,
-        ))
+        out.append(
+            JournalEntryView(
+                slug=slug,
+                date=date,
+                type_=type_,
+                trunk_at_runtime=trunk,
+                mutation=mutation,
+                hypothesis=hypothesis,
+                run_link=run_link,
+                body_md=body,
+                sections=sections,
+                instance_id=instance_id,
+            )
+        )
     return out
 
 
@@ -1922,14 +2077,37 @@ def _row_to_spawn(r: dict[str, object]) -> SpawnRow:
     return SpawnRow(
         spawn_id=str(r["spawn_id"]),
         skill=str(r["skill"]),
+        provider=_opt_str(r.get("provider")),
+        model=_opt_str(r.get("model")),
         started_at=started,
         finished_at=finished,
         duration_sec=duration,
         exit_code=_opt_int(r.get("exit_code")),
+        input_tokens=_opt_int(r.get("input_tokens")),
+        cached_input_tokens=_opt_int(r.get("cached_input_tokens")),
+        output_tokens=_opt_int(r.get("output_tokens")),
+        reasoning_output_tokens=_opt_int(r.get("reasoning_output_tokens")),
+        total_tokens=_opt_int(r.get("total_tokens")),
         cost_usd_estimate=_opt_float(r.get("cost_usd_estimate")),
         log_path=_opt_str(r.get("log_path")),
         args=_decode_json(r.get("args")),
         notes=_opt_str(r.get("notes")),
+    )
+
+
+def _row_to_usage(r: dict[str, object]) -> UsageSummaryRow:
+    return UsageSummaryRow(
+        source=str(r.get("source") or ""),
+        provider=_opt_str(r.get("provider")),
+        model=_opt_str(r.get("model")),
+        step=str(r.get("step") or ""),
+        calls=int(r.get("calls") or 0),
+        input_tokens=_opt_int(r.get("input_tokens")),
+        cached_input_tokens=_opt_int(r.get("cached_input_tokens")),
+        output_tokens=_opt_int(r.get("output_tokens")),
+        reasoning_output_tokens=_opt_int(r.get("reasoning_output_tokens")),
+        total_tokens=_opt_int(r.get("total_tokens")),
+        cost_usd=_opt_float(r.get("cost_usd")),
     )
 
 
@@ -2136,18 +2314,25 @@ def _load_verifier_report(trial_dir: Path) -> VerifierReport | None:
             if isinstance(raw_summary, dict):
                 for k, v in raw_summary.items():
                     if isinstance(v, (int, float)) and k in {
-                        "tests", "passed", "failed", "skipped", "pending", "other",
+                        "tests",
+                        "passed",
+                        "failed",
+                        "skipped",
+                        "pending",
+                        "other",
                     }:
                         summary[k] = int(v)
             for t in results.get("tests") or []:
                 if not isinstance(t, dict):
                     continue
-                tests.append(VerifierTest(
-                    name=str(t.get("name") or "?"),
-                    status=str(t.get("status") or "?"),
-                    duration_sec=_opt_float(t.get("duration")),
-                    message=_opt_str(t.get("message") or t.get("trace")),
-                ))
+                tests.append(
+                    VerifierTest(
+                        name=str(t.get("name") or "?"),
+                        status=str(t.get("status") or "?"),
+                        duration_sec=_opt_float(t.get("duration")),
+                        message=_opt_str(t.get("message") or t.get("trace")),
+                    )
+                )
 
     reward_text: str | None = None
     rwd = vdir / "reward.txt"
@@ -2204,8 +2389,10 @@ def _load_turns_from_trial(trial_dir: Path, *, max_chars_per_block: int = 6_000)
             tool_calls: list[dict[str, object]] = []
             tool_results: list[dict[str, object]] = []
 
-            blocks = content if isinstance(content, list) else (
-                [{"type": "text", "text": content}] if isinstance(content, str) else []
+            blocks = (
+                content
+                if isinstance(content, list)
+                else ([{"type": "text", "text": content}] if isinstance(content, str) else [])
             )
             for b in blocks:
                 if not isinstance(b, dict):
@@ -2217,11 +2404,13 @@ def _load_turns_from_trial(trial_dir: Path, *, max_chars_per_block: int = 6_000)
                         text = text[:max_chars_per_block] + "\n…[truncated]…"
                     texts.append(text)
                 elif btype == "tool_use":
-                    tool_calls.append({
-                        "id": b.get("id"),
-                        "name": b.get("name"),
-                        "input": b.get("input"),
-                    })
+                    tool_calls.append(
+                        {
+                            "id": b.get("id"),
+                            "name": b.get("name"),
+                            "input": b.get("input"),
+                        }
+                    )
                 elif btype == "tool_result":
                     text = b.get("content")
                     if isinstance(text, list):
@@ -2231,23 +2420,27 @@ def _load_turns_from_trial(trial_dir: Path, *, max_chars_per_block: int = 6_000)
                     text = str(text or "")
                     if len(text) > max_chars_per_block:
                         text = text[:max_chars_per_block] + "\n…[truncated]…"
-                    tool_results.append({
-                        "tool_use_id": b.get("tool_use_id"),
-                        "is_error": b.get("is_error", False),
-                        "content": text,
-                    })
+                    tool_results.append(
+                        {
+                            "tool_use_id": b.get("tool_use_id"),
+                            "is_error": b.get("is_error", False),
+                            "content": text,
+                        }
+                    )
 
             n_chars = sum(len(t) for t in texts) + sum(
                 len(str(t.get("content", ""))) for t in tool_results
             )
-            turns.append(TurnCard(
-                index=idx,
-                role=role,
-                texts=texts,
-                tool_calls=tool_calls,
-                tool_results=tool_results,
-                n_chars=n_chars,
-            ))
+            turns.append(
+                TurnCard(
+                    index=idx,
+                    role=role,
+                    texts=texts,
+                    tool_calls=tool_calls,
+                    tool_results=tool_results,
+                    n_chars=n_chars,
+                )
+            )
     return turns
 
 

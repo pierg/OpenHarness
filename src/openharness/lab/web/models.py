@@ -122,14 +122,36 @@ class ProcessNode:
 class SpawnRow:
     spawn_id: str
     skill: str
+    provider: str | None
+    model: str | None
     started_at: datetime | None
     finished_at: datetime | None
     duration_sec: float | None
     exit_code: int | None
+    input_tokens: int | None
+    cached_input_tokens: int | None
+    output_tokens: int | None
+    reasoning_output_tokens: int | None
+    total_tokens: int | None
     cost_usd_estimate: float | None
     log_path: str | None
     args: Json
     notes: str | None
+
+
+@dataclass(eq=False, slots=True)
+class UsageSummaryRow:
+    source: str
+    provider: str | None
+    model: str | None
+    step: str
+    calls: int
+    input_tokens: int | None
+    cached_input_tokens: int | None
+    output_tokens: int | None
+    reasoning_output_tokens: int | None
+    total_tokens: int | None
+    cost_usd: float | None
 
 
 @dataclass(eq=False, slots=True)
@@ -365,6 +387,10 @@ class TrialDetail:
     status: str | None
     error_phase: str | None
     cost_usd: float | None
+    input_tokens: int | None
+    cache_tokens: int | None
+    output_tokens: int | None
+    total_tokens: int | None
     duration_sec: float | None
     n_turns: int | None
     trial_dir: str

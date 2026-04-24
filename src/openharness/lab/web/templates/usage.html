@@ -1,0 +1,106 @@
+{% extends "base.html" %}
+{% block title %}Token usage · OpenHarness lab{% endblock %}
+{% block crumbs %}<a href="/" class="hover:underline">Home</a> / Token usage{% endblock %}
+{% block content %}
+
+<header class="mb-6">
+  <h1 class="text-xl font-semibold">Token usage</h1>
+  <p class="text-sm text-slate-500 mt-1 max-w-3xl">
+    Agent-trial usage comes from Harbor trial results. Pipeline usage comes from
+    cached spawn telemetry parsed from Codex/Gemini logs during ingest. Costs are
+    approximate API-equivalent estimates when model pricing is available.
+  </p>
+</header>
+
+{% set p = namespace(calls=0, tokens=0, cost=0.0) %}
+{% for r in pipeline_rows %}
+  {% set p.calls = p.calls + r.calls %}
+  {% set p.tokens = p.tokens + (r.total_tokens or 0) %}
+  {% set p.cost = p.cost + (r.cost_usd or 0) %}
+{% endfor %}
+{% set a = namespace(calls=0, tokens=0, cost=0.0) %}
+{% for r in trial_rows %}
+  {% set a.calls = a.calls + r.calls %}
+  {% set a.tokens = a.tokens + (r.total_tokens or 0) %}
+  {% set a.cost = a.cost + (r.cost_usd or 0) %}
+{% endfor %}
+
+<section class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
+  <div class="bg-white border border-slate-200 rounded-lg p-5">
+    <div class="text-xs uppercase tracking-wide text-slate-500">Pipeline model calls</div>
+    <div class="mt-2 flex items-baseline gap-3">
+      <div class="font-mono text-2xl">{{ fmt_int(p.tokens) }}</div>
+      <div class="text-sm text-slate-500">tokens</div>
+    </div>
+    <div class="mt-2 text-sm text-slate-600">{{ fmt_int(p.calls) }} skill spawns · {{ fmt_money(p.cost) }}</div>
+    <div class="mt-2 text-xs text-slate-500">Design, implement, critique, replan, finalize, trial-critic, and task-feature agent calls.</div>
+  </div>
+  <div class="bg-white border border-slate-200 rounded-lg p-5">
+    <div class="text-xs uppercase tracking-wide text-slate-500">Agent trial execution</div>
+    <div class="mt-2 flex items-baseline gap-3">
+      <div class="font-mono text-2xl">{{ fmt_int(a.tokens) }}</div>
+      <div class="text-sm text-slate-500">tokens</div>
+    </div>
+    <div class="mt-2 text-sm text-slate-600">{{ fmt_int(a.calls) }} trials · {{ fmt_money(a.cost) }}</div>
+    <div class="mt-2 text-xs text-slate-500">The actual agents being benchmarked inside experiment runs.</div>
+  </div>
+</section>
+
+<section class="bg-white border border-slate-200 rounded-lg overflow-x-auto">
+  <table class="w-full text-sm min-w-[1040px]">
+    <thead>
+      <tr class="text-xs uppercase text-slate-500 border-b border-slate-200 text-left">
+        <th class="py-2 px-3">Source</th>
+        <th>Step</th>
+        <th>Provider</th>
+        <th>Model</th>
+        <th class="text-right">Calls / trials</th>
+        <th class="text-right">Input</th>
+        <th class="text-right">Cached</th>
+        <th class="text-right">Output</th>
+        <th class="text-right">Reasoning</th>
+        <th class="text-right">Total</th>
+        <th class="text-right pr-3">Cost</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for r in rows %}
+        <tr class="border-b border-slate-100">
+          <td class="py-1.5 px-3">
+            <span class="px-1.5 py-0.5 rounded text-xs {% if r.source == 'pipeline' %}bg-sky-100 text-sky-800{% else %}bg-emerald-100 text-emerald-800{% endif %}">
+              {{ r.source }}
+            </span>
+          </td>
+          <td class="font-mono text-xs">{{ r.step }}</td>
+          <td class="font-mono text-xs text-slate-600">{{ r.provider or '—' }}</td>
+          <td class="font-mono text-xs text-slate-600">{{ r.model or '—' }}</td>
+          <td class="text-right font-mono text-xs">{{ fmt_int(r.calls) }}</td>
+          <td class="text-right font-mono text-xs">{{ fmt_int(r.input_tokens) }}</td>
+          <td class="text-right font-mono text-xs text-slate-500">{{ fmt_int(r.cached_input_tokens) }}</td>
+          <td class="text-right font-mono text-xs">{{ fmt_int(r.output_tokens) }}</td>
+          <td class="text-right font-mono text-xs text-slate-500">{{ fmt_int(r.reasoning_output_tokens) }}</td>
+          <td class="text-right font-mono text-xs font-semibold">{{ fmt_int(r.total_tokens) }}</td>
+          <td class="text-right font-mono text-xs pr-3">{{ fmt_money(r.cost_usd) }}</td>
+        </tr>
+      {% else %}
+        <tr>
+          <td colspan="11" class="px-4 py-8 text-center text-slate-500">
+            No token usage rows yet. Run ingest after migrations to backfill from existing runs and spawn logs.
+          </td>
+        </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</section>
+
+<section class="mt-6 bg-slate-50 border border-slate-200 rounded-lg p-5 text-sm text-slate-600">
+  <h2 class="font-semibold text-slate-800 mb-2">Backfill coverage</h2>
+  <p>
+    Previous agent-trial usage is filled when experiment runs have been ingested.
+    Previous pipeline usage is recoverable only when the matching spawn log still
+    exists and contains Codex <code>turn.completed</code> usage events or Gemini
+    CLI token stats.
+  </p>
+</section>
+
+{% endblock %}

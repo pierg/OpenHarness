@@ -30,6 +30,7 @@ import yaml
 from openharness.lab import critic_io
 from openharness.lab import db as labdb
 from openharness.lab.paths import EXPERIMENTS_RUNS_ROOT, REPO_ROOT
+from openharness.lab.usage import augment_spawn_record
 
 logger = logging.getLogger(__name__)
 
@@ -61,47 +62,66 @@ def _scan_misconfigurations(
     try:
         from openharness.agents import components as comps
     except Exception as exc:  # pragma: no cover - defensive
-        return [(
-            cid, "registry_unavailable",
-            {"reason": str(exc)},
-        ) for cid in components_active]
+        return [
+            (
+                cid,
+                "registry_unavailable",
+                {"reason": str(exc)},
+            )
+            for cid in components_active
+        ]
 
     try:
         registry = comps.load_registry()
     except comps.ComponentError as exc:
-        return [(
-            cid, "registry_invalid",
-            {"reason": str(exc)},
-        ) for cid in components_active]
+        return [
+            (
+                cid,
+                "registry_invalid",
+                {"reason": str(exc)},
+            )
+            for cid in components_active
+        ]
 
     issues: list[tuple[str, str, dict[str, Any]]] = []
     chosen_ids = set(components_active)
     for cid in components_active:
         spec = registry.get(cid)
         if spec is None:
-            issues.append((cid, "unknown_id",
-                           {"known": sorted(registry)}))
+            issues.append((cid, "unknown_id", {"known": sorted(registry)}))
             continue
-        if spec.applies_to_architectures and architecture and \
-                architecture not in spec.applies_to_architectures:
-            issues.append((
-                cid, "architecture_mismatch",
-                {"agent_architecture": architecture,
-                 "supported": list(spec.applies_to_architectures)},
-            ))
-        if spec.applies_to_agents and agent_name and \
-                agent_name not in spec.applies_to_agents:
-            issues.append((
-                cid, "agent_mismatch",
-                {"agent_name": agent_name,
-                 "supported": list(spec.applies_to_agents)},
-            ))
+        if (
+            spec.applies_to_architectures
+            and architecture
+            and architecture not in spec.applies_to_architectures
+        ):
+            issues.append(
+                (
+                    cid,
+                    "architecture_mismatch",
+                    {
+                        "agent_architecture": architecture,
+                        "supported": list(spec.applies_to_architectures),
+                    },
+                )
+            )
+        if spec.applies_to_agents and agent_name and agent_name not in spec.applies_to_agents:
+            issues.append(
+                (
+                    cid,
+                    "agent_mismatch",
+                    {"agent_name": agent_name, "supported": list(spec.applies_to_agents)},
+                )
+            )
         clashing = chosen_ids & set(spec.conflicts_with)
         if clashing:
-            issues.append((
-                cid, "conflicts_with",
-                {"clashing": sorted(clashing)},
-            ))
+            issues.append(
+                (
+                    cid,
+                    "conflicts_with",
+                    {"clashing": sorted(clashing)},
+                )
+            )
     return issues
 
 
@@ -137,8 +157,12 @@ def _read_json(path: Path) -> Any:
     return json.loads(path.read_text())
 
 
-def _parse_ts(value: str | None) -> datetime | None:
+def _parse_ts(value: object) -> datetime | None:
     if not value:
+        return None
+    if isinstance(value, datetime):
+        return value
+    if not isinstance(value, str):
         return None
     if value.endswith("Z"):
         value = value[:-1] + "+00:00"
@@ -483,7 +507,9 @@ def _ingest_run_inner(
                 trials_skipped += 1
 
         misconfig_count += _record_misconfigurations(
-            conn, trial_ids=leg_trial_ids, findings=leg_findings,
+            conn,
+            trial_ids=leg_trial_ids,
+            findings=leg_findings,
         )
 
     return IngestSummary(
@@ -723,13 +749,16 @@ def _upsert_spawn(
     conn: duckdb.DuckDBPyConnection,
     record: dict[str, Any],
 ) -> None:
+    record = augment_spawn_record(record)
     conn.execute(
         """
         INSERT INTO spawns (
             spawn_id, skill, args, cwd, log_path, started_at,
             finished_at, exit_code, cost_usd_estimate,
-            parent_run_dir, notes
-        ) VALUES (?,?,?,?,?,?,?,?,?,?,?)
+            parent_run_dir, notes, provider, model, input_tokens,
+            cached_input_tokens, output_tokens, reasoning_output_tokens,
+            total_tokens, duration_sec, effective_settings, last_message
+        ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
         ON CONFLICT (spawn_id) DO UPDATE SET
             skill = EXCLUDED.skill,
             args = EXCLUDED.args,
@@ -740,7 +769,17 @@ def _upsert_spawn(
             exit_code = EXCLUDED.exit_code,
             cost_usd_estimate = EXCLUDED.cost_usd_estimate,
             parent_run_dir = EXCLUDED.parent_run_dir,
-            notes = EXCLUDED.notes
+            notes = EXCLUDED.notes,
+            provider = EXCLUDED.provider,
+            model = EXCLUDED.model,
+            input_tokens = EXCLUDED.input_tokens,
+            cached_input_tokens = EXCLUDED.cached_input_tokens,
+            output_tokens = EXCLUDED.output_tokens,
+            reasoning_output_tokens = EXCLUDED.reasoning_output_tokens,
+            total_tokens = EXCLUDED.total_tokens,
+            duration_sec = EXCLUDED.duration_sec,
+            effective_settings = EXCLUDED.effective_settings,
+            last_message = EXCLUDED.last_message
         """,
         [
             record["spawn_id"],
@@ -754,8 +793,37 @@ def _upsert_spawn(
             record.get("cost_usd_estimate"),
             record.get("parent_run_dir"),
             record.get("notes"),
+            record.get("provider"),
+            record.get("model"),
+            record.get("input_tokens"),
+            record.get("cached_input_tokens"),
+            record.get("output_tokens"),
+            record.get("reasoning_output_tokens"),
+            record.get("total_tokens"),
+            record.get("duration_sec"),
+            json.dumps(record.get("effective_settings") or {}),
+            record.get("last_message"),
         ],
     )
+
+
+def _backfill_spawn_usage(conn: duckdb.DuckDBPyConnection) -> int:
+    rows = conn.execute(
+        """
+        SELECT spawn_id, skill, args, cwd, log_path, started_at, finished_at,
+               exit_code, cost_usd_estimate, parent_run_dir, notes, provider,
+               model, input_tokens, cached_input_tokens, output_tokens,
+               reasoning_output_tokens, total_tokens, duration_sec,
+               effective_settings, last_message
+        FROM spawns
+        WHERE log_path IS NOT NULL
+          AND (provider IS NULL OR model IS NULL OR total_tokens IS NULL)
+        """
+    ).fetchall()
+    cols = [d[0] for d in conn.description]
+    for row in rows:
+        _upsert_spawn(conn, dict(zip(cols, row, strict=True)))
+    return len(rows)
 
 
 def ingest_critiques(
@@ -818,6 +886,7 @@ def ingest_critiques(
                     continue
                 _upsert_spawn(conn, record)
                 counts["spawns"] += 1
+            counts["spawns"] += _backfill_spawn_usage(conn)
     return counts
 
 
@@ -921,10 +990,25 @@ def dump_db_to_files(
         return True
 
     for row in trial_rows:
-        (trial_id, trial_dir, schema_version, task_summary, agent_strategy,
-         key_actions, outcome, root_cause, success_factor, anti_patterns,
-         components_active, task_features, surprising_observations,
-         confidence, critic_model, extra, created_at) = row
+        (
+            trial_id,
+            trial_dir,
+            schema_version,
+            task_summary,
+            agent_strategy,
+            key_actions,
+            outcome,
+            root_cause,
+            success_factor,
+            anti_patterns,
+            components_active,
+            task_features,
+            surprising_observations,
+            confidence,
+            critic_model,
+            extra,
+            created_at,
+        ) = row
         body = {
             "kind": "trial_critique",
             "schema_version": int(schema_version or 1),
@@ -952,8 +1036,18 @@ def dump_db_to_files(
         if _maybe_write(path, body):
             counts["trial_critiques"] += 1
     for row in cmp_rows:
-        (inst, task_name, winning_leg, runner_up_leg, delta_score, why,
-         evidence, legs_compared, critic_model, created_at) = row
+        (
+            inst,
+            task_name,
+            winning_leg,
+            runner_up_leg,
+            delta_score,
+            why,
+            evidence,
+            legs_compared,
+            critic_model,
+            created_at,
+        ) = row
         run_dir = run_dir_by_instance.get(inst)
         if run_dir is None:
             continue
@@ -979,8 +1073,18 @@ def dump_db_to_files(
         if _maybe_write(path, body):
             counts["comparisons"] += 1
     for row in tf_rows:
-        (task_checksum, task_name, category, required_tools, env_complexity,
-         output_shape, keywords, extra, extracted_by, extracted_at) = row
+        (
+            task_checksum,
+            task_name,
+            category,
+            required_tools,
+            env_complexity,
+            output_shape,
+            keywords,
+            extra,
+            extracted_by,
+            extracted_at,
+        ) = row
         body = {
             "kind": "task_features",
             "schema_version": 1,
@@ -1004,8 +1108,16 @@ def dump_db_to_files(
         if _maybe_write(path, body):
             counts["task_features"] += 1
     for row in cp_rows:
-        (component_id, task_cluster, n_trials, win_rate, cost_delta_pct,
-         supporting, notes, updated_at) = row
+        (
+            component_id,
+            task_cluster,
+            n_trials,
+            win_rate,
+            cost_delta_pct,
+            supporting,
+            notes,
+            updated_at,
+        ) = row
         body = {
             "kind": "component_perf",
             "schema_version": 1,

@@ -110,6 +110,7 @@
           <th class="text-right">Trials</th>
           <th class="text-right">Pass</th>
           <th class="text-right">Errored</th>
+          <th class="text-right">Tokens</th>
           <th class="text-right">Cost</th>
           <th class="text-right">Median dur</th>
         </tr>
@@ -132,6 +133,7 @@
               </span>
             </td>
             <td class="text-right text-xs">{{ l.n_errored }}</td>
+            <td class="text-right text-xs font-mono">{{ fmt_int(l.tokens_total) }}</td>
             <td class="text-right text-xs font-mono">{{ fmt_money(l.cost_usd) }}</td>
             <td class="text-right text-xs">{{ '{:.1f}s'.format(l.median_dur_sec) if l.median_dur_sec is not none else '—' }}</td>
           </tr>

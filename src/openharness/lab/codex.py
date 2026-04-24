@@ -74,6 +74,7 @@ from openharness.lab.paths import (
     REPO_ROOT,
     ensure_lab_runs_dir,
 )
+from openharness.lab.usage import augment_spawn_record
 
 logger = logging.getLogger(__name__)
 
@@ -177,9 +178,7 @@ class CodexConfig:
                 f"Invalid default_reasoning_summary {self.default_reasoning_summary!r}"
             )
         if self.default_sandbox not in _VALID_SANDBOXES:
-            raise CodexAdapterError(
-                f"Invalid default_sandbox {self.default_sandbox!r}"
-            )
+            raise CodexAdapterError(f"Invalid default_sandbox {self.default_sandbox!r}")
         self._semaphore = threading.BoundedSemaphore(self.max_concurrency)
 
     @property
@@ -305,7 +304,6 @@ SKILL_PROFILES: dict[str, SkillProfile] = {
             "quality is leverage."
         ),
     ),
-
     # --- per-experiment aggregation ---
     "experiment-critic": SkillProfile(
         model="gpt-5.5",
@@ -322,7 +320,6 @@ SKILL_PROFILES: dict[str, SkillProfile] = {
             "comparisons are parallelized via codex multi_agent."
         ),
     ),
-
     # --- cross-experiment analysis (apex spawn; singleton) ---
     "cross-experiment-critic": SkillProfile(
         model="gpt-5.5",
@@ -342,7 +339,6 @@ SKILL_PROFILES: dict[str, SkillProfile] = {
             "Per-component analyses are parallelized via codex multi_agent."
         ),
     ),
-
     # --- phase 1: design the variant ---
     # Sandbox is workspace-write (not read-only) because the output file
     # `runs/lab/state/<slug>/design.md` lives inside the workspace and the
@@ -361,7 +357,6 @@ SKILL_PROFILES: dict[str, SkillProfile] = {
             "high-effort thinking for marginal design polish is waste."
         ),
     ),
-
     # --- phase 2: implement the variant in the worktree ---
     "lab-implement-variant": SkillProfile(
         model="gpt-5.5",
@@ -378,7 +373,6 @@ SKILL_PROFILES: dict[str, SkillProfile] = {
             "actually measures."
         ),
     ),
-
     # --- phase 5: postmortem + roadmap rewrite on the experiment branch ---
     "lab-replan-roadmap": SkillProfile(
         model="gpt-5.5",
@@ -392,7 +386,6 @@ SKILL_PROFILES: dict[str, SkillProfile] = {
             "already contains the next queue state."
         ),
     ),
-
     # --- phase 6: merge the experiment outcome back to main ---
     "lab-finalize-pr": SkillProfile(
         model="gpt-5.5",
@@ -549,10 +542,7 @@ def list_skills(*, checkout_root: Path = REPO_ROOT) -> list[str]:
     skills_dir = _skills_dir(checkout_root)
     if not skills_dir.is_dir():
         return []
-    return sorted(
-        d.name for d in skills_dir.iterdir()
-        if d.is_dir() and (d / "SKILL.md").is_file()
-    )
+    return sorted(d.name for d in skills_dir.iterdir() if d.is_dir() and (d / "SKILL.md").is_file())
 
 
 def _ensure_skill_path(
@@ -582,8 +572,7 @@ def _ensure_skill_path(
 def _check_binary(cfg: CodexConfig) -> None:
     if shutil.which(cfg.binary) is None:
         raise CodexAdapterError(
-            f"`{cfg.binary}` not found on PATH. Install Codex CLI before "
-            "running the orchestrator."
+            f"`{cfg.binary}` not found on PATH. Install Codex CLI before running the orchestrator."
         )
 
 
@@ -659,11 +648,16 @@ def get_profile(skill_id: str, *, override: SkillProfile | None = None) -> Skill
     # Replace only the fields the override actually sets (non-default).
     patch: dict[str, object] = {}
     for f, default in (
-        ("model", None), ("reasoning_effort", None),
-        ("reasoning_summary", None), ("sandbox", None),
-        ("full_auto", None), ("ephemeral", None),
-        ("timeout_sec", None), ("singleton", False),
-        ("output_schema", None), ("notes", ""),
+        ("model", None),
+        ("reasoning_effort", None),
+        ("reasoning_summary", None),
+        ("sandbox", None),
+        ("full_auto", None),
+        ("ephemeral", None),
+        ("timeout_sec", None),
+        ("singleton", False),
+        ("output_schema", None),
+        ("notes", ""),
         ("extra_args", ()),
     ):
         v = getattr(override, f)
@@ -684,15 +678,15 @@ def _resolve_output_schema(skill_id: str, profile: SkillProfile) -> Path | None:
         if not p.is_absolute():
             p = REPO_ROOT / p
         if not p.is_file():
-            raise CodexAdapterError(
-                f"output_schema not found for skill {skill_id!r}: {p}"
-            )
+            raise CodexAdapterError(f"output_schema not found for skill {skill_id!r}: {p}")
         return p
     auto = SKILL_SCHEMAS_DIR / f"{skill_id}.json"
     return auto if auto.is_file() else None
 
 
-def effective_settings(skill_id: str, cfg: CodexConfig, profile: SkillProfile | None = None) -> dict[str, object]:
+def effective_settings(
+    skill_id: str, cfg: CodexConfig, profile: SkillProfile | None = None
+) -> dict[str, object]:
     """Return the resolved knobs for this spawn (for logging / debugging)."""
     profile = profile or get_profile(skill_id)
     schema = _resolve_output_schema(skill_id, profile)
@@ -732,25 +726,27 @@ def _build_argv(
             f"expected one of {sorted(_VALID_REASONING_EFFORTS)}"
         )
     if summary not in _VALID_REASONING_SUMMARIES:
-        raise CodexAdapterError(
-            f"Invalid reasoning_summary {summary!r} for skill {skill_id!r}"
-        )
+        raise CodexAdapterError(f"Invalid reasoning_summary {summary!r} for skill {skill_id!r}")
     if sandbox not in _VALID_SANDBOXES:
-        raise CodexAdapterError(
-            f"Invalid sandbox {sandbox!r} for skill {skill_id!r}"
-        )
+        raise CodexAdapterError(f"Invalid sandbox {sandbox!r} for skill {skill_id!r}")
 
     argv: list[str] = [
-        cfg.binary, "exec",
+        cfg.binary,
+        "exec",
         "--json",
-        "--cd", str(cfg.cwd),
+        "--cd",
+        str(cfg.cwd),
         "--skip-git-repo-check",
-        "-o", str(last_msg_path),
-        "-m", model,
+        "-o",
+        str(last_msg_path),
+        "-m",
+        model,
         # `-c key=value` values are parsed as TOML; quote strings so
         # they round-trip as TOML strings rather than bare identifiers.
-        "-c", f'model_reasoning_effort="{effort}"',
-        "-c", f'model_reasoning_summary="{summary}"',
+        "-c",
+        f'model_reasoning_effort="{effort}"',
+        "-c",
+        f'model_reasoning_summary="{summary}"',
     ]
 
     # Sandbox + approval mode. Three valid combinations for our
@@ -836,7 +832,7 @@ def _render_prompt(
 ) -> str:
     body = skill_path(skill_id, checkout_root=checkout_root).read_text()
     if args:
-        args_block = "\n".join(f"  {i+1}. {a}" for i, a in enumerate(args))
+        args_block = "\n".join(f"  {i + 1}. {a}" for i, a in enumerate(args))
     else:
         args_block = "  (no arguments)"
     template = _PROMPT_TEMPLATE_SCHEMA if schema_path is not None else _PROMPT_TEMPLATE_OK_REFUSE
@@ -870,6 +866,7 @@ def _record_spawn(result: SpawnResult, *, parent_run_dir: Path | None) -> None:
     record = {
         "spawn_id": result.spawn_id,
         "skill": result.skill,
+        "provider": "codex-cli",
         "args": list(result.args),
         "cwd": str(REPO_ROOT),
         "log_path": str(result.log_path),
@@ -884,7 +881,7 @@ def _record_spawn(result: SpawnResult, *, parent_run_dir: Path | None) -> None:
         "last_message": result.last_message,
     }
     try:
-        critic_io.write_spawn_record(record)
+        critic_io.write_spawn_record(augment_spawn_record(record))
     except Exception as exc:  # pragma: no cover - telemetry, shouldn't break runs
         logger.warning("failed to write spawn record %s: %s", result.spawn_id, exc)
 
@@ -928,7 +925,9 @@ def run(
     )
 
     argv = _build_argv(
-        skill_id, cfg, profile,
+        skill_id,
+        cfg,
+        profile,
         last_msg_path=last_msg_path,
         schema_path=schema_path,
     )
@@ -1045,7 +1044,9 @@ def run_many(
     def _worker(skill_id: str, args: Sequence[str]) -> None:
         try:
             r = run(
-                skill_id, args, cfg=cfg,
+                skill_id,
+                args,
+                cfg=cfg,
                 profile_override=profile_override,
                 parent_run_dir=parent_run_dir,
                 expected_orchestrator_pid=expected_orchestrator_pid,

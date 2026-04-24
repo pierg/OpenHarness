@@ -27,6 +27,7 @@ from typing import Any, Sequence
 from openharness.lab import codex as skill_runtime
 from openharness.lab import critic_io, trial_evidence
 from openharness.lab.paths import LAB_LOGS_DIR, REPO_ROOT, ensure_lab_runs_dir
+from openharness.lab.usage import augment_spawn_record
 
 DEFAULT_TRIAL_MODEL = "gemini-3.1-pro-preview"
 FLASH_TRIAL_MODEL = "gemini-3-flash-preview"
@@ -197,8 +198,7 @@ def run_trial_critic(
             payload.setdefault("critic_model", selected_model)
             _validate_trial_payload(payload)
             last_message = (
-                f"OK; outcome={payload.get('outcome')} "
-                f"confidence={payload.get('confidence')}"
+                f"OK; outcome={payload.get('outcome')} confidence={payload.get('confidence')}"
             )
             if persist:
                 output_path = critic_io.write_trial_critique(
@@ -271,8 +271,7 @@ def _check_binary(cfg: GeminiConfig) -> None:
         return
     if shutil.which(cfg.binary) is None:
         raise GeminiAdapterError(
-            f"`{cfg.binary}` not found on PATH. Install Gemini CLI before "
-            "running trial-critic."
+            f"`{cfg.binary}` not found on PATH. Install Gemini CLI before running trial-critic."
         )
 
 
@@ -495,7 +494,7 @@ def _record_spawn(result: GeminiResult) -> None:
         "last_message": result.last_message,
     }
     with contextlib.suppress(Exception):
-        critic_io.write_spawn_record(record)
+        critic_io.write_spawn_record(augment_spawn_record(record))
 
 
 def _tail(text: str, *, n: int = 800) -> str:

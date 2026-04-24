@@ -35,6 +35,11 @@ FALLBACK_PRICES_PER_MILLION: dict[str, tuple[float, float]] = {
     # ($0.10 input / $0.40 output per million tokens) until Google
     # publishes the preview tier.
     "gemini-3.1-flash-lite-preview": (0.10, 0.40),
+    # genai-prices may lag new Codex/OpenAI model IDs. Use the current
+    # gpt-5.4/5.5 rate as an explicit API-equivalent placeholder until the
+    # package grows first-class pricing for these Codex model ids.
+    "gpt-5.4": (5.00, 15.00),
+    "gpt-5.5": (5.00, 15.00),
 }
 
 
@@ -53,17 +58,23 @@ def estimate_cost(
     provider: str | None = None,
     input_tokens: int = 0,
     output_tokens: int = 0,
+    cache_read_tokens: int = 0,
 ) -> float | None:
     """Return estimated cost in USD, or None if pricing data is unavailable."""
-    if not model or (input_tokens == 0 and output_tokens == 0):
+    if not model or (input_tokens == 0 and output_tokens == 0 and cache_read_tokens == 0):
         return None
 
     try:
         from genai_prices import Usage, calc_price
 
         provider_id = PROVIDER_MAP.get(provider or "", None)
+        uncached_input = max(0, input_tokens - cache_read_tokens)
         result = calc_price(
-            Usage(input_tokens=input_tokens, output_tokens=output_tokens),
+            Usage(
+                input_tokens=uncached_input,
+                cache_read_tokens=cache_read_tokens or None,
+                output_tokens=output_tokens,
+            ),
             model_ref=model,
             provider_id=provider_id,
         )
@@ -74,4 +85,8 @@ def estimate_cost(
             "Cost estimation failed for model=%s provider=%s", model, provider, exc_info=True
         )
 
-    return _fallback_estimate(model=model, input_tokens=input_tokens, output_tokens=output_tokens)
+    return _fallback_estimate(
+        model=model,
+        input_tokens=max(0, input_tokens - cache_read_tokens),
+        output_tokens=output_tokens,
+    )
