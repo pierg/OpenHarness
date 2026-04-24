@@ -129,7 +129,7 @@ def run_trial_critic(
         model=selected_model,
         include_dirs=[Path(trial_dir).resolve()],
     )
-    env = os.environ.copy()
+    env = _build_env()
     env["OPENHARNESS_LAB_SKILL"] = "trial-critic"
     env["OPENHARNESS_LAB_SPAWN_ID"] = spawn_id
     env["OPENHARNESS_GEMINI_MODEL"] = selected_model
@@ -296,6 +296,37 @@ def _build_argv(
     for path in include_dirs:
         argv += ["--include-directories", str(path)]
     return argv
+
+
+def _build_env() -> dict[str, str]:
+    env = os.environ.copy()
+    dotenv_path = REPO_ROOT / ".env"
+    if dotenv_path.is_file():
+        for key, value in _read_dotenv(dotenv_path).items():
+            env.setdefault(key, value)
+    if not env.get("GEMINI_API_KEY") and env.get("GOOGLE_API_KEY"):
+        env["GEMINI_API_KEY"] = env["GOOGLE_API_KEY"]
+    return env
+
+
+def _read_dotenv(path: Path) -> dict[str, str]:
+    values: dict[str, str] = {}
+    for raw in path.read_text(encoding="utf-8").splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        key = key.strip()
+        if not key:
+            continue
+        values[key] = _clean_dotenv_value(value.strip())
+    return values
+
+
+def _clean_dotenv_value(value: str) -> str:
+    if len(value) >= 2 and value[0] == value[-1] and value[0] in {"'", '"'}:
+        return value[1:-1]
+    return value
 
 
 def _render_trial_prompt(
