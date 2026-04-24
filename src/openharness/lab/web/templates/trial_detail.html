@@ -19,7 +19,7 @@
 </header>
 
 <!-- Stat strip -->
-<section class="grid grid-cols-2 md:grid-cols-6 gap-3 mb-6 text-sm">
+<section class="grid grid-cols-2 md:grid-cols-7 gap-3 mb-6 text-sm">
   <div class="bg-white border border-slate-200 rounded p-3">
     <div class="text-xs text-slate-500 uppercase">Score</div>
     <div class="font-mono text-lg">{{ '{:.2f}'.format(trial.score) if trial.score is not none else '—' }}</div>
@@ -27,6 +27,13 @@
   <div class="bg-white border border-slate-200 rounded p-3">
     <div class="text-xs text-slate-500 uppercase">Cost</div>
     <div class="font-mono text-lg">{{ fmt_money(trial.cost_usd) }}</div>
+  </div>
+  <div class="bg-white border border-slate-200 rounded p-3">
+    <div class="text-xs text-slate-500 uppercase">Tokens</div>
+    <div class="font-mono text-lg">{{ fmt_int(trial.total_tokens) }}</div>
+    <div class="text-[10px] text-slate-500">
+      in {{ fmt_int(trial.input_tokens) }} · cached {{ fmt_int(trial.cache_tokens) }} · out {{ fmt_int(trial.output_tokens) }}
+    </div>
   </div>
   <div class="bg-white border border-slate-200 rounded p-3">
     <div class="text-xs text-slate-500 uppercase">Duration</div>

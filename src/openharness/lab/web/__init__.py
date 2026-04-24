@@ -8,7 +8,9 @@ Internally a FastAPI app served by uvicorn. Reads the lab DuckDB
 read-only via ``openharness.lab.db.reader`` and reads the markdown
 audit surface (``lab/*.md``), per-experiment artefacts under
 ``runs/experiments/<id>/``, and per-spawn logs under
-``runs/lab/logs/`` directly from disk.
+``runs/lab/logs/`` directly from disk. Token and cost telemetry is
+served from the lab DB: agent-run usage comes from ``trials`` and
+pipeline model-call usage comes from cached ``spawns`` fields.
 
 This package never writes to the lab; mutations stay in
 ``uv run lab ...`` per the file-is-truth / DB-is-cache invariant

@@ -9,72 +9,90 @@ import pytest
 
 
 def _trial_dir(tmp_path: Path) -> Path:
-    trial = tmp_path / "runs" / "experiments" / "inst" / "legs" / "basic" / "harbor" / "h" / "task__1"
+    trial = (
+        tmp_path / "runs" / "experiments" / "inst" / "legs" / "basic" / "harbor" / "h" / "task__1"
+    )
     trial.mkdir(parents=True)
     (trial.parents[2] / "agent.resolved.yaml").write_text(
         "name: basic\narchitecture: simple\nmodel: gemini-x\ntools: [bash]\ncomponents: [loop-guard]\n"
     )
     (trial / "agent").mkdir()
-    (trial / "agent" / "trajectory.json").write_text(json.dumps({
-        "steps": [
-            {"step_id": 1, "source": "user", "message": "Fix the bug."},
+    (trial / "agent" / "trajectory.json").write_text(
+        json.dumps(
             {
-                "step_id": 2,
-                "source": "agent",
-                "message": "(tool call)",
-                "tool_calls": [{
-                    "function_name": "bash",
-                    "arguments": {"command": "pytest -q"},
-                }],
-                "observation": {"results": [{"content": "failed"}]},
-            },
-            {
-                "step_id": 3,
-                "source": "agent",
-                "message": "(tool call)",
-                "tool_calls": [{
-                    "function_name": "bash",
-                    "arguments": {"command": "pytest -q"},
-                }],
-                "observation": {"results": [{"content": "failed again"}]},
-            },
-        ],
-    }))
+                "steps": [
+                    {"step_id": 1, "source": "user", "message": "Fix the bug."},
+                    {
+                        "step_id": 2,
+                        "source": "agent",
+                        "message": "(tool call)",
+                        "tool_calls": [
+                            {
+                                "function_name": "bash",
+                                "arguments": {"command": "pytest -q"},
+                            }
+                        ],
+                        "observation": {"results": [{"content": "failed"}]},
+                    },
+                    {
+                        "step_id": 3,
+                        "source": "agent",
+                        "message": "(tool call)",
+                        "tool_calls": [
+                            {
+                                "function_name": "bash",
+                                "arguments": {"command": "pytest -q"},
+                            }
+                        ],
+                        "observation": {"results": [{"content": "failed again"}]},
+                    },
+                ],
+            }
+        )
+    )
     (trial / "events.jsonl").write_text(
-        json.dumps({
-            "type": "model_request",
-            "model": "gemini-x",
-            "usage": {"input_tokens": 10, "output_tokens": 3},
-        })
+        json.dumps(
+            {
+                "type": "model_request",
+                "model": "gemini-x",
+                "usage": {"input_tokens": 10, "output_tokens": 3},
+            }
+        )
         + "\n"
     )
-    (trial / "result.json").write_text(json.dumps({
-        "id": "trial-1",
-        "task_name": "task",
-        "task_checksum": "abc",
-        "verifier_result": "failed",
-        "agent_result": {
-            "metadata": {
-                "summary": {
-                    "final_text": "I tried",
-                    "input_tokens": 10,
-                    "output_tokens": 3,
-                }
+    (trial / "result.json").write_text(
+        json.dumps(
+            {
+                "id": "trial-1",
+                "task_name": "task",
+                "task_checksum": "abc",
+                "verifier_result": "failed",
+                "agent_result": {
+                    "metadata": {
+                        "summary": {
+                            "final_text": "I tried",
+                            "input_tokens": 10,
+                            "output_tokens": 3,
+                        }
+                    }
+                },
+                "verifier": {
+                    "reward": 0.0,
+                    "metadata": {
+                        "parser_results": {
+                            "tests": [
+                                {
+                                    "name": "test_bug",
+                                    "status": "failed",
+                                    "message": "still broken",
+                                }
+                            ]
+                        }
+                    },
+                },
             }
-        },
-        "verifier": {
-            "reward": 0.0,
-            "metadata": {
-                "parser_results": {
-                    "tests": [{
-                        "name": "test_bug",
-                        "status": "failed",
-                        "message": "still broken",
-                    }]
-                }
-            },
-        },
-    }))
+        )
+    )
     return trial
 
 
@@ -93,7 +111,8 @@ def test_trial_evidence_digest_summarizes_core_artifacts(tmp_path: Path) -> None
 
 
 def test_gemini_trial_critic_parses_and_persists_payload(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     repo = tmp_path / "repo"
     (repo / ".agents" / "skills" / "trial-critic").mkdir(parents=True)
@@ -104,14 +123,19 @@ def test_gemini_trial_critic_parses_and_persists_payload(
     monkeypatch.setenv("OPENHARNESS_REPO_ROOT", str(repo))
 
     import openharness.lab.paths as paths
+
     importlib.reload(paths)
     import openharness.lab.codex as codex
+
     importlib.reload(codex)
     import openharness.lab.critic_io as critic_io
+
     importlib.reload(critic_io)
     import openharness.lab.trial_evidence as trial_evidence
+
     importlib.reload(trial_evidence)
     import openharness.lab.gemini as gemini
+
     importlib.reload(gemini)
 
     trial = _trial_dir(tmp_path)
@@ -162,7 +186,8 @@ def test_gemini_trial_critic_parses_and_persists_payload(
 
 
 def test_gemini_trial_critic_loads_repo_dotenv_for_worktree_cwd(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     repo = tmp_path / "repo"
     worktree = tmp_path / "worktree"
@@ -182,14 +207,19 @@ def test_gemini_trial_critic_loads_repo_dotenv_for_worktree_cwd(
     monkeypatch.delenv("GOOGLE_API_KEY", raising=False)
 
     import openharness.lab.paths as paths
+
     importlib.reload(paths)
     import openharness.lab.codex as codex
+
     importlib.reload(codex)
     import openharness.lab.critic_io as critic_io
+
     importlib.reload(critic_io)
     import openharness.lab.trial_evidence as trial_evidence
+
     importlib.reload(trial_evidence)
     import openharness.lab.gemini as gemini
+
     importlib.reload(gemini)
 
     trial = _trial_dir(tmp_path)
@@ -237,7 +267,8 @@ def test_gemini_trial_critic_loads_repo_dotenv_for_worktree_cwd(
 
 
 def test_gemini_invalid_payload_fails_without_persisting(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     repo = tmp_path / "repo"
     (repo / ".agents" / "skills" / "trial-critic").mkdir(parents=True)
@@ -248,14 +279,19 @@ def test_gemini_invalid_payload_fails_without_persisting(
     monkeypatch.setenv("OPENHARNESS_REPO_ROOT", str(repo))
 
     import openharness.lab.paths as paths
+
     importlib.reload(paths)
     import openharness.lab.codex as codex
+
     importlib.reload(codex)
     import openharness.lab.critic_io as critic_io
+
     importlib.reload(critic_io)
     import openharness.lab.trial_evidence as trial_evidence
+
     importlib.reload(trial_evidence)
     import openharness.lab.gemini as gemini
+
     importlib.reload(gemini)
 
     trial = _trial_dir(tmp_path)

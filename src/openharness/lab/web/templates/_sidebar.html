@@ -8,7 +8,7 @@
    reachable from a single click. They're grouped by topic:
 
      Catalogs    /components, /components-perf, /ideas, /roadmap
-     Operations  /daemon, /pending, /spawns
+     Operations  /daemon, /pending, /spawns, /usage
      Legacy      /experiments  (alias of /runs, kept for bookmarks)
 
    The disclosure stays open whenever the active page lives inside
@@ -19,7 +19,7 @@
    checkbox in base.html toggles the ``peer-checked:`` modifier. #}
 {% set _more_keys = (
   "components", "components-perf", "ideas", "roadmap",
-  "daemon", "pending", "spawns", "experiments",
+  "daemon", "pending", "spawns", "usage", "experiments",
 ) %}
 {% set _more_open = nav_active in _more_keys %}
 <nav class="w-56 border-r border-slate-200 bg-white shrink-0 flex flex-col
@@ -79,6 +79,7 @@
         ("daemon",  "/daemon",  "Daemon detail"),
         ("pending", "/pending", "Pending actions"),
         ("spawns",  "/spawns",  "Spawn logs"),
+        ("usage",   "/usage",   "Token usage"),
       ] %}
       {% for key, href, label in ops %}
         <a href="{{ href }}"

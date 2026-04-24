@@ -8,7 +8,7 @@
 
       cmd        — POST /api/cmd execution (web_commands.jsonl)
       tick       — daemon tick finished
-      spawn      — codex spawn finished
+      spawn      — model skill spawn finished
       verdict    — tree_diffs row appeared
       trunk-swap — trunk_changes row appeared
 #}
@@ -18,7 +18,7 @@
   <span class="text-xs text-slate-500">{{ rows|length }} rows · newest first</span>
   {# Cross-links to the deeper, source-specific surfaces. The log
      consolidates them, but operators sometimes need the un-merged
-     view (e.g. raw codex stdout from /spawns/log/<name>). #}
+     view (e.g. raw model CLI stdout from /spawns/log/<name>). #}
   <nav class="ml-auto text-xs text-slate-500 flex flex-wrap gap-x-4">
     <a href="/spawns" class="hover:underline">spawn detail ›</a>
     <a href="/audit" class="hover:underline">audit detail ›</a>

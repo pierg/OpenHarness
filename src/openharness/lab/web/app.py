@@ -10,7 +10,8 @@ Read-only Phase 1. Routes mirror the IA in the design doc:
     /experiments/{id}    one run (legs, per-task heatmap, journal entry)
     /ideas               themed backlog
     /roadmap             priority queue
-    /spawns              codex spawn audit log
+    /spawns              model skill spawn audit log
+    /usage               token / cost usage summary
     /spawns/{name}       one log file (text/plain)
     /daemon              daemon status + log tail
     /api/pending         JSON for the right-rail HTMX poll
@@ -69,6 +70,7 @@ def create_app() -> FastAPI:
     templates.env.globals["fmt_delta"] = _fmt_delta
     templates.env.globals["fmt_elapsed"] = _fmt_elapsed
     templates.env.globals["fmt_money"] = _fmt_money
+    templates.env.globals["fmt_int"] = _fmt_int
     templates.env.globals["pct_color"] = _pct_color
     templates.env.globals["status_color"] = _status_color
     templates.env.globals["verdict_color"] = _verdict_color
@@ -117,7 +119,8 @@ def create_app() -> FastAPI:
         try:
             recent_exp = reader.experiments(limit=8)
             return _render(
-                request, "home.html",
+                request,
+                "home.html",
                 _reader=reader,
                 nav_active="status",
                 recent_experiments=recent_exp,
@@ -147,8 +150,10 @@ def create_app() -> FastAPI:
             pr_by_slug = {pr.slug: pr for pr in pr_rows}
             pr_by_instance = {pr.instance_id: pr for pr in pr_rows}
             return _render(
-                request, "tree.html",
-                _reader=reader, nav_active="tree",
+                request,
+                "tree.html",
+                _reader=reader,
+                nav_active="tree",
                 snapshot=reader.tree(),
                 trunk_history=reader.trunk_history(limit=20),
                 pending_merge=reader.tree_diffs(applied=False, limit=20),
@@ -171,9 +176,12 @@ def create_app() -> FastAPI:
             for row in perf:
                 perf_by_id.setdefault(row.component_id, []).append(row)
             return _render(
-                request, "components.html",
-                _reader=reader, nav_active="components",
-                catalog=cat, perf_by_id=perf_by_id,
+                request,
+                "components.html",
+                _reader=reader,
+                nav_active="components",
+                catalog=cat,
+                perf_by_id=perf_by_id,
             )
         except Exception:
             _close_reader(request, reader)
@@ -184,8 +192,10 @@ def create_app() -> FastAPI:
         reader = _reader_ctx(request)
         try:
             return _render(
-                request, "experiments_list.html",
-                _reader=reader, nav_active="experiments",
+                request,
+                "experiments_list.html",
+                _reader=reader,
+                nav_active="experiments",
                 experiments=reader.experiments(limit=200),
                 journal=reader.journal(),
             )
@@ -217,8 +227,10 @@ def create_app() -> FastAPI:
                 None,
             )
             return _render(
-                request, "experiment_detail.html",
-                _reader=reader, nav_active="experiments",
+                request,
+                "experiment_detail.html",
+                _reader=reader,
+                nav_active="experiments",
                 instance_id=instance_id,
                 experiment=exp,
                 legs=legs,
@@ -248,8 +260,10 @@ def create_app() -> FastAPI:
             for i in ideas_list:
                 grouped.setdefault(i.section, {}).setdefault(i.theme, []).append(i)
             return _render(
-                request, "ideas.html",
-                _reader=reader, nav_active="ideas",
+                request,
+                "ideas.html",
+                _reader=reader,
+                nav_active="ideas",
                 grouped=grouped,
             )
         except Exception:
@@ -262,9 +276,13 @@ def create_app() -> FastAPI:
         try:
             up_next, suggested, done = reader.roadmap()
             return _render(
-                request, "roadmap.html",
-                _reader=reader, nav_active="roadmap",
-                up_next=up_next, suggested=suggested, done=done,
+                request,
+                "roadmap.html",
+                _reader=reader,
+                nav_active="roadmap",
+                up_next=up_next,
+                suggested=suggested,
+                done=done,
                 # daemon_state powers the per-row "queued / running"
                 # badges and the Approve/Revoke buttons. Cheap to
                 # load; pulled here so the body partial can render
@@ -280,11 +298,33 @@ def create_app() -> FastAPI:
         reader = _reader_ctx(request)
         try:
             return _render(
-                request, "spawns.html",
-                _reader=reader, nav_active="spawns",
+                request,
+                "spawns.html",
+                _reader=reader,
+                nav_active="spawns",
                 spawns=reader.recent_spawns(limit=limit),
                 logs=list(labdata.list_log_files(limit=50)),
                 limit=limit,
+            )
+        except Exception:
+            _close_reader(request, reader)
+            raise
+
+    @app.get("/usage", response_class=HTMLResponse)
+    def usage(request: Request) -> HTMLResponse:
+        reader = _reader_ctx(request)
+        try:
+            rows = reader.usage_summary()
+            pipeline_rows = [r for r in rows if r.source == "pipeline"]
+            trial_rows = [r for r in rows if r.source == "agent trials"]
+            return _render(
+                request,
+                "usage.html",
+                _reader=reader,
+                nav_active="usage",
+                rows=rows,
+                pipeline_rows=pipeline_rows,
+                trial_rows=trial_rows,
             )
         except Exception:
             _close_reader(request, reader)
@@ -299,8 +339,10 @@ def create_app() -> FastAPI:
                 _close_reader(request, reader)
                 raise HTTPException(404, f"unknown trial {trial_id} in {instance_id}")
             return _render(
-                request, "trial_detail.html",
-                _reader=reader, nav_active="experiments",
+                request,
+                "trial_detail.html",
+                _reader=reader,
+                nav_active="experiments",
                 instance_id=instance_id,
                 trial=trial,
             )
@@ -315,8 +357,10 @@ def create_app() -> FastAPI:
         reader = _reader_ctx(request)
         try:
             return _render(
-                request, "tasks_list.html",
-                _reader=reader, nav_active="tasks",
+                request,
+                "tasks_list.html",
+                _reader=reader,
+                nav_active="tasks",
                 tasks=reader.tasks_index(),
             )
         except Exception:
@@ -329,17 +373,22 @@ def create_app() -> FastAPI:
         try:
             features = reader.task_features(checksum)
             board = reader.task_leaderboard(checksum)
-            task_name = features.task_name if features else (board[0].leg_id if board else checksum[:16])
+            task_name = (
+                features.task_name if features else (board[0].leg_id if board else checksum[:16])
+            )
             if board:
                 # Pull the canonical task name from any trial row.
-                trials_with_checksum = [t for t in reader.trials(board[0].instance_id)
-                                        if t.task_checksum == checksum]
+                trials_with_checksum = [
+                    t for t in reader.trials(board[0].instance_id) if t.task_checksum == checksum
+                ]
                 if trials_with_checksum:
                     task_name = trials_with_checksum[0].task_name
             comparisons = reader.comparisons_for_task(task_name) if task_name else []
             return _render(
-                request, "task_detail.html",
-                _reader=reader, nav_active="tasks",
+                request,
+                "task_detail.html",
+                _reader=reader,
+                nav_active="tasks",
                 checksum=checksum,
                 task_name=task_name,
                 features=features,
@@ -357,10 +406,14 @@ def create_app() -> FastAPI:
             rows = reader.components_perf()
             components_set = sorted({r.component_id for r in rows})
             clusters_set = sorted({r.task_cluster for r in rows})
-            cell_lookup: dict[tuple[str, str], Any] = {(r.component_id, r.task_cluster): r for r in rows}
+            cell_lookup: dict[tuple[str, str], Any] = {
+                (r.component_id, r.task_cluster): r for r in rows
+            }
             return _render(
-                request, "components_perf.html",
-                _reader=reader, nav_active="components-perf",
+                request,
+                "components_perf.html",
+                _reader=reader,
+                nav_active="components-perf",
                 rows=rows,
                 components_axis=components_set,
                 clusters_axis=clusters_set,
@@ -379,8 +432,10 @@ def create_app() -> FastAPI:
                 _close_reader(request, reader)
                 raise HTTPException(404, f"unknown component {component_id}")
             return _render(
-                request, "component_detail.html",
-                _reader=reader, nav_active="components",
+                request,
+                "component_detail.html",
+                _reader=reader,
+                nav_active="components",
                 detail=detail,
             )
         except HTTPException:
@@ -406,9 +461,12 @@ def create_app() -> FastAPI:
             if status.log_path:
                 tail = reader.tail_log(Path(status.log_path), n=300)
             return _render(
-                request, "daemon.html",
-                _reader=reader, nav_active="daemon",
-                status=status, tail=tail,
+                request,
+                "daemon.html",
+                _reader=reader,
+                nav_active="daemon",
+                status=status,
+                tail=tail,
                 services=labsvc.all_status(),
                 services_available=labsvc.available(),
                 process_tree=reader.process_tree(),
@@ -426,7 +484,8 @@ def create_app() -> FastAPI:
         reader = _reader_ctx(request)
         try:
             return _render(
-                request, "_drawer.html",
+                request,
+                "_drawer.html",
                 _reader=reader,
                 # Suppress drawer->drawer recursion.
                 pending=reader.pending_actions(),
@@ -444,9 +503,11 @@ def create_app() -> FastAPI:
             if status.log_path:
                 tail = reader.tail_log(Path(status.log_path), n=300)
             return _render(
-                request, "_log_tail.html",
+                request,
+                "_log_tail.html",
                 _reader=reader,
-                status=status, tail=tail,
+                status=status,
+                tail=tail,
             )
         except Exception:
             _close_reader(request, reader)
@@ -519,7 +580,8 @@ def create_app() -> FastAPI:
 
     @app.get("/_hx/daemon-journal", response_class=HTMLResponse)
     def hx_daemon_journal(
-        request: Request, lines: int = 300,
+        request: Request,
+        lines: int = 300,
     ) -> HTMLResponse:
         """Tail of `journalctl --user -u openharness-daemon`.
 
@@ -536,7 +598,8 @@ def create_app() -> FastAPI:
         n = max(50, min(int(lines), 2000))
         text = labsvc.journal("openharness-daemon", lines=n)
         return _render(
-            request, "_daemon_journal.html",
+            request,
+            "_daemon_journal.html",
             _reader=_reader_ctx(request),
             journal_text=text,
             requested_lines=n,
@@ -548,7 +611,8 @@ def create_app() -> FastAPI:
         reader = _reader_ctx(request)
         try:
             return _render(
-                request, "_daemon_status.html",
+                request,
+                "_daemon_status.html",
                 _reader=reader,
                 status=reader.daemon_status(),
             )
@@ -561,7 +625,8 @@ def create_app() -> FastAPI:
         reader = _reader_ctx(request)
         try:
             return _render(
-                request, "_home_daemon.html",
+                request,
+                "_home_daemon.html",
                 _reader=reader,
                 daemon=reader.daemon_status(),
             )
@@ -576,7 +641,8 @@ def create_app() -> FastAPI:
         reader = _reader_ctx(request)
         try:
             return _render(
-                request, "_services_panel.html",
+                request,
+                "_services_panel.html",
                 _reader=reader,
                 services=labsvc.all_status(),
                 services_available=labsvc.available(),
@@ -593,7 +659,8 @@ def create_app() -> FastAPI:
         reader = _reader_ctx(request)
         try:
             return _render(
-                request, "_process_tree.html",
+                request,
+                "_process_tree.html",
                 _reader=reader,
                 process_tree=reader.process_tree(),
             )
@@ -621,7 +688,8 @@ def create_app() -> FastAPI:
         reader = _reader_ctx(request)
         try:
             return _render(
-                request, "_daemon_control_bar.html",
+                request,
+                "_daemon_control_bar.html",
                 _reader=reader,
                 status=reader.daemon_status(),
                 daemon_state=reader.daemon_state(),
@@ -644,7 +712,8 @@ def create_app() -> FastAPI:
         reader = _reader_ctx(request)
         try:
             return _render(
-                request, "_daemon_pipeline.html",
+                request,
+                "_daemon_pipeline.html",
                 _reader=reader,
                 pipeline=reader.pipeline_view(),
                 daemon_state=reader.daemon_state(),
@@ -658,7 +727,8 @@ def create_app() -> FastAPI:
         reader = _reader_ctx(request)
         try:
             return _render(
-                request, "_daemon_mode.html",
+                request,
+                "_daemon_mode.html",
                 _reader=reader,
                 daemon_state=reader.daemon_state(),
             )
@@ -671,7 +741,8 @@ def create_app() -> FastAPI:
         reader = _reader_ctx(request)
         try:
             return _render(
-                request, "_daemon_active_tick.html",
+                request,
+                "_daemon_active_tick.html",
                 _reader=reader,
                 daemon_state=reader.daemon_state(),
             )
@@ -684,7 +755,8 @@ def create_app() -> FastAPI:
         reader = _reader_ctx(request)
         try:
             return _render(
-                request, "_daemon_approvals.html",
+                request,
+                "_daemon_approvals.html",
                 _reader=reader,
                 daemon_state=reader.daemon_state(),
             )
@@ -697,7 +769,8 @@ def create_app() -> FastAPI:
         reader = _reader_ctx(request)
         try:
             return _render(
-                request, "_daemon_failures.html",
+                request,
+                "_daemon_failures.html",
                 _reader=reader,
                 daemon_state=reader.daemon_state(),
             )
@@ -710,7 +783,8 @@ def create_app() -> FastAPI:
         reader = _reader_ctx(request)
         try:
             return _render(
-                request, "_daemon_history.html",
+                request,
+                "_daemon_history.html",
                 _reader=reader,
                 daemon_state=reader.daemon_state(),
             )
@@ -746,6 +820,7 @@ def create_app() -> FastAPI:
         # ``paths`` (with a tmp repo root) see the override. The cost
         # is negligible: a module attribute lookup, not a re-import.
         from openharness.lab import paths as _paths
+
         logs_dir = _paths.LAB_LOGS_DIR
         target = (logs_dir / filename).resolve()
         # Defense in depth: confirm the resolved path is inside the
@@ -790,9 +865,12 @@ def create_app() -> FastAPI:
         try:
             up_next, suggested, done = reader.roadmap()
             return _render(
-                request, "_roadmap_body.html",
+                request,
+                "_roadmap_body.html",
                 _reader=reader,
-                up_next=up_next, suggested=suggested, done=done,
+                up_next=up_next,
+                suggested=suggested,
+                done=done,
                 daemon_state=reader.daemon_state(),
             )
         except Exception:
@@ -808,7 +886,8 @@ def create_app() -> FastAPI:
             for i in ideas_list:
                 grouped.setdefault(i.section, {}).setdefault(i.theme, []).append(i)
             return _render(
-                request, "_ideas_body.html",
+                request,
+                "_ideas_body.html",
                 _reader=reader,
                 grouped=grouped,
             )
@@ -826,9 +905,11 @@ def create_app() -> FastAPI:
             for row in perf:
                 perf_by_id.setdefault(row.component_id, []).append(row)
             return _render(
-                request, "_components_body.html",
+                request,
+                "_components_body.html",
                 _reader=reader,
-                catalog=cat, perf_by_id=perf_by_id,
+                catalog=cat,
+                perf_by_id=perf_by_id,
             )
         except Exception:
             _close_reader(request, reader)
@@ -844,7 +925,8 @@ def create_app() -> FastAPI:
         try:
             diff = reader.preview_diff(slug)
             return _render(
-                request, "_tree_diff.html",
+                request,
+                "_tree_diff.html",
                 _reader=reader,
                 slug=slug,
                 diff=diff,
@@ -858,7 +940,8 @@ def create_app() -> FastAPI:
         reader = _reader_ctx(request)
         try:
             return _render(
-                request, "_pending_body.html",
+                request,
+                "_pending_body.html",
                 _reader=reader,
             )
         except Exception:
@@ -873,10 +956,10 @@ def create_app() -> FastAPI:
             p = r.pending_actions()
             return {
                 "total": p.total,
-                "suggested": [{"slug": s.slug, "hypothesis": s.hypothesis}
-                              for s in p.suggested],
-                "auto_proposed": [{"id": i.idea_id, "motivation": i.motivation}
-                                  for i in p.auto_proposed],
+                "suggested": [{"slug": s.slug, "hypothesis": s.hypothesis} for s in p.suggested],
+                "auto_proposed": [
+                    {"id": i.idea_id, "motivation": i.motivation} for i in p.auto_proposed
+                ],
                 "misconfig_recent": p.misconfig_recent,
                 "failed_spawns_recent": p.failed_spawns_recent,
             }
@@ -908,7 +991,8 @@ def create_app() -> FastAPI:
             # allowed (viewer, unknown email).
             status = 401 if identity.role == "anonymous" and identity.email is None else 403
             return templates.TemplateResponse(
-                request, "_cmd_result.html",
+                request,
+                "_cmd_result.html",
                 {
                     "error": auth_err,
                     "error_kind": "Forbidden" if status == 403 else "Authentication required",
@@ -931,7 +1015,8 @@ def create_app() -> FastAPI:
         )
         if not cmd_id:
             return templates.TemplateResponse(
-                request, "_cmd_result.html",
+                request,
+                "_cmd_result.html",
                 {"error": "missing cmd_id", "result": None},
                 status_code=400,
             )
@@ -939,12 +1024,14 @@ def create_app() -> FastAPI:
             result = labcmd.run_command(cmd_id, raw, actor=actor)
         except labcmd.CommandError as e:
             return templates.TemplateResponse(
-                request, "_cmd_result.html",
+                request,
+                "_cmd_result.html",
                 {"error": str(e), "result": None},
                 status_code=400,
             )
         response = templates.TemplateResponse(
-            request, "_cmd_result.html",
+            request,
+            "_cmd_result.html",
             {"error": None, "result": result},
             status_code=200,
         )
@@ -958,9 +1045,7 @@ def create_app() -> FastAPI:
                 # HX-Trigger fires events on the document immediately
                 # after HTMX swaps the response. Each event maps to a
                 # null payload — listeners only need the event name.
-                response.headers["HX-Trigger"] = json.dumps(
-                    {ev: None for ev in events}
-                )
+                response.headers["HX-Trigger"] = json.dumps({ev: None for ev in events})
         return response
 
     @app.get("/_hx/cmd-clear", response_class=HTMLResponse)
@@ -980,8 +1065,10 @@ def create_app() -> FastAPI:
         reader = _reader_ctx(request)
         try:
             return _render(
-                request, "experiments_list.html",
-                _reader=reader, nav_active="runs",
+                request,
+                "experiments_list.html",
+                _reader=reader,
+                nav_active="runs",
                 experiments=reader.experiments(limit=200),
                 journal=reader.journal(),
                 pr_states=reader.pr_states(),
@@ -1021,8 +1108,10 @@ def create_app() -> FastAPI:
                 None,
             )
             return _render(
-                request, "experiment_detail.html",
-                _reader=reader, nav_active="runs",
+                request,
+                "experiment_detail.html",
+                _reader=reader,
+                nav_active="runs",
                 instance_id=instance_id,
                 experiment=exp,
                 legs=legs,
@@ -1054,8 +1143,10 @@ def create_app() -> FastAPI:
                 _close_reader(request, reader)
                 raise HTTPException(404, f"unknown trial {trial_id} in {instance_id}")
             return _render(
-                request, "trial_detail.html",
-                _reader=reader, nav_active="runs",
+                request,
+                "trial_detail.html",
+                _reader=reader,
+                nav_active="runs",
                 instance_id=instance_id,
                 trial=trial,
             )
@@ -1087,8 +1178,10 @@ def create_app() -> FastAPI:
             if slug:
                 rows = [r for r in rows if r.slug == slug]
             return _render(
-                request, "log.html",
-                _reader=reader, nav_active="log",
+                request,
+                "log.html",
+                _reader=reader,
+                nav_active="log",
                 rows=rows,
                 filter_kind=kind or "",
                 filter_actor=actor or "",
@@ -1106,7 +1199,8 @@ def create_app() -> FastAPI:
         reader = _reader_ctx(request)
         try:
             return _render(
-                request, "_idle_reason.html",
+                request,
+                "_idle_reason.html",
                 _reader=reader,
                 idle_reason=reader.idle_reason(),
             )
@@ -1119,7 +1213,8 @@ def create_app() -> FastAPI:
         reader = _reader_ctx(request)
         try:
             return _render(
-                request, "_you_owe.html",
+                request,
+                "_you_owe.html",
                 _reader=reader,
                 pending=reader.pending_actions(),
             )
@@ -1166,8 +1261,10 @@ def create_app() -> FastAPI:
                 else:
                     fail_count += 1
             return _render(
-                request, "audit.html",
-                _reader=reader, nav_active="audit",
+                request,
+                "audit.html",
+                _reader=reader,
+                nav_active="audit",
                 rows=rows,
                 log_path=str(labcmd.audit_log_path()),
                 total_in_sample=len(sample),
@@ -1247,6 +1344,15 @@ def _fmt_money(v: object) -> str:
         return "—"
 
 
+def _fmt_int(v: object) -> str:
+    if v is None:
+        return "—"
+    try:
+        return f"{int(v):,}"  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return "—"
+
+
 def _pct_color(pct: float | None) -> str:
     if pct is None:
         return "bg-slate-200 text-slate-700"
@@ -1275,8 +1381,11 @@ def _status_color(status: str | None) -> str:
 def _verdict_color(kind: str | None, applied: bool = True) -> str:
     k = (kind or "").lower()
     if k == "graduate":
-        return "border-amber-400 bg-amber-50 text-amber-900" if not applied \
+        return (
+            "border-amber-400 bg-amber-50 text-amber-900"
+            if not applied
             else "border-amber-300 bg-amber-100 text-amber-900"
+        )
     if k == "add_branch":
         return "border-emerald-300 bg-emerald-50 text-emerald-900"
     if k == "reject":

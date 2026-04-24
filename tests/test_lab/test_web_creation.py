@@ -47,11 +47,11 @@ def test_new_commands_in_whitelist() -> None:
 
 def test_new_commands_emit_refresh_events() -> None:
     expected = {
-        "idea-append":          {"lab-ideas-changed", "lab-pending-changed"},
-        "roadmap-add":          {"lab-roadmap-changed", "lab-pending-changed"},
-        "roadmap-suggest":      {"lab-roadmap-changed", "lab-pending-changed"},
+        "idea-append": {"lab-ideas-changed", "lab-pending-changed"},
+        "roadmap-add": {"lab-roadmap-changed", "lab-pending-changed"},
+        "roadmap-suggest": {"lab-roadmap-changed", "lab-pending-changed"},
         "component-set-status": {"lab-components-changed"},
-        "component-upsert":     {"lab-components-changed"},
+        "component-upsert": {"lab-components-changed"},
     }
     for cid, want in expected.items():
         events = set(labcmd.trigger_events(cid))
@@ -67,42 +67,67 @@ def test_new_commands_emit_refresh_events() -> None:
 
 def test_optional_group_dropped_when_param_missing() -> None:
     spec = labcmd.COMMANDS["roadmap-add"]
-    params = labcmd._validate_params(spec, {
-        "slug": "tb2-foo",
-        "hypothesis": "h", "plan": "p",
-        # idea / depends_on / cost intentionally absent
-    })
+    params = labcmd._validate_params(
+        spec,
+        {
+            "slug": "tb2-foo",
+            "hypothesis": "h",
+            "plan": "p",
+            # idea / depends_on / cost intentionally absent
+        },
+    )
     argv = labcmd._build_argv(spec, params)
     assert "--idea" not in argv
     assert "--depends-on" not in argv
     assert "--cost" not in argv
     # Required tokens still present.
-    assert argv == ["roadmap", "add", "tb2-foo",
-                    "--hypothesis", "h", "--plan", "p"]
+    assert argv == ["roadmap", "add", "tb2-foo", "--hypothesis", "h", "--plan", "p"]
 
 
 def test_optional_group_included_when_param_present() -> None:
     spec = labcmd.COMMANDS["roadmap-add"]
-    params = labcmd._validate_params(spec, {
-        "slug": "tb2-foo", "hypothesis": "h", "plan": "p",
-        "idea": "loop-guard", "depends_on": "a, b", "cost": "$5",
-    })
+    params = labcmd._validate_params(
+        spec,
+        {
+            "slug": "tb2-foo",
+            "hypothesis": "h",
+            "plan": "p",
+            "idea": "loop-guard",
+            "depends_on": "a, b",
+            "cost": "$5",
+        },
+    )
     argv = labcmd._build_argv(spec, params)
-    assert argv == ["roadmap", "add", "tb2-foo",
-                    "--hypothesis", "h", "--plan", "p",
-                    "--idea", "loop-guard",
-                    "--depends-on", "a, b",
-                    "--cost", "$5"]
+    assert argv == [
+        "roadmap",
+        "add",
+        "tb2-foo",
+        "--hypothesis",
+        "h",
+        "--plan",
+        "p",
+        "--idea",
+        "loop-guard",
+        "--depends-on",
+        "a, b",
+        "--cost",
+        "$5",
+    ]
 
 
 def test_optional_group_partial_includes_only_resolvable() -> None:
     # Setting only `cost` (not idea/depends_on) must still emit --cost
     # but skip the other two — each group is independent.
     spec = labcmd.COMMANDS["roadmap-add"]
-    params = labcmd._validate_params(spec, {
-        "slug": "tb2-foo", "hypothesis": "h", "plan": "p",
-        "cost": "$5",
-    })
+    params = labcmd._validate_params(
+        spec,
+        {
+            "slug": "tb2-foo",
+            "hypothesis": "h",
+            "plan": "p",
+            "cost": "$5",
+        },
+    )
     argv = labcmd._build_argv(spec, params)
     assert "--cost" in argv and "$5" in argv
     assert "--idea" not in argv
@@ -138,8 +163,7 @@ def test_idea_theme_vocabulary_locked() -> None:
 
 
 def test_component_status_vocabulary_locked() -> None:
-    for ok in ["proposed", "experimental", "branch",
-               "validated", "rejected", "superseded"]:
+    for ok in ["proposed", "experimental", "branch", "validated", "rejected", "superseded"]:
         assert labcmd._COMPONENT_STATUS.fullmatch(ok)
     for bad in ["Proposed", "graduated", "promoted", ""]:
         assert not labcmd._COMPONENT_STATUS.fullmatch(bad)
@@ -222,8 +246,7 @@ def test_audit_page_summary_and_filters() -> None:
     # Summary tally surface.
     assert "commands in recent window" in r.text
     # Filter form.
-    for snippet in ['<select name="cmd"', '<select name="actor"',
-                    '<select name="ok"']:
+    for snippet in ['<select name="cmd"', '<select name="actor"', '<select name="ok"']:
         assert snippet in r.text
     # Filter values are echoed back into selectors.
     r2 = c.get("/audit?ok=no")
@@ -251,26 +274,32 @@ def test_api_cmd_rejects_unknown_cmd_id() -> None:
 
 
 def test_api_cmd_rejects_invalid_slug_for_idea_append() -> None:
-    r = _client().post("/api/cmd", data={
-        "cmd_id": "idea-append",
-        "idea_id": "Has Spaces",
-        "theme": "Tools",
-        "motivation": "m",
-        "sketch": "s",
-    })
+    r = _client().post(
+        "/api/cmd",
+        data={
+            "cmd_id": "idea-append",
+            "idea_id": "Has Spaces",
+            "theme": "Tools",
+            "motivation": "m",
+            "sketch": "s",
+        },
+    )
     assert r.status_code == 400
     assert "does not match required pattern" in r.text
 
 
 def test_api_cmd_rejects_unknown_extras() -> None:
-    r = _client().post("/api/cmd", data={
-        "cmd_id": "idea-append",
-        "idea_id": "ok",
-        "theme": "Tools",
-        "motivation": "m",
-        "sketch": "s",
-        "evil_param": "rm -rf /",
-    })
+    r = _client().post(
+        "/api/cmd",
+        data={
+            "cmd_id": "idea-append",
+            "idea_id": "ok",
+            "theme": "Tools",
+            "motivation": "m",
+            "sketch": "s",
+            "evil_param": "rm -rf /",
+        },
+    )
     assert r.status_code == 400
     assert "unexpected param" in r.text
 
@@ -304,9 +333,17 @@ def test_idle_reason_partial_renders_a_palette() -> None:
     assert r.status_code == 200
     # One of the operational states should be reflected somewhere.
     body = r.text.lower()
-    assert any(token in body for token in (
-        "idle", "running", "paused", "stopped", "blocked", "queue",
-    ))
+    assert any(
+        token in body
+        for token in (
+            "idle",
+            "running",
+            "paused",
+            "stopped",
+            "blocked",
+            "queue",
+        )
+    )
 
 
 def test_you_owe_partial_renders_or_is_empty_state() -> None:
@@ -316,13 +353,20 @@ def test_you_owe_partial_renders_or_is_empty_state() -> None:
     # actionable rows. In both cases the partial must render — not
     # throw an UndefinedError.
     body = r.text
-    assert any(token in body for token in (
-        "Nothing waiting", "up to date", "Discard", "Promote",
-        "Auto-proposed", "Daemon suggestions",
-        # In empty state the partial still has to render *something*
-        # benign — any non-empty body is acceptable as long as no
-        # template error leaked through.
-    ))
+    assert any(
+        token in body
+        for token in (
+            "Nothing waiting",
+            "up to date",
+            "Discard",
+            "Promote",
+            "Auto-proposed",
+            "Daemon suggestions",
+            # In empty state the partial still has to render *something*
+            # benign — any non-empty body is acceptable as long as no
+            # template error leaked through.
+        )
+    )
 
 
 def test_log_page_renders_filter_form_and_kind_pills() -> None:
@@ -387,8 +431,14 @@ def test_sidebar_reflects_new_six_page_ia() -> None:
     r = _client().get("/")
     assert r.status_code == 200
     body = r.text
-    for href in ('href="/"', 'href="/tree"', 'href="/runs"',
-                 'href="/tasks"', 'href="/log"', 'href="/audit"'):
+    for href in (
+        'href="/"',
+        'href="/tree"',
+        'href="/runs"',
+        'href="/tasks"',
+        'href="/log"',
+        'href="/audit"',
+    ):
         assert href in body, f"sidebar link {href} missing"
 
 
@@ -407,9 +457,17 @@ def test_sidebar_more_views_reaches_every_secondary_page() -> None:
         'href="/daemon"',
         'href="/pending"',
         'href="/spawns"',
+        'href="/usage"',
         'href="/experiments"',
     ):
         assert href in body, f"'More views' link {href} missing from sidebar"
+
+
+def test_usage_page_renders() -> None:
+    r = _client().get("/usage")
+    assert r.status_code == 200
+    assert "Token usage" in r.text
+    assert "Pipeline model calls" in r.text
 
 
 def test_more_views_is_open_when_active_page_is_secondary() -> None:
@@ -426,7 +484,7 @@ def test_more_views_is_open_when_active_page_is_secondary() -> None:
     assert idx > 0, "'More views' summary missing"
     # The <details ... open> tag opens before the summary text. Look
     # for it in the 200-char window before the needle.
-    window = body[max(0, idx - 200):idx]
+    window = body[max(0, idx - 200) : idx]
     assert "<details" in window
     assert "open" in window, "details element should be open on secondary page"
 
@@ -439,10 +497,10 @@ def test_every_get_route_returns_200_on_a_fresh_db() -> None:
     # endpoints are skipped — they're exercised by their own targeted
     # tests.
     from openharness.lab.web.app import create_app
+
     app = create_app()
     skip_prefixes = ("/api", "/_hx", "/static")
-    skip_exact = {"/openapi.json", "/docs", "/redoc",
-                  "/docs/oauth2-redirect"}
+    skip_exact = {"/openapi.json", "/docs", "/redoc", "/docs/oauth2-redirect"}
     paths: list[str] = []
     for r in app.routes:
         path = getattr(r, "path", None)
@@ -460,8 +518,7 @@ def test_every_get_route_returns_200_on_a_fresh_db() -> None:
     for path in paths:
         resp = c.get(path)
         assert resp.status_code == 200, (
-            f"{path} returned {resp.status_code}; "
-            f"body[:200]={resp.text[:200]!r}"
+            f"{path} returned {resp.status_code}; body[:200]={resp.text[:200]!r}"
         )
 
 
@@ -474,10 +531,12 @@ def test_open_mode_allows_admin_writes() -> None:
     # In open mode the configured_mode is "open" and the synthesized
     # identity claims admin-equivalent privileges on loopback.
     assert labauth.configured_mode() == "open"
+
     # Build a minimal request mock just enough for identify().
     class _Req:
         headers: dict[str, str] = {}
         client = type("C", (), {"host": "127.0.0.1"})()
+
     ident = labauth.identify(_Req())  # type: ignore[arg-type]
     assert ident.can_write is True
     assert labauth.check_write(ident) is None
