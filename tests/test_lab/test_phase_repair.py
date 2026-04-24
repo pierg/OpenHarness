@@ -314,3 +314,39 @@ def test_process_entry_retries_failed_preflight_after_host_cleanup(
     assert calls == ["alpha"]
     assert result.ok is True
     assert ps.load("alpha").get("preflight").status == "ok"
+
+
+def test_process_entry_pauses_after_requested_phase(
+    isolated_lab: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A pause-after barrier stops the tick only after a clean phase boundary."""
+    import openharness.lab.daemon_state as ds
+    import openharness.lab.phase_state as ps
+    import openharness.lab.runner as runner
+    importlib.reload(runner)
+
+    ds.set_mode("autonomous")
+    ds.set_pause_after("preflight", slug="alpha")
+
+    def _preflight(entry, _state, _cfg):
+        ps.mark_ok(entry.slug, "preflight", payload={
+            "worktree": "/tmp/wt",
+            "branch": "lab/alpha",
+            "base_sha": "abc",
+            "base_branch": "main",
+        })
+        return None
+
+    monkeypatch.setattr(runner, "_PHASE_DISPATCH", (("preflight", _preflight),))
+
+    result = runner._process_entry(
+        runner.RoadmapEntry(
+            slug="alpha", body="", idea_id="some-idea", hypothesis="h",
+        ),
+        runner.OrchestratorConfig(once=True),
+    )
+
+    assert result.outcome == "paused"
+    assert "paused after preflight" in (result.summary or "")
+    assert ds.load().mode == "paused"
+    assert ps.load("alpha").get("preflight").status == "ok"

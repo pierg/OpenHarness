@@ -93,6 +93,9 @@ _UNIT_ID = re.compile(r"^(?:openharness-lab|openharness-daemon)$")
 _PID_RE = re.compile(r"^[0-9]{1,7}$")
 # Daemon operating modes, must match :data:`openharness.lab.daemon_state.DaemonMode`.
 _DAEMON_MODE = re.compile(r"^(?:paused|manual|autonomous)$")
+_PIPELINE_PHASE = re.compile(
+    r"^(?:preflight|design|implement|run|critique|replan|finalize)$"
+)
 
 
 @dataclass(eq=False, slots=True)
@@ -741,6 +744,58 @@ COMMANDS: dict[str, CommandSpec] = {
         ],
         confirm_text=None,
         events=["lab-daemon-state-changed", "lab-roadmap-changed"],
+    ),
+    "daemon-pause-after": CommandSpec(
+        cmd_id="daemon-pause-after",
+        label="Pause after phase",
+        description=(
+            "Arm a one-shot phase barrier. After the selected phase "
+            "finishes cleanly, the daemon switches to paused mode and "
+            "leaves the next phase pending."
+        ),
+        argv_template=[
+            "daemon", "pause-after", "{phase}",
+            ["--slug", "{slug}"],
+            "--actor", "{actor}",
+        ],
+        params=[
+            ParamSpec(
+                name="phase",
+                pattern=_PIPELINE_PHASE,
+                label="Phase",
+                placeholder="preflight | design | implement | run | critique | replan | finalize",
+            ),
+            ParamSpec(
+                name="slug",
+                pattern=_SAFE_TOKEN,
+                label="Slug (optional)",
+                required=False,
+            ),
+            ParamSpec(
+                name="actor",
+                pattern=_SAFE_ACTOR,
+                label="Actor",
+                default="human:webui",
+            ),
+        ],
+        confirm_text=None,
+        events=["lab-daemon-state-changed"],
+    ),
+    "daemon-clear-pause-after": CommandSpec(
+        cmd_id="daemon-clear-pause-after",
+        label="Clear pause barrier",
+        description="Disarm the pending pause-after phase barrier.",
+        argv_template=["daemon", "clear-pause-after", "--actor", "{actor}"],
+        params=[
+            ParamSpec(
+                name="actor",
+                pattern=_SAFE_ACTOR,
+                label="Actor",
+                default="human:webui",
+            ),
+        ],
+        confirm_text=None,
+        events=["lab-daemon-state-changed"],
     ),
     "daemon-cancel": CommandSpec(
         cmd_id="daemon-cancel",

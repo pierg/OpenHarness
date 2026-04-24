@@ -93,6 +93,7 @@ from openharness.lab import codex as codex_adapter
 from openharness.lab import critic_io
 from openharness.lab import daemon_state as ds
 from openharness.lab import db as labdb
+from openharness.lab import gemini as gemini_adapter
 from openharness.lab import gcs_sync
 from openharness.lab import ingest as labingest
 from openharness.lab import journal_synth
@@ -1024,6 +1025,23 @@ def _phase_run(
     )
     resume_id = state.get("run").payload.get("instance_id")
     phase_state.mark_running(entry.slug, "run")
+    if run_payload:
+        phase_state.update_payload(entry.slug, "run", run_payload)
+
+    def _record_launched_run(outcome: phase_run_mod.RunOutcome) -> None:
+        phase_state.update_payload(
+            entry.slug,
+            "run",
+            {
+                **run_payload,
+                "instance_id": outcome.instance_id,
+                "run_dir": str(outcome.run_dir),
+                "spec_name": outcome.spec_name,
+                "log_path": str(outcome.log_path),
+                "trunk_at_runtime": trunk_id,
+            },
+        )
+
     try:
         outcome = phase_run_mod.run_experiment(
             slug=entry.slug,
@@ -1033,6 +1051,7 @@ def _phase_run(
             timeout_sec=cfg.run_timeout_sec,
             poll_interval_sec=cfg.poll_interval_sec,
             resume_instance_id=resume_id,
+            on_launch=_record_launched_run if not resume_id else None,
         )
     except phase_run_mod.PhaseRunError as exc:
         msg = str(exc)
@@ -1119,13 +1138,30 @@ def _phase_critique(
     if needing:
         ds.update_tick(
             phase="critique",
-            note=f"trial-critic × {len(needing)}",
+            note=f"gemini trial-critic × {len(needing)}",
         )
-        codex_adapter.run_many(
-            [("trial-critic", [trial_dir]) for _, trial_dir in needing],
-            cfg=cx, parent_run_dir=run_dir,
-            expected_orchestrator_pid=my_pid,
+        gemini_cfg = gemini_adapter.GeminiConfig(
+            cwd=worktree,
+            max_concurrency=cfg.max_concurrency,
         )
+        try:
+            results = gemini_adapter.run_many_trial_critics(
+                [trial_dir for _, trial_dir in needing],
+                cfg=gemini_cfg,
+                parent_run_dir=run_dir,
+            )
+        except Exception as exc:
+            msg = f"Gemini trial-critic adapter failed: {exc}"
+            phase_state.mark_failed(entry.slug, "critique", error=msg)
+            return TickResult(ok=False, outcome="error", summary=msg)
+        failed = [r for r in results if not r.ok]
+        if failed:
+            msg = (
+                f"{len(failed)} Gemini trial-critic spawn(s) failed; "
+                f"first log={failed[0].log_path}"
+            )
+            phase_state.mark_failed(entry.slug, "critique", error=msg)
+            return TickResult(ok=False, outcome="error", summary=msg)
 
     unseen = checksums_needing_features(summary.instance_id)
     if unseen:
@@ -1141,10 +1177,13 @@ def _phase_critique(
 
     still_needing = trials_needing_critique(summary.instance_id)
     if still_needing:
-        logger.warning(
-            "%d trials still missing critiques; skipping experiment-critic",
-            len(still_needing),
+        msg = (
+            f"{len(still_needing)} trials still missing critiques; "
+            "not running experiment-critic"
         )
+        logger.warning(msg)
+        phase_state.mark_failed(entry.slug, "critique", error=msg)
+        return TickResult(ok=False, outcome="error", summary=msg)
     else:
         ds.update_tick(phase="critique", note="experiment-critic")
         codex_adapter.run(
@@ -1453,6 +1492,27 @@ _PHASE_DISPATCH: tuple[
 )
 
 
+def _pause_after_phase_if_requested(
+    *,
+    entry: RoadmapEntry,
+    phase_name: ds.PipelinePhase,
+) -> TickResult | None:
+    """Honor a one-shot operator barrier after a phase completes.
+
+    This is intentionally checked only after the phase handler returns
+    successfully. Stopping before the boundary risks killing an
+    in-flight harbor run or leaving the next resume ambiguous.
+    """
+    if not ds.consume_pause_after_if_matches(
+        phase=phase_name, slug=entry.slug, actor="daemon"
+    ):
+        return None
+    msg = f"paused after {phase_name} for {entry.slug}"
+    ds.update_tick(phase=phase_name, note=msg)
+    logger.info(msg)
+    return TickResult(ok=True, outcome="paused", summary=msg)
+
+
 def _process_entry(entry: RoadmapEntry, cfg: OrchestratorConfig) -> TickResult:
     """Run one tick of the phased pipeline for ``entry``.
 
@@ -1549,6 +1609,12 @@ def _process_entry(entry: RoadmapEntry, cfg: OrchestratorConfig) -> TickResult:
             return result
         # Re-read so the next iteration sees the just-written payload.
         state = phase_state.load_or_init(entry.slug)
+        pause_result = _pause_after_phase_if_requested(
+            entry=entry,
+            phase_name=phase_name,
+        )
+        if pause_result is not None:
+            return pause_result
 
     # All phases ok / skipped.
     summary = state.get("critique").payload.get("instance_id") or entry.slug

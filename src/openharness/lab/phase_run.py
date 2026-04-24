@@ -43,6 +43,7 @@ import time
 from dataclasses import dataclass
 from datetime import date as date_cls
 from pathlib import Path
+from typing import Callable
 
 from openharness.lab import lab_docs
 from openharness.lab.paths import EXPERIMENTS_RUNS_ROOT, LAB_LOGS_DIR, REPO_ROOT
@@ -354,6 +355,7 @@ def run_experiment(
     timeout_sec: int = DEFAULT_RUN_TIMEOUT_SEC,
     poll_interval_sec: int = DEFAULT_POLL_INTERVAL_SEC,
     resume_instance_id: str | None = None,
+    on_launch: Callable[[RunOutcome], None] | None = None,
 ) -> RunOutcome:
     """Launch the experiment in ``worktree`` and wait for ``summary.md``.
 
@@ -383,6 +385,15 @@ def run_experiment(
             spec_name=spec, profile=profile, instance_id=instance_id,
             worktree=worktree, run_dir=run_dir, log_path=log_path,
         )
+        if on_launch is not None:
+            on_launch(
+                RunOutcome(
+                    instance_id=instance_id,
+                    run_dir=run_dir,
+                    spec_name=spec,
+                    log_path=log_path,
+                )
+            )
 
     if not wait_for_summary(
         run_dir,

@@ -295,6 +295,19 @@ def mark_running(slug: str, phase: PhaseName) -> SlugPhases:
     return state
 
 
+def update_payload(
+    slug: str,
+    phase: PhaseName,
+    payload: dict[str, Any],
+) -> SlugPhases:
+    """Merge durable payload into a phase without changing its status."""
+    state = load_or_init(slug)
+    rec = state.get(phase)
+    rec.payload.update(payload)
+    save(state)
+    return state
+
+
 def mark_ok(
     slug: str,
     phase: PhaseName,

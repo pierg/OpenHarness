@@ -38,7 +38,7 @@ mode, and there is no normal human `graduate confirm` gate.
 | `design` | `lab-design-variant` | `runs/lab/state/<slug>/design.md` |
 | `implement` | `lab-implement-variant` | worktree commits + `implement.json` |
 | `run` | deterministic Python | `runs/experiments/<instance-id>/...` + journal stub |
-| `critique` | deterministic Python + critic skills | branch-local tree verdict + journal narrative |
+| `critique` | deterministic Python + Gemini trial critics + Codex aggregate critics | branch-local tree verdict + journal narrative |
 | `replan` | `lab-replan-roadmap` | branch-local roadmap/ideas updates + `replan.json` |
 | `finalize` | `lab-finalize-pr` | merged PR outcome + `finalize.json` |
 
@@ -61,7 +61,13 @@ uv run lab svc stop daemon
 uv run lab svc restart daemon
 uv run lab daemon start --foreground --once
 uv run lab daemon start --foreground --once --dry-run
+uv run lab daemon pause-after run --slug <slug>
+uv run lab daemon clear-pause-after
 ```
+
+Use `pause-after run` instead of stopping the service mid-run. The
+barrier trips only after the selected phase finishes cleanly, switches
+daemon mode to `paused`, and leaves the next phase pending for resume.
 
 Recovery:
 
@@ -143,7 +149,18 @@ Interpretation:
 
 - `design` / `implement` / `replan` / `finalize` failures are usually skill failures
 - `run` failures are usually execution/infrastructure
-- `critique` failures are usually ingest/data/critic issues
+- `critique` failures are usually ingest/data/Gemini trial-critic issues
+
+## Critic model policy
+
+- `trial-critic` runs through Gemini CLI from
+  `critic/trial-evidence.json`; default model is
+  `gemini-3.1-pro-preview` via `OPENHARNESS_GEMINI_TRIAL_MODEL`.
+- Compare Pro vs Flash without overwriting canonical critiques:
+  `uv run lab trial-critic-shadow <instance_id> --models gemini-3.1-pro-preview,gemini-3-flash-preview`.
+- Judgment-heavy phases stay on Codex `gpt-5.5` with `xhigh`
+  reasoning: experiment critic, cross-experiment critic, replan,
+  finalize, design, and implement.
 
 ## Legacy notes
 

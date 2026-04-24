@@ -19,6 +19,7 @@ which walks the file tree and upserts the cache tables.
 File layout:
 
     <trial_dir>/critic/trial-critic.json
+    <trial_dir>/critic/trial-evidence.json
     <run_dir>/critic/experiment-critic.json
     <run_dir>/critic/comparisons/<task_name>.json
     runs/lab/task_features/<task_checksum>.json
@@ -65,6 +66,33 @@ SPAWNS_DIR: Path = LAB_RUNS_ROOT / "spawns"
 def trial_critique_path(trial_dir: Path) -> Path:
     """`<trial_dir>/critic/trial-critic.json`."""
     return Path(trial_dir) / CRITIC_DIRNAME / "trial-critic.json"
+
+
+def localize_trial_dir(trial_dir: Path) -> Path:
+    """Map stale absolute trial paths onto this checkout's runs root.
+
+    Synced DuckDB files may contain absolute paths from another host
+    (for example `/home/.../OpenHarness/runs/experiments/...`). The
+    portable part starts at `runs/experiments/`; if the original path
+    is absent, rebuild it under this machine's
+    :data:`EXPERIMENTS_RUNS_ROOT`.
+    """
+    trial_dir = Path(trial_dir)
+    if trial_dir.exists():
+        return trial_dir
+    parts = trial_dir.parts
+    for i in range(len(parts) - 1):
+        if parts[i] == "runs" and parts[i + 1] == "experiments":
+            rel = Path(*parts[i + 2 :])
+            candidate = EXPERIMENTS_RUNS_ROOT / rel
+            if candidate.exists():
+                return candidate
+    return trial_dir
+
+
+def trial_evidence_path(trial_dir: Path) -> Path:
+    """`<trial_dir>/critic/trial-evidence.json`."""
+    return Path(trial_dir) / CRITIC_DIRNAME / "trial-evidence.json"
 
 
 def experiment_critic_path(run_dir: Path) -> Path:
@@ -184,6 +212,21 @@ def write_trial_critique(
 
 def read_trial_critique(trial_dir: Path) -> dict[str, Any] | None:
     return _read_json(trial_critique_path(trial_dir))
+
+
+def write_trial_evidence(trial_dir: Path, payload: dict[str, Any]) -> Path:
+    """Persist deterministic per-trial evidence. Returns the file path."""
+    path = trial_evidence_path(trial_dir)
+    body = _wrap(
+        payload,
+        provenance=_provenance(skill="trial-evidence"),
+        kind="trial_evidence",
+    )
+    return _atomic_write_json(path, body)
+
+
+def read_trial_evidence(trial_dir: Path) -> dict[str, Any] | None:
+    return _read_json(trial_evidence_path(trial_dir))
 
 
 # ---------------------------------------------------------------------------
