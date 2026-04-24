@@ -1,10 +1,9 @@
 """Uniform `codex exec` adapter for the lab orchestrator.
 
-Every multi-step "thinking" task in the lab loop (variant
-implementation, the four critic skills, task-features extraction,
-plus the small mechanical lab-* skills) is invoked through this
-adapter so we have one failure mode for agent execution and one
-shape of audit trail.
+Most judgment-heavy "thinking" tasks in the lab loop (variant design
+/ implementation, aggregate critics, replan, finalize, and
+task-features extraction) are invoked through this adapter. The
+high-volume `trial-critic` path uses the Gemini CLI adapter instead.
 
 Three knob layers, in increasing specificity:
 
@@ -16,8 +15,8 @@ Three knob layers, in increasing specificity:
    `max_concurrency` from CLI flags. These cover model, reasoning
    effort, reasoning summary, sandbox, ephemeral, timeout.
 3. **Per-skill profile** (`SKILL_PROFILES[skill_id]`). Tuned per skill
-   based on its job: bulk graders use `gpt-5.4-mini` at low effort,
-   the cross-experiment critic uses `high` effort and runs as a
+   based on its job: critical phases use `gpt-5.5` at `xhigh`,
+   the cross-experiment critic runs as a
    singleton, the variant implementer gets a longer timeout, etc.
    Anything left as `None` falls back to the lab default.
 
@@ -137,7 +136,7 @@ class CodexConfig:
     # `high` effort with `detailed` reasoning summaries (so a human
     # auditing logs can reconstruct the reasoning when something
     # surprising lands).
-    default_model: str = "gpt-5.4"
+    default_model: str = "gpt-5.5"
     default_reasoning_effort: str = "high"
     default_reasoning_summary: str = "detailed"
 
@@ -253,30 +252,25 @@ class SkillProfile:
 # of model thinking is free, an unreliable verdict is expensive
 # (every downstream decision compounds the noise). So:
 #
-#   - The whole tower of analysis sits on top of `trial-critic`'s
-#     verdicts. Use the flagship at `medium` effort — going lower
-#     poisons everything above; going xhigh per trial doesn't give
-#     enough additional signal per token to justify it at scale.
+#   - The normal daemon path does NOT use Codex for `trial-critic`;
+#     it uses Gemini CLI plus deterministic trial-evidence digests.
+#     The profile remains here for explicit/manual Codex backfills.
 #   - `experiment-critic` aggregates dozens of trials into a leg
-#     comparison that drives the next experiment's design. `high`.
+#     comparison that drives the next experiment's design. `xhigh`.
 #   - `cross-experiment-critic` is the apex spawn: it rewrites
 #     `components_perf`, proposes follow-up ideas (writing to
 #     `lab/ideas.md > ## Auto-proposed`), and shapes the entire
 #     roadmap. `xhigh`, `detailed` summary, singleton.
-#   - `lab-design-variant` is read-only and writes ONE design.md.
-#     Cheap thinking budget; medium effort. The downstream
-#     implement phase has the design as its contract, so a sloppy
-#     design is a guaranteed implement-phase failure — but a
-#     "good enough" design at high effort wastes thinking time
-#     when the implement phase will catch holes anyway. Sandbox:
-#     read-only.
+#   - `lab-design-variant` writes the implementation contract.
+#     Design mistakes invalidate the downstream run, so it gets
+#     the flagship at `xhigh`.
 #   - `lab-implement-variant` writes code in a worktree. Code
-#     quality directly shapes the variant being measured; `high`
+#     quality directly shapes the variant being measured; `xhigh`
 #     effort. Sandbox: workspace-write scoped to the worktree.
 #   - `lab-replan-roadmap` is the deep reflection pass that decides
 #     what the queue should look like *after* a finished experiment.
 #     This is judgment-heavy and changes the next several ticks, so
-#     it deserves high effort.
+#     it deserves `xhigh`.
 #   - `lab-finalize-pr` now owns rebase/conflict resolution, PR
 #     creation, and merge-to-main for the experiment outcome. This is
 #     no longer a trivial wrapper, so it gets the flagship rather than
@@ -290,7 +284,7 @@ class SkillProfile:
 SKILL_PROFILES: dict[str, SkillProfile] = {
     # --- bulk grading: 1 invocation per trial / per task_checksum ---
     "trial-critic": SkillProfile(
-        model="gpt-5.4",
+        model="gpt-5.5",
         reasoning_effort="medium",
         reasoning_summary="concise",
         timeout_sec=60 * 60 * 2,  # 2h safety net per trial
@@ -301,7 +295,7 @@ SKILL_PROFILES: dict[str, SkillProfile] = {
         ),
     ),
     "task-features": SkillProfile(
-        model="gpt-5.4",
+        model="gpt-5.5",
         reasoning_effort="medium",
         reasoning_summary="concise",
         timeout_sec=60 * 60 * 2,
@@ -314,8 +308,8 @@ SKILL_PROFILES: dict[str, SkillProfile] = {
 
     # --- per-experiment aggregation ---
     "experiment-critic": SkillProfile(
-        model="gpt-5.4",
-        reasoning_effort="high",
+        model="gpt-5.5",
+        reasoning_effort="xhigh",
         reasoning_summary="detailed",
         timeout_sec=60 * 60 * 6,
         # Per-task comparisons are independent; let the agent fan out
@@ -331,7 +325,7 @@ SKILL_PROFILES: dict[str, SkillProfile] = {
 
     # --- cross-experiment analysis (apex spawn; singleton) ---
     "cross-experiment-critic": SkillProfile(
-        model="gpt-5.4",
+        model="gpt-5.5",
         reasoning_effort="xhigh",
         reasoning_summary="detailed",
         timeout_sec=60 * 60 * 12,
@@ -356,9 +350,9 @@ SKILL_PROFILES: dict[str, SkillProfile] = {
     # prevented by the SKILL.md contract ("No source-file edits") rather
     # than the sandbox — the same pattern used by the implement phase.
     "lab-design-variant": SkillProfile(
-        model="gpt-5.4",
-        reasoning_effort="medium",
-        reasoning_summary="concise",
+        model="gpt-5.5",
+        reasoning_effort="xhigh",
+        reasoning_summary="detailed",
         timeout_sec=60 * 60,  # 1h cap; designs typically settle in <15min
         notes=(
             "Phase 1 of the lab pipeline. Reads the codebase + idea "
@@ -370,8 +364,8 @@ SKILL_PROFILES: dict[str, SkillProfile] = {
 
     # --- phase 2: implement the variant in the worktree ---
     "lab-implement-variant": SkillProfile(
-        model="gpt-5.4",
-        reasoning_effort="high",
+        model="gpt-5.5",
+        reasoning_effort="xhigh",
         reasoning_summary="detailed",
         timeout_sec=60 * 60 * 4,
         notes=(
@@ -387,8 +381,8 @@ SKILL_PROFILES: dict[str, SkillProfile] = {
 
     # --- phase 5: postmortem + roadmap rewrite on the experiment branch ---
     "lab-replan-roadmap": SkillProfile(
-        model="gpt-5.4",
-        reasoning_effort="high",
+        model="gpt-5.5",
+        reasoning_effort="xhigh",
         reasoning_summary="detailed",
         timeout_sec=4 * 60 * 60,
         notes=(
@@ -401,8 +395,8 @@ SKILL_PROFILES: dict[str, SkillProfile] = {
 
     # --- phase 6: merge the experiment outcome back to main ---
     "lab-finalize-pr": SkillProfile(
-        model="gpt-5.4",
-        reasoning_effort="medium",
+        model="gpt-5.5",
+        reasoning_effort="xhigh",
         reasoning_summary="detailed",
         sandbox="danger-full-access",
         timeout_sec=60 * 60 * 2,
@@ -446,12 +440,21 @@ def _singleton_lock_for(skill_id: str) -> threading.Lock:
 # ----- skill discovery ------------------------------------------------------
 
 
-def _skill_exists(skill_id: str | None = None) -> bool:
-    if not SKILLS_DIR.is_dir():
+def _skills_dir(checkout_root: Path = REPO_ROOT) -> Path:
+    return Path(checkout_root) / ".agents" / "skills"
+
+
+def _skill_exists(
+    skill_id: str | None = None,
+    *,
+    checkout_root: Path = REPO_ROOT,
+) -> bool:
+    skills_dir = _skills_dir(checkout_root)
+    if not skills_dir.is_dir():
         return False
     if skill_id is None:
         return True
-    return (SKILLS_DIR / skill_id / "SKILL.md").is_file()
+    return (skills_dir / skill_id / "SKILL.md").is_file()
 
 
 def _skills_binary_candidates() -> list[Path]:
@@ -474,9 +477,9 @@ def _skills_binary_candidates() -> list[Path]:
     return out
 
 
-def _resolve_skills_repo_key(binary: Path) -> str | None:
+def _resolve_skills_repo_key(binary: Path, *, checkout_root: Path = REPO_ROOT) -> str | None:
     proc = subprocess.run(
-        [str(binary), "resolve", "--json", str(REPO_ROOT)],
+        [str(binary), "resolve", "--json", str(checkout_root)],
         text=True,
         capture_output=True,
         check=False,
@@ -484,7 +487,7 @@ def _resolve_skills_repo_key(binary: Path) -> str | None:
     if proc.returncode != 0:
         logger.debug(
             "skills resolve failed for %s: %s",
-            REPO_ROOT,
+            checkout_root,
             (proc.stderr or proc.stdout).strip(),
         )
         return None
@@ -498,16 +501,18 @@ def _resolve_skills_repo_key(binary: Path) -> str | None:
     return repo if isinstance(repo, str) and registered else None
 
 
-def _deploy_private_skills() -> None:
-    """Best-effort deployment of private skills for this checkout/worktree.
+def _deploy_operator_skills(*, checkout_root: Path = REPO_ROOT) -> None:
+    """Best-effort deployment of operator-local skills for this checkout/worktree.
 
-    `.agents/` is intentionally ignored in the public fork. The private
-    `pierg/skills` repo deploys symlinks into each checkout, including new
-    experiment worktrees. If the CLI is absent we let the normal missing-skill
-    error fire below so public users get a direct explanation.
+    `.agents/` is intentionally ignored in the fork. The operator skill
+    registry deploys symlinks into each checkout, including new experiment
+    worktrees. If the CLI is absent we let the normal missing-skill error fire
+    below so users get a direct explanation.
     """
     for binary in _skills_binary_candidates():
-        repo_key = _resolve_skills_repo_key(binary)
+        repo_key = _resolve_skills_repo_key(binary, checkout_root=checkout_root)
+        if repo_key is None and Path(checkout_root).resolve() != REPO_ROOT.resolve():
+            repo_key = _resolve_skills_repo_key(binary, checkout_root=REPO_ROOT)
         if repo_key is None:
             continue
         proc = subprocess.run(
@@ -515,52 +520,59 @@ def _deploy_private_skills() -> None:
             text=True,
             capture_output=True,
             check=False,
-            cwd=str(REPO_ROOT),
+            cwd=str(checkout_root),
         )
         if proc.returncode != 0:
             raise CodexAdapterError(
-                f"`skills deploy {repo_key}` failed for {REPO_ROOT}: "
+                f"`skills deploy {repo_key}` failed for {checkout_root}: "
                 f"{(proc.stderr or proc.stdout).strip()}"
             )
-        logger.info("deployed private skills for %s via %s", repo_key, binary)
+        logger.info("deployed operator-local skills for %s via %s", repo_key, binary)
         return
 
 
-def skill_path(skill_id: str) -> Path:
+def skill_path(skill_id: str, *, checkout_root: Path = REPO_ROOT) -> Path:
     """Return the SKILL.md path for `skill_id`, or raise."""
-    if not SKILLS_DIR.is_dir():
+    skills_dir = _skills_dir(checkout_root)
+    if not skills_dir.is_dir():
         raise CodexAdapterError(
-            f"Shared skills dir not found: {SKILLS_DIR}. Codex / Cursor expect "
+            f"Shared skills dir not found: {skills_dir}. Codex / Cursor expect "
             "skills to live under .agents/skills/<id>/SKILL.md."
         )
-    candidate = SKILLS_DIR / skill_id / "SKILL.md"
+    candidate = skills_dir / skill_id / "SKILL.md"
     if not candidate.is_file():
         raise CodexAdapterError(f"Skill not found: {candidate}")
     return candidate
 
 
-def list_skills() -> list[str]:
-    if not SKILLS_DIR.is_dir():
+def list_skills(*, checkout_root: Path = REPO_ROOT) -> list[str]:
+    skills_dir = _skills_dir(checkout_root)
+    if not skills_dir.is_dir():
         return []
     return sorted(
-        d.name for d in SKILLS_DIR.iterdir()
+        d.name for d in skills_dir.iterdir()
         if d.is_dir() and (d / "SKILL.md").is_file()
     )
 
 
-def _ensure_skill_path(skill_id: str | None = None) -> None:
-    if not _skill_exists(skill_id):
-        _deploy_private_skills()
-    if not SKILLS_DIR.is_dir():
+def _ensure_skill_path(
+    skill_id: str | None = None,
+    *,
+    checkout_root: Path = REPO_ROOT,
+) -> None:
+    if not _skill_exists(skill_id, checkout_root=checkout_root):
+        _deploy_operator_skills(checkout_root=checkout_root)
+    skills_dir = _skills_dir(checkout_root)
+    if not skills_dir.is_dir():
         raise CodexAdapterError(
-            f"Skills directory missing: {SKILLS_DIR}. The lab pipeline "
+            f"Skills directory missing: {skills_dir}. The lab pipeline "
             "expects skills at this path (shared with Cursor). If this is "
-            "a private OpenHarness checkout, run `skills deploy pierg/OpenHarness`."
+            "an operator-managed OpenHarness checkout, run `skills deploy pierg/OpenHarness`."
         )
-    if skill_id is not None and not _skill_exists(skill_id):
+    if skill_id is not None and not _skill_exists(skill_id, checkout_root=checkout_root):
         raise CodexAdapterError(
-            f"Skill not found: {SKILLS_DIR / skill_id / 'SKILL.md'}. If this "
-            "is a private OpenHarness checkout, run `skills deploy pierg/OpenHarness`."
+            f"Skill not found: {skills_dir / skill_id / 'SKILL.md'}. If this "
+            "is an operator-managed OpenHarness checkout, run `skills deploy pierg/OpenHarness`."
         )
 
 
@@ -815,8 +827,14 @@ prose, markdown fences, or commentary outside the JSON.
 """
 
 
-def _render_prompt(skill_id: str, args: Sequence[str], *, schema_path: Path | None) -> str:
-    body = skill_path(skill_id).read_text()
+def _render_prompt(
+    skill_id: str,
+    args: Sequence[str],
+    *,
+    schema_path: Path | None,
+    checkout_root: Path = REPO_ROOT,
+) -> str:
+    body = skill_path(skill_id, checkout_root=checkout_root).read_text()
     if args:
         args_block = "\n".join(f"  {i+1}. {a}" for i, a in enumerate(args))
     else:
@@ -888,11 +906,11 @@ def run(
 ) -> SpawnResult:
     """Run one skill via `codex exec`. Blocks until completion."""
     cfg = cfg or CodexConfig()
-    _ensure_skill_path(skill_id)
+    _ensure_skill_path(skill_id, checkout_root=cfg.cwd)
     _check_binary(cfg)
     _check_auth()
     _check_orchestrator_lock(cfg, expected_owner_pid=expected_orchestrator_pid)
-    skill_path(skill_id)  # raises if missing
+    skill_path(skill_id, checkout_root=cfg.cwd)  # raises if missing
     ensure_lab_runs_dir()
 
     profile = get_profile(skill_id, override=profile_override)
@@ -902,7 +920,12 @@ def run(
     spawn_id = _new_spawn_id()
     log_path = _log_path_for(skill_id, spawn_id)
     last_msg_path = log_path.with_suffix(".last.txt")
-    prompt = _render_prompt(skill_id, args, schema_path=schema_path)
+    prompt = _render_prompt(
+        skill_id,
+        args,
+        schema_path=schema_path,
+        checkout_root=cfg.cwd,
+    )
 
     argv = _build_argv(
         skill_id, cfg, profile,

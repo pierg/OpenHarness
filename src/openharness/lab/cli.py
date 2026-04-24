@@ -243,6 +243,11 @@ def _expect_dict(payload: dict | list, what: str) -> dict:
     return payload
 
 
+def _avg(values) -> float | None:
+    vals = list(values)
+    return sum(vals) / len(vals) if vals else None
+
+
 @app.command("write-trial-critique")
 def write_trial_critique_cmd(
     trial_dir: Path = typer.Argument(
@@ -265,6 +270,184 @@ def write_trial_critique_cmd(
         trial_dir, payload, critic_model=critic_model,
     )
     typer.echo(f"write-trial-critique ok: {path}")
+
+
+@app.command("write-trial-evidence")
+def write_trial_evidence_cmd(
+    trial_dir: Path = typer.Argument(
+        ..., help="Absolute path to the trial directory under runs/experiments/."
+    ),
+) -> None:
+    """Persist deterministic `<trial_dir>/critic/trial-evidence.json`."""
+    from openharness.lab import trial_evidence
+
+    trial_dir = critic_io.localize_trial_dir(trial_dir)
+    if not trial_dir.is_dir():
+        err_console.print(f"[red]trial_dir does not exist: {trial_dir}[/red]")
+        raise typer.Exit(2)
+    path = trial_evidence.write_trial_evidence(trial_dir)
+    typer.echo(f"write-trial-evidence ok: {path}")
+
+
+@app.command("gemini-trial-critic")
+def gemini_trial_critic_cmd(
+    trial_dir: Path = typer.Argument(
+        ..., help="Absolute path to the trial directory under runs/experiments/."
+    ),
+    model: Optional[str] = typer.Option(
+        None,
+        "--model",
+        help="Gemini model. Defaults to OPENHARNESS_GEMINI_TRIAL_MODEL or gemini-3.1-pro-preview.",
+    ),
+    no_persist: bool = typer.Option(
+        False,
+        "--no-persist",
+        help="Run and validate Gemini output without writing trial-critic.json.",
+    ),
+) -> None:
+    """Run Gemini CLI for one trial critique."""
+    from openharness.lab import gemini as gemini_adapter
+
+    trial_dir = critic_io.localize_trial_dir(trial_dir)
+    if not trial_dir.is_dir():
+        err_console.print(f"[red]trial_dir does not exist: {trial_dir}[/red]")
+        raise typer.Exit(2)
+    result = gemini_adapter.run_trial_critic(
+        trial_dir,
+        model=model,
+        persist=not no_persist,
+    )
+    typer.echo(
+        f"gemini-trial-critic exit={result.exit_code} "
+        f"model={result.model} log={result.log_path}"
+    )
+    if result.last_message:
+        typer.echo(result.last_message)
+    if result.exit_code != 0:
+        raise typer.Exit(result.exit_code)
+
+
+@app.command("trial-critic-shadow")
+def trial_critic_shadow_cmd(
+    instance_id: str = typer.Argument(..., help="Experiment instance_id to sample."),
+    models: str = typer.Option(
+        "gemini-3.1-pro-preview,gemini-3-flash-preview",
+        "--models",
+        help="Comma-separated Gemini models to compare.",
+    ),
+    limit_trials: int = typer.Option(
+        20,
+        "--limit-trials",
+        min=1,
+        help="Maximum trials to evaluate.",
+    ),
+    concurrency: int = typer.Option(
+        2,
+        "--concurrency",
+        "-j",
+        min=1,
+        max=8,
+        help="Parallel Gemini CLI processes per model.",
+    ),
+) -> None:
+    """Compare Gemini trial-critic models without touching canonical critiques."""
+    from openharness.lab import gemini as gemini_adapter
+
+    selected = [m.strip() for m in models.split(",") if m.strip()]
+    if not selected:
+        err_console.print("[red]--models must contain at least one model[/red]")
+        raise typer.Exit(2)
+    with labdb.reader() as conn:
+        rows = conn.execute(
+            """
+            SELECT trial_id, trial_dir
+            FROM trials
+            WHERE instance_id = ?
+            ORDER BY trial_id
+            LIMIT ?
+            """,
+            [instance_id, limit_trials],
+        ).fetchall()
+    if not rows:
+        err_console.print(
+            f"[red]No trials found for instance_id={instance_id!r}. "
+            "Run `uv run lab ingest <run_dir>` first.[/red]"
+        )
+        raise typer.Exit(1)
+
+    report: dict[str, object] = {
+        "schema_version": 1,
+        "instance_id": instance_id,
+        "models": selected,
+        "limit_trials": limit_trials,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "results": {},
+        "summary": {},
+    }
+    by_model: dict[str, list[dict[str, object]]] = {}
+    for model in selected:
+        typer.echo(f"\n=== shadow trial-critic model={model} ===")
+        cfg = gemini_adapter.GeminiConfig(max_concurrency=concurrency)
+        results = gemini_adapter.run_many_trial_critics(
+            [Path(r[1]) for r in rows],
+            cfg=cfg,
+            model=model,
+            persist=False,
+        )
+        rows_out: list[dict[str, object]] = []
+        for result in sorted(results, key=lambda r: r.args[0]):
+            payload = result.payload or {}
+            rows_out.append({
+                "trial_dir": result.args[0],
+                "ok": result.ok,
+                "exit_code": result.exit_code,
+                "log_path": str(result.log_path),
+                "outcome": payload.get("outcome"),
+                "confidence": payload.get("confidence"),
+                "root_cause": payload.get("root_cause"),
+                "success_factor": payload.get("success_factor"),
+                "evidence_source": payload.get("evidence_source"),
+            })
+        by_model[model] = rows_out
+        ok_count = sum(1 for row in rows_out if row["ok"])
+        avg_conf = _avg(
+            float(row["confidence"])
+            for row in rows_out
+            if isinstance(row.get("confidence"), (int, float))
+        )
+        report["summary"][model] = {
+            "ok": ok_count,
+            "failed": len(rows_out) - ok_count,
+            "avg_confidence": avg_conf,
+        }
+        typer.echo(f"{model}: {ok_count}/{len(rows_out)} valid; avg_conf={avg_conf}")
+
+    report["results"] = by_model
+    if len(selected) >= 2:
+        first, second = selected[0], selected[1]
+        pairs = zip(by_model[first], by_model[second])
+        comparable = 0
+        outcome_agree = 0
+        for left, right in pairs:
+            if left["ok"] and right["ok"]:
+                comparable += 1
+                if left.get("outcome") == right.get("outcome"):
+                    outcome_agree += 1
+        report["pairwise"] = {
+            "models": [first, second],
+            "comparable": comparable,
+            "outcome_agreement": outcome_agree,
+            "outcome_agreement_rate": (
+                outcome_agree / comparable if comparable else None
+            ),
+        }
+
+    out_dir = LAB_RUNS_ROOT / "trial_critic_shadow"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    path = out_dir / f"{stamp}__{instance_id}.json"
+    path.write_text(json.dumps(report, indent=2, default=str))
+    typer.echo(f"\nshadow report: {path}")
 
 
 @app.command("write-comparison")
@@ -975,13 +1158,18 @@ def analyze(
             "this instance."
         ),
     ),
+    trial_critic_model: Optional[str] = typer.Option(
+        None,
+        "--trial-critic-model",
+        help="Gemini model for trial-critic. Defaults to OPENHARNESS_GEMINI_TRIAL_MODEL.",
+    ),
 ) -> None:
     """Backfill critic data for an existing experiment.
 
     Mirrors the daemon's post-ingest pipeline (steps 4-7), but
     targeted at one instance and triggered manually. Three phases:
 
-      A. parallel: trial-critic over uncritiqued trials  +
+      A. parallel: Gemini trial-critic over uncritiqued trials  +
                    task-features over unseen task_checksums
       B. sequential: experiment-critic <instance_id>
                      (only if every trial now has a critique)
@@ -991,6 +1179,7 @@ def analyze(
     smoke a small batch first, --concurrency N to tune the pool.
     """
     from openharness.lab import codex as codex_adapter
+    from openharness.lab import gemini as gemini_adapter
     from openharness.lab.runner import (
         checksums_needing_features,
         comparison_exists,
@@ -1025,7 +1214,7 @@ def analyze(
     plan.add_column("count", justify="right")
     plan.add_column("notes")
     plan.add_row(
-        "A", "trial-critic", str(len(trial_jobs)),
+        "A", "gemini trial-critic", str(len(trial_jobs)),
         "skipped" if skip_trial_critic else f"limit={limit_trials}" if limit_trials else "all uncritiqued",
     )
     plan.add_row(
@@ -1069,18 +1258,20 @@ def analyze(
 
     started = datetime.now(timezone.utc)
     typer.echo(f"\n=== Phase A: per-trial + per-checksum (concurrency={concurrency}) ===")
-    # Interleave so monitoring sees both row counts climbing in
-    # parallel; the global semaphore decides actual concurrency.
-    trial_invs = [("trial-critic", [trial_dir]) for _, trial_dir in trial_jobs]
     feat_invs = [("task-features", [c]) for c in feature_jobs]
-    invocations: list[tuple[str, list[str]]] = []
-    for i in range(max(len(trial_invs), len(feat_invs))):
-        if i < len(trial_invs):
-            invocations.append(trial_invs[i])
-        if i < len(feat_invs):
-            invocations.append(feat_invs[i])
-    if invocations:
-        results_a = codex_adapter.run_many(invocations, cfg=cx)
+    results_a = []
+    if trial_jobs:
+        gemini_cfg = gemini_adapter.GeminiConfig(max_concurrency=concurrency)
+        results_a.extend(
+            gemini_adapter.run_many_trial_critics(
+                [trial_dir for _, trial_dir in trial_jobs],
+                cfg=gemini_cfg,
+                model=trial_critic_model,
+            )
+        )
+    if feat_invs:
+        results_a.extend(codex_adapter.run_many(feat_invs, cfg=cx))
+    if results_a:
         n_ok = sum(1 for r in results_a if r.ok)
         n_fail = len(results_a) - n_ok
         typer.echo(f"Phase A done: {n_ok} ok, {n_fail} failed.")
@@ -1088,7 +1279,10 @@ def analyze(
             err_console.print("[yellow]failed spawn logs:[/yellow]")
             for r in results_a:
                 if not r.ok:
-                    err_console.print(f"  {r.skill} args={r.args} -> exit={r.exit_code} log={r.log_path}")
+                    err_console.print(
+                        f"  {r.skill} args={r.args} -> "
+                        f"exit={r.exit_code} log={r.log_path}"
+                    )
     else:
         typer.echo("Phase A: nothing to do.")
 
@@ -1856,6 +2050,15 @@ def daemon_attach() -> None:
 
 
 _VALID_MODES = ("paused", "manual", "autonomous")
+_VALID_PIPELINE_PHASES = (
+    "preflight",
+    "design",
+    "implement",
+    "run",
+    "critique",
+    "replan",
+    "finalize",
+)
 
 
 @daemon_app.command("mode")
@@ -1924,6 +2127,55 @@ def daemon_revoke(
         f"revoked {slug!r}; queue: {state.approved_slugs}"
         + (" (daemon notified)" if woke else "")
     )
+
+
+@daemon_app.command("pause-after")
+def daemon_pause_after(
+    phase: str = typer.Argument(
+        ...,
+        help=(
+            "Pipeline phase after which to pause: "
+            "preflight|design|implement|run|critique|replan|finalize."
+        ),
+    ),
+    slug: Optional[str] = typer.Option(
+        None,
+        "--slug",
+        help=(
+            "Optional roadmap slug. If omitted, the next slug to finish "
+            "the phase trips the barrier."
+        ),
+    ),
+    actor: str = typer.Option("human:cli", "--actor"),
+) -> None:
+    """Pause the daemon after a specific phase completes successfully."""
+    from openharness.lab import daemon_state as _ds
+
+    if phase not in _VALID_PIPELINE_PHASES:
+        err_console.print(
+            f"[red]invalid phase '{phase}' "
+            f"(use: {' | '.join(_VALID_PIPELINE_PHASES)})[/red]"
+        )
+        raise typer.Exit(2)
+    state = _ds.set_pause_after(phase, slug=slug, actor=actor)  # type: ignore[arg-type]
+    woke = _ds.notify_daemon()
+    scope = f" for {state.pause_after_slug}" if state.pause_after_slug else ""
+    typer.echo(
+        f"pause-after → {state.pause_after_phase}{scope}"
+        + (" (daemon notified)" if woke else "")
+    )
+
+
+@daemon_app.command("clear-pause-after")
+def daemon_clear_pause_after(
+    actor: str = typer.Option("human:cli", "--actor"),
+) -> None:
+    """Clear any pending pause-after barrier."""
+    from openharness.lab import daemon_state as _ds
+
+    _ds.clear_pause_after(actor=actor)
+    woke = _ds.notify_daemon()
+    typer.echo("pause-after cleared" + (" (daemon notified)" if woke else ""))
 
 
 @daemon_app.command("approvals")
@@ -2064,7 +2316,15 @@ def daemon_state_show(
         return
     typer.echo(f"mode:       {state.mode}")
     typer.echo(f"approvals:  {state.approved_slugs or '(none)'}")
-    typer.echo(f"active:     {state.active_tick.slug + ' / ' + state.active_tick.phase if state.active_tick else '(idle)'}")
+    if state.pause_after_phase:
+        scope = f" for {state.pause_after_slug}" if state.pause_after_slug else ""
+        typer.echo(f"pause after:{state.pause_after_phase}{scope}")
+    else:
+        typer.echo("pause after:(none)")
+    typer.echo(
+        "active:     "
+        f"{state.active_tick.slug + ' / ' + state.active_tick.phase if state.active_tick else '(idle)'}"
+    )
     if state.entry_failures:
         typer.echo("failures:")
         for slug, rec in state.entry_failures.items():

@@ -96,6 +96,9 @@ def test_save_then_load_roundtrips_all_fields(isolated_lab: Path) -> None:
         mode="autonomous",
         approved_slugs=["a", "b"],
         max_failures_before_demote=5,
+        pause_after_phase="run",
+        pause_after_slug="x",
+        pause_after_requested_at=now,
         active_tick=ds.ActiveTick(
             slug="x", phase="running", started_at=now,
             spawn_pid=1234, log_path="/tmp/x.log",
@@ -122,6 +125,9 @@ def test_save_then_load_roundtrips_all_fields(isolated_lab: Path) -> None:
     assert loaded.mode == "autonomous"
     assert loaded.approved_slugs == ["a", "b"]
     assert loaded.max_failures_before_demote == 5
+    assert loaded.pause_after_phase == "run"
+    assert loaded.pause_after_slug == "x"
+    assert loaded.pause_after_requested_at is not None
     assert loaded.active_tick is not None
     assert loaded.active_tick.slug == "x"
     assert loaded.active_tick.spawn_pid == 1234
@@ -193,6 +199,38 @@ def test_failure_counter_increments_then_resets_on_success(isolated_lab: Path) -
     _, rec = ds.end_tick(outcome="ok")
     assert rec is None
     assert "bad" not in ds.load().entry_failures
+
+
+def test_paused_tick_does_not_increment_failure_counter(isolated_lab: Path) -> None:
+    import openharness.lab.daemon_state as ds
+
+    ds.begin_tick(ds.ActiveTick(
+        slug="alpha",
+        phase="run",
+        started_at=datetime.now(timezone.utc),
+    ))
+    _, rec = ds.end_tick(outcome="paused", summary="paused after run")
+
+    state = ds.load()
+    assert rec is None
+    assert state.entry_failures == {}
+    assert state.history[-1].outcome == "paused"
+
+
+def test_consume_pause_after_sets_paused_mode(isolated_lab: Path) -> None:
+    import openharness.lab.daemon_state as ds
+
+    ds.set_mode("autonomous")
+    ds.set_pause_after("run", slug="alpha")
+
+    assert ds.consume_pause_after_if_matches(phase="design", slug="alpha") is False
+    assert ds.consume_pause_after_if_matches(phase="run", slug="beta") is False
+    assert ds.consume_pause_after_if_matches(phase="run", slug="alpha") is True
+
+    state = ds.load()
+    assert state.mode == "paused"
+    assert state.pause_after_phase is None
+    assert state.pause_after_slug is None
 
 
 def test_clear_active_tick_does_not_record_history(isolated_lab: Path) -> None:

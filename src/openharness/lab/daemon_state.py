@@ -109,8 +109,20 @@ Surfaced verbatim by the web UI's `Current tick` panel so the
 operator can tell "still designing the variant" from "polling the
 harbor run" from "rewriting the roadmap after critique"."""
 
+PipelinePhase = Literal[
+    "preflight",
+    "design",
+    "implement",
+    "run",
+    "critique",
+    "replan",
+    "finalize",
+]
+"""Real pipeline phases that can be used as pause-after barriers."""
+
 TickOutcome = Literal[
     "ok",                  # full pipeline succeeded
+    "paused",              # operator-requested pause after a phase completed
     "refuse",              # codex skill returned REFUSE (e.g. missing creds)
     "no-run-dir",          # skill said OK but no new run dir appeared
     "timeout",             # results/summary.md never landed
@@ -178,6 +190,9 @@ class DaemonState:
     active_tick: ActiveTick | None = None
     entry_failures: dict[str, FailureRecord] = field(default_factory=dict)
     max_failures_before_demote: int = DEFAULT_MAX_FAILURES_BEFORE_DEMOTE
+    pause_after_phase: PipelinePhase | None = None
+    pause_after_slug: str | None = None
+    pause_after_requested_at: datetime | None = None
     history: list[TickHistoryEntry] = field(default_factory=list)
     # Bumped every write; useful for optimistic concurrency / debugging.
     schema_version: int = 1
@@ -229,6 +244,9 @@ def _state_to_dict(state: DaemonState) -> dict[str, Any]:
         "mode": state.mode,
         "approved_slugs": list(state.approved_slugs),
         "max_failures_before_demote": state.max_failures_before_demote,
+        "pause_after_phase": state.pause_after_phase,
+        "pause_after_slug": state.pause_after_slug,
+        "pause_after_requested_at": _ts(state.pause_after_requested_at),
         "last_updated_at": _ts(state.last_updated_at),
         "last_updated_by": state.last_updated_by,
     }
@@ -318,6 +336,9 @@ def _state_from_dict(data: dict[str, Any]) -> DaemonState:
         max_failures_before_demote=int(
             data.get("max_failures_before_demote", DEFAULT_MAX_FAILURES_BEFORE_DEMOTE)
         ),
+        pause_after_phase=data.get("pause_after_phase"),
+        pause_after_slug=data.get("pause_after_slug"),
+        pause_after_requested_at=_parse_ts(data.get("pause_after_requested_at")),
         history=history,
         schema_version=int(data.get("schema_version", 1)),
         last_updated_at=_parse_ts(data.get("last_updated_at")),
@@ -425,6 +446,55 @@ def revoke(slug: str, *, actor: str | None = None) -> DaemonState:
         return st
 
 
+def set_pause_after(
+    phase: PipelinePhase,
+    *,
+    slug: str | None = None,
+    actor: str | None = None,
+) -> DaemonState:
+    """Arm a one-shot barrier that pauses the daemon after ``phase``.
+
+    ``slug=None`` means "the next slug that reaches this phase". A
+    concrete slug scopes the barrier so unrelated in-flight work does
+    not trip it.
+    """
+    if phase not in ("preflight", "design", "implement", "run", "critique", "replan", "finalize"):
+        raise ValueError(f"invalid pipeline phase: {phase!r}")
+    with mutate(actor=actor) as st:
+        st.pause_after_phase = phase
+        st.pause_after_slug = slug
+        st.pause_after_requested_at = datetime.now(timezone.utc)
+        return st
+
+
+def clear_pause_after(*, actor: str | None = None) -> DaemonState:
+    """Disarm any pending pause-after barrier."""
+    with mutate(actor=actor) as st:
+        st.pause_after_phase = None
+        st.pause_after_slug = None
+        st.pause_after_requested_at = None
+        return st
+
+
+def consume_pause_after_if_matches(
+    *,
+    phase: PipelinePhase,
+    slug: str,
+    actor: str | None = None,
+) -> bool:
+    """If the barrier matches ``slug``/``phase``, clear it and pause mode."""
+    with mutate(actor=actor) as st:
+        if st.pause_after_phase != phase:
+            return False
+        if st.pause_after_slug is not None and st.pause_after_slug != slug:
+            return False
+        st.pause_after_phase = None
+        st.pause_after_slug = None
+        st.pause_after_requested_at = None
+        st.mode = "paused"
+        return True
+
+
 def consume_approval(slug: str, *, actor: str | None = None) -> bool:
     """Pop a slug from the approval list. Returns whether it was there.
 
@@ -515,6 +585,8 @@ def end_tick(
         rec: FailureRecord | None = None
         if outcome == "ok":
             st.entry_failures.pop(slug, None)
+        elif outcome == "paused":
+            rec = None
         else:
             rec = st.entry_failures.get(slug) or FailureRecord()
             rec.count += 1
