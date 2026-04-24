@@ -446,6 +446,86 @@ def _singleton_lock_for(skill_id: str) -> threading.Lock:
 # ----- skill discovery ------------------------------------------------------
 
 
+def _skill_exists(skill_id: str | None = None) -> bool:
+    if not SKILLS_DIR.is_dir():
+        return False
+    if skill_id is None:
+        return True
+    return (SKILLS_DIR / skill_id / "SKILL.md").is_file()
+
+
+def _skills_binary_candidates() -> list[Path]:
+    """Return likely `skills` CLI locations, including VM-local installs."""
+    raw: list[str | Path | None] = [
+        shutil.which("skills"),
+        Path.home() / "skills" / "bin" / "skills",
+        Path.home() / "Projects" / "skills" / "bin" / "skills",
+    ]
+    out: list[Path] = []
+    seen: set[Path] = set()
+    for item in raw:
+        if item is None:
+            continue
+        path = Path(item).expanduser().resolve()
+        if path in seen or not path.is_file():
+            continue
+        seen.add(path)
+        out.append(path)
+    return out
+
+
+def _resolve_skills_repo_key(binary: Path) -> str | None:
+    proc = subprocess.run(
+        [str(binary), "resolve", "--json", str(REPO_ROOT)],
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    if proc.returncode != 0:
+        logger.debug(
+            "skills resolve failed for %s: %s",
+            REPO_ROOT,
+            (proc.stderr or proc.stdout).strip(),
+        )
+        return None
+    try:
+        payload = json.loads(proc.stdout)
+    except json.JSONDecodeError:
+        logger.debug("skills resolve returned non-json output: %r", proc.stdout[:500])
+        return None
+    repo = payload.get("repo")
+    registered = bool(payload.get("registered"))
+    return repo if isinstance(repo, str) and registered else None
+
+
+def _deploy_private_skills() -> None:
+    """Best-effort deployment of private skills for this checkout/worktree.
+
+    `.agents/` is intentionally ignored in the public fork. The private
+    `pierg/skills` repo deploys symlinks into each checkout, including new
+    experiment worktrees. If the CLI is absent we let the normal missing-skill
+    error fire below so public users get a direct explanation.
+    """
+    for binary in _skills_binary_candidates():
+        repo_key = _resolve_skills_repo_key(binary)
+        if repo_key is None:
+            continue
+        proc = subprocess.run(
+            [str(binary), "deploy", "--json", repo_key],
+            text=True,
+            capture_output=True,
+            check=False,
+            cwd=str(REPO_ROOT),
+        )
+        if proc.returncode != 0:
+            raise CodexAdapterError(
+                f"`skills deploy {repo_key}` failed for {REPO_ROOT}: "
+                f"{(proc.stderr or proc.stdout).strip()}"
+            )
+        logger.info("deployed private skills for %s via %s", repo_key, binary)
+        return
+
+
 def skill_path(skill_id: str) -> Path:
     """Return the SKILL.md path for `skill_id`, or raise."""
     if not SKILLS_DIR.is_dir():
@@ -468,11 +548,19 @@ def list_skills() -> list[str]:
     )
 
 
-def _ensure_skill_path() -> None:
+def _ensure_skill_path(skill_id: str | None = None) -> None:
+    if not _skill_exists(skill_id):
+        _deploy_private_skills()
     if not SKILLS_DIR.is_dir():
         raise CodexAdapterError(
             f"Skills directory missing: {SKILLS_DIR}. The lab pipeline "
-            "expects skills at this path (shared with Cursor)."
+            "expects skills at this path (shared with Cursor). If this is "
+            "a private OpenHarness checkout, run `skills deploy pierg/OpenHarness`."
+        )
+    if skill_id is not None and not _skill_exists(skill_id):
+        raise CodexAdapterError(
+            f"Skill not found: {SKILLS_DIR / skill_id / 'SKILL.md'}. If this "
+            "is a private OpenHarness checkout, run `skills deploy pierg/OpenHarness`."
         )
 
 
@@ -800,7 +888,7 @@ def run(
 ) -> SpawnResult:
     """Run one skill via `codex exec`. Blocks until completion."""
     cfg = cfg or CodexConfig()
-    _ensure_skill_path()
+    _ensure_skill_path(skill_id)
     _check_binary(cfg)
     _check_auth()
     _check_orchestrator_lock(cfg, expected_owner_pid=expected_orchestrator_pid)
