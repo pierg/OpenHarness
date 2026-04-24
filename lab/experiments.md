@@ -6,7 +6,7 @@
 -   **Trunk at run-time:** [`trunk`](../src/openharness/agents/configs/trunk.yaml)
 -   **Hypothesis:** enabling `LoopGuardConfig.enabled` on trunk `basic` recovers a meaningful share of the loop-heavy near-miss failures from `extended-budget-paired-on-trunk` by breaking repeated command / timeout spirals without the cost blow-up of longer budgets.
 -   **Run:** [`runs/experiments/loop-guard-on-basic-near-miss-20260424-021810`](../runs/experiments/loop-guard-on-basic-near-miss-20260424-021810)
--   **Branch:** `lab/loop-guard-on-basic-near-miss`
+-   **Branch:** [`lab/loop-guard-on-basic-near-miss`](https://github.com/pierg/OpenHarness/pull/32) — metadata-only merge (reject: loop-guard on basic scored 1/46 vs trunk 2/46 on the near-miss slice and did not recover loop-heavy failures.; discarded=`9b96272`)
 
 ### Aggregate
 | Leg | Agent | Trials | Passed | Failed | Pass rate | Cost (USD) |
