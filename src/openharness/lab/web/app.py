@@ -118,6 +118,7 @@ def create_app() -> FastAPI:
         reader = _reader_ctx(request)
         try:
             recent_exp = reader.experiments(limit=8)
+            up_next, suggested, done = reader.roadmap()
             return _render(
                 request,
                 "home.html",
@@ -130,6 +131,9 @@ def create_app() -> FastAPI:
                 daemon_state=reader.daemon_state(),
                 pipeline=reader.pipeline_view(),
                 idle_reason=reader.idle_reason(),
+                up_next=up_next,
+                suggested=suggested,
+                done=done,
             )
         except Exception:
             _close_reader(request, reader)
@@ -1217,6 +1221,24 @@ def create_app() -> FastAPI:
                 "_you_owe.html",
                 _reader=reader,
                 pending=reader.pending_actions(),
+            )
+        except Exception:
+            _close_reader(request, reader)
+            raise
+
+    @app.get("/_hx/status-roadmap-queue", response_class=HTMLResponse)
+    def hx_status_roadmap_queue(request: Request) -> HTMLResponse:
+        reader = _reader_ctx(request)
+        try:
+            up_next, suggested, done = reader.roadmap()
+            return _render(
+                request,
+                "_status_roadmap_queue.html",
+                _reader=reader,
+                up_next=up_next,
+                suggested=suggested,
+                done=done,
+                daemon_state=reader.daemon_state(),
             )
         except Exception:
             _close_reader(request, reader)

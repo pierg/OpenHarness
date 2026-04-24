@@ -9,10 +9,11 @@
                       manual-no-approvals, etc. Replaces
                       the old log-tail bottom panel with one
                       actionable sentence.
-   3. You owe       — actionable cards (roadmap curation,
+   3. Roadmap       — the ordered daemon queue plus active tick.
+   4. You owe       — actionable cards (roadmap curation,
                       auto-proposed ideas,
                       misconfigurations). Replaces the right rail.
-   4. Recent        — last 5 experiments + 5 ticks for context.
+   5. Recent        — last 5 experiments + 5 ticks for context.
 #}
 <div id="cmd-result" class="mb-4"></div>
 
@@ -49,6 +50,22 @@
     </div>
   </section>
 </div>
+
+<!-- Roadmap queue -->
+<section id="roadmap-queue" class="bg-white border border-slate-200 rounded-lg p-5 mb-6">
+  <div class="flex items-baseline justify-between mb-3">
+    <h2 class="font-semibold">Roadmap</h2>
+    <nav class="text-xs text-slate-400 flex items-baseline gap-x-4">
+      <a href="/roadmap" class="hover:underline text-slate-500">roadmap detail ›</a>
+      <span>Auto-refresh every 15 s</span>
+    </nav>
+  </div>
+  <div hx-get="/_hx/status-roadmap-queue"
+       hx-trigger="load, every 15s, lab-roadmap-changed from:body, lab-daemon-state-changed from:body"
+       hx-swap="innerHTML">
+    {% include "_status_roadmap_queue.html" %}
+  </div>
+</section>
 
 <!-- You owe -->
 <section id="you-owe" class="bg-white border border-slate-200 rounded-lg p-5 mb-6">

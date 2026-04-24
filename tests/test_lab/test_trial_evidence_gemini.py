@@ -196,15 +196,18 @@ def test_gemini_trial_critic_loads_repo_dotenv_for_worktree_cwd(
         "---\nname: trial-critic\n---\n"
     )
     (repo / "runs" / "lab").mkdir(parents=True)
-    (repo / ".env").write_text("GOOGLE_API_KEY=from-google\n", encoding="utf-8")
+    (repo / ".env").write_text(
+        "GOOGLE_API_KEY=from-google\nGEMINI_API_KEY=from-gemini\n",
+        encoding="utf-8",
+    )
     worktree.mkdir()
     (worktree / ".agents" / "skills" / "trial-critic").mkdir(parents=True)
     (worktree / ".agents" / "skills" / "trial-critic" / "SKILL.md").write_text(
         "---\nname: trial-critic\n---\n"
     )
     monkeypatch.setenv("OPENHARNESS_REPO_ROOT", str(repo))
-    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
-    monkeypatch.delenv("GOOGLE_API_KEY", raising=False)
+    monkeypatch.setenv("GEMINI_API_KEY", "from-shell-gemini")
+    monkeypatch.setenv("GOOGLE_API_KEY", "from-shell-google")
 
     import openharness.lab.paths as paths
 
@@ -263,7 +266,7 @@ def test_gemini_trial_critic_loads_repo_dotenv_for_worktree_cwd(
 
     assert result.ok is True
     assert captured_env["GOOGLE_API_KEY"] == "from-google"
-    assert captured_env["GEMINI_API_KEY"] == "from-google"
+    assert "GEMINI_API_KEY" not in captured_env
 
 
 def test_gemini_invalid_payload_fails_without_persisting(
