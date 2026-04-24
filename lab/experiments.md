@@ -9,21 +9,27 @@
 -   **Branch:** `lab/timeout-aware-retry-on-needs-network`
 
 ### Aggregate
-
-_(pending)_
-
+| Leg | Agent | Trials | Passed | Failed | Pass rate | Cost (USD) |
+|-----|-------|-------:|-------:|-------:|----------:|-----------:|
+| `basic` | `basic` | 4 | 2 | 2 | 50.0% | $0.46 |
+| `basic_timeout_aware_retry` | `basic_timeout_aware_retry` | 4 | 2 | 2 | 50.0% | $0.09 |
 ### Mutation impact
-
-_(pending)_
-
+-   **Best leg:** `basic` (50.0%, $0.46)
+-   **Worst leg:** `basic_timeout_aware_retry` (50.0%, $0.09)
+-   **Spread:** +0.0 pp
+-   _(experiment-critic JSON missing a `mutation_impact` field; this is a DB-only fallback.)_
 ### Failure modes
 
 _(pending)_
 
 ### Tree effect
-
-_(pending)_
-
+-   **Verdict:** **No-op** — recorded for trend analysis
+-   **Target:** `basic_timeout_aware_retry`
+-   **Pair:** trunk leg `basic` vs mutation `basic_timeout_aware_retry`
+-   **Δ pass-rate:** +0.00 pp
+-   **Δ $/pass:** -79.4%
+-   **Confidence:** 0.00
+-   **Rationale:** insufficient_data: smallest leg has n=4 trials (< floor of 5); under-sampled legs: {'basic': 4, 'basic_timeout_aware_retry': 4}. Re-run on a wider slice (the design's `## Slice > Full` section) before drawing a verdict.
 ### Linked follow-ups
 
 _(pending)_
