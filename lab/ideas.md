@@ -50,6 +50,18 @@
 -   **Sketch:** Add build-task fallbacks that inspect repo build docs first, switch to repo-local or package-manager alternatives when clang/gcc/opam/pip paths fail, and treat long bootstrap steps as background-poll work instead of repeated probing. Run a paired ablation on a c_build plus network_dependency slice, optionally alongside the existing timeout-aware-retry branch.
 -   **Auto-proposed by:** cross-experiment-critic@2026-04-24
 
+#### planner-empty-glob-breaker
+
+-   **Motivation:** Across the 22 `planner-schema-guard` trials, the mutation cut spend but produced zero decisive wins because planner-side empty `glob` loops and ungrounded filesystem guesses still dominated the failed tasks.
+-   **Sketch:** Add a planner-side breaker that stops repeated `glob`/`grep` probes after repeated no-match results, forces README/verifier/task-local inspection, and retries plan generation with grounded paths. Measure `planner_executor_schema_guard` vs the breaker-enhanced variant on the existing `python_data + system_administration + security_certificates` slice.
+-   **Auto-proposed by:** cross-experiment-critic@2026-04-24
+
+#### portable-artifact-clean-env-gate
+
+-   **Motivation:** Across the current planner run and the earlier long-budget / loop-guard evidence, cost-saving components still leave the agent failing on hallucinated success, environment mutation, and sample-only validation instead of producing portable artifacts that survive the real verifier.
+-   **Sketch:** Add a runtime completion gate that reruns a narrow clean-environment smoke check or verifier-aligned command against the produced artifacts before the final answer, and blocks success when the fix depends on undeclared packages or misses global constraints. Test it first on `openssl-selfsigned-cert`, `reshard-c4-data`, `raman-fitting`, and another clean-env-sensitive control task.
+-   **Auto-proposed by:** cross-experiment-critic@2026-04-24
+
 ## Proposed
 
 ### Architecture
