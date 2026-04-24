@@ -1,21 +1,20 @@
-"""Apply-side of the tree: TreeDiff → markdown + DB cache + (maybe) trunk swap.
+"""Apply-side of the tree: TreeDiff → branch files + DB cache lifecycle.
 
 `tree_ops.evaluate(instance_id)` produces a `TreeDiff`. This module
 turns that diff into actual edits:
 
-- AddBranch / Reject / NoOp: auto-applied. We update
-  `lab/configs.md` (Branches / Rejected sections), bump the status
-  of any uniquely-introduced atoms in `lab/components.md`, write
-  the `### Tree effect` block into the `lab/experiments.md` journal
-  entry, and mirror the diff into the `tree_diffs` cache table.
-- Graduate: STAGED, not applied. We write the `### Tree effect`
-  block as a "PROPOSED" badge, mark `tree_diffs.applied = false`,
-  and require `uv run lab graduate confirm <slug>` (a human gesture)
-  before swapping `trunk.yaml` and writing a `trunk_changes` row.
+- During critique, the diff is materialized on the experiment branch:
+  `lab/configs.md`, `lab/components.md`, `lab/experiments.md`, and
+  for `graduate`, `src/openharness/agents/configs/trunk.yaml`.
+- The DB cache row in `tree_diffs` is written with `applied=false`
+  until finalize merges the experiment outcome back to `main`.
+- Finalize then calls :func:`mark_diff_merged` to flip the DB row to
+  `applied=true` and, for `graduate`, append the `trunk_changes`
+  audit row.
 
-Idempotent at the markdown layer (re-applying a diff with the same
-slug rewrites the section in place), and at the DB layer
-(`upsert_tree_diff`).
+Idempotent at the branch-file layer (re-applying a diff with the same
+slug rewrites the same sections) and at the DB layer (`upsert_tree_diff`
++ `mark_diff_merged`).
 """
 
 from __future__ import annotations
@@ -37,8 +36,13 @@ from openharness.lab.tree_ops import (
     upsert_tree_diff,
 )
 
-_AGENT_CONFIGS_DIR = REPO_ROOT / "src" / "openharness" / "agents" / "configs"
-_TRUNK_YAML = _AGENT_CONFIGS_DIR / "trunk.yaml"
+def _agent_configs_dir(*, repo_root: Path | None = None) -> Path:
+    root = repo_root or REPO_ROOT
+    return root / "src" / "openharness" / "agents" / "configs"
+
+
+def _trunk_yaml(*, repo_root: Path | None = None) -> Path:
+    return _agent_configs_dir(repo_root=repo_root) / "trunk.yaml"
 
 
 @dataclass(slots=True)
@@ -58,18 +62,47 @@ def apply_diff(
     applied_by: str = "auto:daemon",
     today: date | None = None,
     lab_root: Path | None = None,
+    repo_root: Path | None = None,
+    mark_applied: bool = False,
 ) -> ApplyResult:
-    """Apply a TreeDiff to the on-disk lab + DB cache.
-
-    `graduate` diffs are *staged*, not applied: the caller (or the
-    human via `lab graduate confirm <slug>`) is responsible for the
-    trunk swap. Everything else is auto-applied.
-    """
+    """Apply a TreeDiff to the current checkout and upsert the DB row."""
     today = today or date.today()
     notes: list[str] = []
-    is_graduate = diff.kind == "graduate"
-    auto_apply = not is_graduate
+    branch_applied = True
     lr = {"lab_root": lab_root} if lab_root is not None else {}
+
+    prev_trunk_id: str | None = None
+    if diff.kind == "graduate":
+        snap = lab_docs.tree_snapshot(**lr)
+        prev_trunk_id = snap.trunk_id
+        target_yaml = _agent_configs_dir(repo_root=repo_root) / f"{diff.target_id}.yaml"
+        trunk_yaml = _trunk_yaml(repo_root=repo_root)
+        if not target_yaml.is_file():
+            raise FileNotFoundError(
+                f"Cannot apply graduate `{diff.target_id}`: {target_yaml} not found."
+            )
+        shutil.copyfile(target_yaml, trunk_yaml)
+        notes.append(f"trunk.yaml ← copy of {target_yaml.name}")
+        journal_link = f"[`{slug}`](experiments.md#{slug})"
+        lab_docs.set_trunk(
+            trunk_id=diff.target_id,
+            reason=diff.rationale[:200],
+            journal_link=journal_link,
+            **lr,
+        )
+        notes.append(f"configs.md > ## Trunk now points at `{diff.target_id}`")
+        if prev_trunk_id and prev_trunk_id != diff.target_id:
+            try:
+                lab_docs.add_branch(
+                    branch_id=prev_trunk_id,
+                    mutation="(former trunk; preserved for history)",
+                    use_when="legacy trunk anchor",
+                    last_verified=today.isoformat(),
+                    **lr,
+                )
+                notes.append(f"former trunk `{prev_trunk_id}` archived as a branch")
+            except lab_docs.LabDocError as exc:
+                notes.append(f"could not archive former trunk: {exc}")
 
     if diff.kind == "add_branch":
         body_use_when = _format_use_when(diff.use_when)
@@ -97,12 +130,9 @@ def apply_diff(
     elif diff.kind == "no_op":
         notes.append("no_op: no tree mutation; recorded in journal only")
     elif diff.kind == "graduate":
-        notes.append(
-            f"STAGED graduate of `{diff.target_id}` "
-            f"(run `uv run lab graduate confirm {slug}` to apply)"
-        )
+        notes.append(f"applied graduate of `{diff.target_id}` on the experiment branch")
 
-    block = render_tree_effect_block(diff, slug=slug, applied=auto_apply)
+    block = render_tree_effect_block(diff, slug=slug, applied=branch_applied)
     try:
         lab_docs.set_section(slug=slug, section="Tree effect", body=block, **lr)
         journal_written = True
@@ -113,15 +143,15 @@ def apply_diff(
     bump_notes = _bump_components_for_diff(diff, lab_root=lab_root)
     notes.extend(bump_notes)
 
-    applied_at = datetime.now(timezone.utc) if auto_apply else None
+    applied_at = datetime.now(timezone.utc) if mark_applied else None
     try:
         with labdb.writer() as conn:
             upsert_tree_diff(
                 conn,
                 slug=slug,
                 diff=diff,
-                applied=auto_apply,
-                applied_by=applied_by if auto_apply else "proposed",
+                applied=mark_applied,
+                applied_by=applied_by if mark_applied else "pending_finalize",
                 applied_at=applied_at,
             )
     except Exception as exc:
@@ -130,11 +160,51 @@ def apply_diff(
     return ApplyResult(
         slug=slug,
         diff=diff,
-        applied=auto_apply,
-        applied_by=applied_by if auto_apply else "proposed",
+        applied=branch_applied,
+        applied_by=applied_by,
         journal_block_written=journal_written,
         notes=notes,
     )
+
+
+def mark_diff_merged(
+    *,
+    slug: str,
+    instance_id: str,
+    kind: str,
+    target_id: str,
+    applied_by: str,
+    rationale: str | None = None,
+    from_id: str | None = None,
+    pr_url: str | None = None,
+    branch_sha: str | None = None,
+    applied_at: datetime | None = None,
+) -> None:
+    """Flip a branch-applied diff to ``applied=true`` after PR merge."""
+    applied_at = applied_at or datetime.now(timezone.utc)
+    with labdb.writer() as conn:
+        conn.execute(
+            """
+            UPDATE tree_diffs
+               SET applied = TRUE,
+                   applied_by = ?,
+                   applied_at = ?,
+                   pr_url = COALESCE(?, pr_url),
+                   branch_sha = COALESCE(?, branch_sha)
+             WHERE instance_id = ?
+            """,
+            [applied_by, applied_at, pr_url, branch_sha, instance_id],
+        )
+        if kind == "graduate":
+            insert_trunk_change(
+                conn,
+                at_ts=applied_at,
+                from_id=from_id,
+                to_id=target_id,
+                reason=(rationale or "")[:200] or None,
+                applied_by=applied_by,
+                instance_id=instance_id,
+            )
 
 
 def confirm_graduate(
@@ -145,7 +215,7 @@ def confirm_graduate(
     reason: str | None = None,
     today: date | None = None,
 ) -> ApplyResult:
-    """Promote a staged Graduate diff: swap trunk.yaml + audit + tree update.
+    """Legacy helper for historical staged Graduate diffs.
 
     Effects:
       1. `trunk.yaml` becomes a copy of `<target_id>.yaml`.
@@ -162,24 +232,25 @@ def confirm_graduate(
     today = today or date.today()
     notes: list[str] = []
 
-    target_yaml = _AGENT_CONFIGS_DIR / f"{diff.target_id}.yaml"
+    target_yaml = _agent_configs_dir() / f"{diff.target_id}.yaml"
     if not target_yaml.is_file():
         raise FileNotFoundError(
             f"Cannot graduate `{diff.target_id}`: {target_yaml} not found."
         )
 
     prev_trunk_id: str | None = None
-    if _TRUNK_YAML.is_file():
+    trunk_yaml = _trunk_yaml()
+    if trunk_yaml.is_file():
         try:
             import yaml
-            data = yaml.safe_load(_TRUNK_YAML.read_text()) or {}
+            data = yaml.safe_load(trunk_yaml.read_text()) or {}
             n = data.get("name")
             if isinstance(n, str):
                 prev_trunk_id = n
         except Exception:
             prev_trunk_id = None
 
-    shutil.copyfile(target_yaml, _TRUNK_YAML)
+    shutil.copyfile(target_yaml, trunk_yaml)
     notes.append(f"trunk.yaml ← copy of {target_yaml.name}")
 
     journal_link = f"[`{slug}`](experiments.md#{slug})"
@@ -244,9 +315,9 @@ def confirm_graduate(
 def render_tree_effect_block(diff: TreeDiff, *, slug: str, applied: bool) -> str:
     """Render the `### Tree effect` body for the journal entry."""
     badge = {
-        "graduate": "**GRADUATE** — APPLIED" if applied else "**GRADUATE** — STAGED (awaits human confirmation)",
-        "add_branch": "**Add branch** — auto-applied",
-        "reject": "**Reject** — auto-applied",
+        "graduate": "**Graduate** — experiment outcome supports trunk promotion",
+        "add_branch": "**Add branch** — experiment outcome supports a specialized branch",
+        "reject": "**Reject** — experiment outcome supports rejection",
         "no_op": "**No-op** — recorded for trend analysis",
     }[diff.kind]
 
@@ -396,7 +467,7 @@ def _components_from_agent_yaml(agent_id: str | None) -> set[str] | None:
     """
     if not agent_id:
         return None
-    yaml_path = _AGENT_CONFIGS_DIR / f"{agent_id}.yaml"
+    yaml_path = _agent_configs_dir() / f"{agent_id}.yaml"
     if not yaml_path.is_file():
         return None
     try:

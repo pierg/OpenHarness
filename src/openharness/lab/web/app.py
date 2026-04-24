@@ -116,14 +116,11 @@ def create_app() -> FastAPI:
         reader = _reader_ctx(request)
         try:
             recent_exp = reader.experiments(limit=8)
-            pr_rows = reader.pr_states(kinds=("graduate",))
-            pr_by_slug = {pr.slug: pr for pr in pr_rows}
             return _render(
                 request, "home.html",
                 _reader=reader,
                 nav_active="status",
                 recent_experiments=recent_exp,
-                pr_by_slug=pr_by_slug,
                 db_info=reader.db_info(),
                 db_path=str(reader.db_path),
                 status=reader.daemon_status(),
@@ -154,9 +151,9 @@ def create_app() -> FastAPI:
                 _reader=reader, nav_active="tree",
                 snapshot=reader.tree(),
                 trunk_history=reader.trunk_history(limit=20),
-                staged_graduates=reader.tree_diffs(applied=False, kind="graduate"),
+                pending_merge=reader.tree_diffs(applied=False, limit=20),
                 pending_eval=reader.experiments_without_diff(limit=10),
-                recent_diffs=reader.tree_diffs(limit=10),
+                recent_diffs=reader.tree_diffs(applied=True, limit=10),
                 pr_by_slug=pr_by_slug,
                 pr_by_instance=pr_by_instance,
             )
@@ -215,6 +212,10 @@ def create_app() -> FastAPI:
             comparisons = reader.comparisons_for_instance(instance_id)
             critic_md = labdata.critic_summary_md(instance_id)
             sum_md = labdata.summary_md(instance_id)
+            pr_for_run = next(
+                (pr for pr in reader.pr_states() if pr.instance_id == instance_id),
+                None,
+            )
             return _render(
                 request, "experiment_detail.html",
                 _reader=reader, nav_active="experiments",
@@ -230,6 +231,7 @@ def create_app() -> FastAPI:
                 comparisons=comparisons,
                 critic_md=critic_md,
                 summary_md=sum_md,
+                pr_for_run=pr_for_run,
             )
         except HTTPException:
             raise
@@ -630,7 +632,7 @@ def create_app() -> FastAPI:
 
     @app.get("/_hx/daemon-pipeline", response_class=HTMLResponse)
     def hx_daemon_pipeline(request: Request) -> HTMLResponse:
-        """The 6-phase pipeline strip + per-slug action bar.
+        """The 7-phase pipeline strip + per-slug action bar.
 
         Pulls a :class:`PipelineView` for the active slug (or the
         most-recent one when idle) and hands it to the template, so
@@ -871,10 +873,6 @@ def create_app() -> FastAPI:
             p = r.pending_actions()
             return {
                 "total": p.total,
-                "staged_graduates": [
-                    {"slug": d.slug, "instance_id": d.instance_id,
-                     "target_id": d.target_id} for d in p.staged_graduates
-                ],
                 "suggested": [{"slug": s.slug, "hypothesis": s.hypothesis}
                               for s in p.suggested],
                 "auto_proposed": [{"id": i.idea_id, "motivation": i.motivation}
@@ -1120,13 +1118,10 @@ def create_app() -> FastAPI:
     def hx_you_owe(request: Request) -> HTMLResponse:
         reader = _reader_ctx(request)
         try:
-            pr_rows = reader.pr_states(kinds=("graduate",))
-            pr_by_slug = {pr.slug: pr for pr in pr_rows}
             return _render(
                 request, "_you_owe.html",
                 _reader=reader,
                 pending=reader.pending_actions(),
-                pr_by_slug=pr_by_slug,
             )
         except Exception:
             _close_reader(request, reader)

@@ -2,7 +2,6 @@
    is the canonical entry point for everything the operator is
    expected to act on:
 
-     - Staged Graduate verdicts (gated by PR merge state).
      - Suggested experiments (one-click promote or remove).
      - Auto-proposed ideas (move to Trying / Rejected).
      - Recent misconfigurations + failed spawns (jump to /log).
@@ -12,57 +11,6 @@
 {% if pending.total == 0 %}
   <div class="text-sm text-slate-500 italic">Nothing waiting. The lab is up to date.</div>
 {% else %}
-  {# ---- Graduate gates: tightly tied to the PR lifecycle. ---- #}
-  {% if pending.staged_graduates %}
-    <div class="mb-5">
-      <div class="flex items-baseline justify-between mb-2">
-        <h3 class="text-sm font-semibold text-amber-900">Trunk swaps awaiting confirmation</h3>
-        <span class="text-xs text-slate-400">{{ pending.staged_graduates|length }}</span>
-      </div>
-      <ul class="space-y-2">
-        {% for g in pending.staged_graduates %}
-          {% set pr = pr_by_slug.get(g.slug) %}
-          <li class="border border-amber-200 bg-amber-50 rounded-md p-3">
-            <div class="flex flex-wrap items-baseline gap-x-3 gap-y-1">
-              <a href="/runs/{{ g.instance_id }}#verdict" class="font-mono text-sm font-semibold text-amber-900 hover:underline">{{ g.slug }}</a>
-              <span class="text-xs text-slate-600">→ {{ g.target_id }}</span>
-            </div>
-            {% if g.rationale %}
-              <p class="text-xs text-amber-800 mt-1">{{ g.rationale }}</p>
-            {% endif %}
-            <div class="mt-2 flex flex-wrap items-center gap-2 text-xs">
-              {% if pr %}
-                <a href="{{ pr.pr_url }}" target="_blank" rel="noopener"
-                   class="px-2 py-0.5 rounded border
-                          {% if pr.is_merged %}border-emerald-400 bg-emerald-100 text-emerald-900
-                          {% elif pr.state == 'OPEN' %}border-amber-400 bg-amber-100 text-amber-900
-                          {% elif pr.state in ('CLOSED','MERGED') %}border-rose-300 bg-rose-50 text-rose-800
-                          {% else %}border-slate-300 bg-white text-slate-600{% endif %}">
-                  PR #{{ pr.pr_number or '?' }} · {{ pr.state or 'unknown' }}{% if pr.checks_status %} · CI {{ pr.checks_status|lower }}{% endif %}
-                </a>
-              {% else %}
-                <span class="text-slate-500 italic">No PR recorded yet</span>
-              {% endif %}
-              {% if identity.can_write %}
-                {% if pr and pr.is_merged %}
-                  <form hx-post="/api/cmd" hx-target="#cmd-result" hx-swap="innerHTML"
-                        hx-confirm="Promote {{ g.slug }} to trunk? This swaps the active configuration.">
-                    <input type="hidden" name="cmd_id" value="graduate-confirm">
-                    <input type="hidden" name="slug" value="{{ g.slug }}">
-                    <button class="px-3 py-1 rounded-md bg-amber-600 text-white hover:bg-amber-700 font-medium">Confirm trunk swap</button>
-                  </form>
-                {% else %}
-                  <button disabled class="px-3 py-1 rounded-md bg-slate-200 text-slate-500 cursor-not-allowed"
-                          title="PR must be merged before the trunk swap is allowed.">PR not merged</button>
-                {% endif %}
-              {% endif %}
-            </div>
-          </li>
-        {% endfor %}
-      </ul>
-    </div>
-  {% endif %}
-
   {# ---- Suggested entries — one-click promote ---- #}
   {% if pending.suggested %}
     <div class="mb-5">

@@ -35,7 +35,7 @@
           <td class="text-xs">
             {% if e.verdict %}
               <span class="px-1.5 py-0.5 border rounded {{ verdict_color(e.verdict.kind, e.verdict.applied) }}">
-                {{ e.verdict.kind }}{% if not e.verdict.applied %} · staged{% endif %}
+                {{ e.verdict.kind }}{% if not e.verdict.applied %} · pending merge{% endif %}
               </span>
             {% else %}—{% endif %}
           </td>

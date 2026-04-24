@@ -238,9 +238,9 @@ class SkillProfile:
 # profile here would be misleading. The current orchestrator-side
 # set is exactly:
 #
-#   lab-design-variant, lab-implement-variant, lab-finalize-pr,
-#   trial-critic, task-features, experiment-critic,
-#   cross-experiment-critic, lab-plan-next
+#   lab-design-variant, lab-implement-variant, lab-replan-roadmap,
+#   lab-finalize-pr, trial-critic, task-features, experiment-critic,
+#   cross-experiment-critic
 #
 # (The legacy `lab-run-experiment` skill is gone — its
 # responsibilities were split across the deterministic
@@ -273,12 +273,14 @@ class SkillProfile:
 #   - `lab-implement-variant` writes code in a worktree. Code
 #     quality directly shapes the variant being measured; `high`
 #     effort. Sandbox: workspace-write scoped to the worktree.
-#   - `lab-finalize-pr` is mostly mechanical (push, gh pr create,
-#     CLI mutation). `low` effort — prompt explicitly disables
-#     creative work here. Sandbox: workspace-write.
-#   - `lab-plan-next` is the only mechanical skill the orchestrator
-#     invokes — closing the loop on the roadmap entry. Smarter
-#     models do not add signal here; mini+low keeps logs clean.
+#   - `lab-replan-roadmap` is the deep reflection pass that decides
+#     what the queue should look like *after* a finished experiment.
+#     This is judgment-heavy and changes the next several ticks, so
+#     it deserves high effort.
+#   - `lab-finalize-pr` now owns rebase/conflict resolution, PR
+#     creation, and merge-to-main for the experiment outcome. This is
+#     no longer a trivial wrapper, so it gets the flagship rather than
+#     the mini model.
 #
 # Timeouts are SAFETY NETS (catch a wedged subprocess), not quality
 # knobs. Each upper bound is generous enough that a healthy spawn
@@ -383,74 +385,46 @@ SKILL_PROFILES: dict[str, SkillProfile] = {
         ),
     ),
 
-    # --- phase 5: open (or skip) the PR after the verdict is in ---
-    "lab-finalize-pr": SkillProfile(
-        model="gpt-5.4-mini",
-        reasoning_effort="low",
-        reasoning_summary="concise",
-        # workspace-write is enough — only git/gh + `uv run lab`. No
-        # code edits expected (and the prompt forbids them).
-        sandbox="workspace-write",
-        full_auto=True,
-        timeout_sec=60 * 30,  # 30min cap; PR creation is fast
-        notes=(
-            "Phase 5 of the lab pipeline. Pushes the experiment "
-            "branch and opens a PR (or skips, on reject/noop), then "
-            "rewrites the journal Branch bullet via "
-            "`lab experiments set-branch`. Mostly mechanical — mini "
-            "model at low effort is enough; the prompt is explicit "
-            "that creative work is forbidden here."
-        ),
-    ),
-
-    # --- mechanical roadmap nudge (orchestrator-invoked) ---
-    # NOTE: `reasoning_effort="minimal"` is rejected by the API when
-    # the agent has the `web_search` tool, which codex 0.121 registers
-    # by default under --full-auto / --dangerously-bypass-*. So the
-    # practical floor for our skills is `low`. If we ever wire up a
-    # tool-suppressing config (e.g. `-c features.web_search=false`),
-    # this can drop to minimal.
-    "lab-plan-next": SkillProfile(
-        model="gpt-5.4-mini",
-        reasoning_effort="low",
-        reasoning_summary="none",
-        timeout_sec=60 * 60,
-        notes=(
-            "Mechanical: moves the just-finished roadmap entry to "
-            "## Done. More model intelligence does not improve the "
-            "outcome; the work is structural, not analytical."
-        ),
-    ),
-
-    # --- tree-aware planner (orchestrator-invoked, post-tree-apply) ---
-    "lab-reflect-and-plan": SkillProfile(
+    # --- phase 5: postmortem + roadmap rewrite on the experiment branch ---
+    "lab-replan-roadmap": SkillProfile(
         model="gpt-5.4",
         reasoning_effort="high",
         reasoning_summary="detailed",
         timeout_sec=4 * 60 * 60,
         notes=(
-            "Reads the current configuration tree + the latest "
-            "journal entries + the cross-experiment snapshot, and "
-            "writes 0..N follow-up entries to "
-            "`roadmap.md > ## Up next > ### Suggested` and "
-            "`ideas.md > ## Auto-proposed`. Designs the next "
-            "experiment — high-signal, judgment-heavy. Worth "
-            "spending tokens for accuracy because each output "
-            "compounds into the priority queue."
+            "Phase 5 of the lab pipeline. Reads the finished run, the "
+            "verdict, and the current queue, then rewrites roadmap/ideas "
+            "on the experiment branch so the merged experiment outcome "
+            "already contains the next queue state."
+        ),
+    ),
+
+    # --- phase 6: merge the experiment outcome back to main ---
+    "lab-finalize-pr": SkillProfile(
+        model="gpt-5.4",
+        reasoning_effort="medium",
+        reasoning_summary="detailed",
+        sandbox="workspace-write",
+        full_auto=True,
+        timeout_sec=60 * 60 * 2,
+        notes=(
+            "Phase 6 of the lab pipeline. Reconciles the experiment "
+            "branch with latest main, creates the required PR artifact(s), "
+            "and waits for the merge before the daemon advances. This may "
+            "need conflict resolution, so it uses the flagship model."
         ),
     ),
     # Skills NOT registered here, intentionally:
     #   - lab-propose-idea: human-driven only. Ideas under
     #     `lab/ideas.md > ## Proposed` are curated by the human
     #     via Cursor; the orchestrator never proposes ideas.
-    #     (cross-experiment-critic and lab-reflect-and-plan write
+    #     (cross-experiment-critic and lab-replan-roadmap may write
     #     into ## Auto-proposed directly via `uv run lab idea
     #     auto-propose`, not via this skill.)
-    #   - lab-graduate-component: human-driven only. The
-    #     `Graduate` verdict is the *only* asymmetric action in
-    #     the loop — the daemon stages it via `lab tree apply`,
-    #     and a human runs `uv run lab graduate confirm <slug>`
-    #     (or this skill in Cursor) to actually swap the trunk.
+    #   - lab-graduate-component: legacy / human-driven only. The
+    #     refactored daemon graduates by merging the experiment PR;
+    #     this skill remains as a compatibility escape hatch for old
+    #     staged rows.
     #   - lab-operator: a Cursor-side meta-skill that drives
     #     `uv run lab daemon ...`; never invoked from the loop.
 }

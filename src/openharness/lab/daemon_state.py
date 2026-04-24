@@ -93,12 +93,13 @@ TickPhase = Literal[
     "implement",           # `lab-implement-variant` codex spawn (worktree-write)
     "run",                 # harbor exec + poll for results/summary.md
     "critique",            # ingest + per-trial critic fan-out + tree apply
+    "replan",              # `lab-replan-roadmap` codex spawn + roadmap rewrite
     "finalize",            # `lab-finalize-pr` codex spawn + cleanup
     # Post-pipeline / generic:
-    "verdict-pending",     # tree apply staged a Graduate; awaiting human
     "done",                # successful close-out, awaiting next tick
     # Legacy values kept so historical `daemon-state.json` files still
     # rehydrate cleanly. The new pipeline never writes these.
+    "verdict-pending",
     "spawning",
     "running",
     "post-processing",
@@ -106,7 +107,7 @@ TickPhase = Literal[
 """Coarse-grained phases the runner advances through inside one tick.
 Surfaced verbatim by the web UI's `Current tick` panel so the
 operator can tell "still designing the variant" from "polling the
-harbor run" from "waiting on a human to confirm a graduate verdict"."""
+harbor run" from "rewriting the roadmap after critique"."""
 
 TickOutcome = Literal[
     "ok",                  # full pipeline succeeded

@@ -26,9 +26,6 @@
       <div class="flex items-baseline gap-2">
         <span class="text-[10px] uppercase tracking-wide font-semibold opacity-70">Verdict</span>
         <h3 class="font-mono font-semibold text-base">{{ kind }}</h3>
-        {% if kind == "graduate" %}
-          <span class="text-[10px] uppercase font-semibold bg-amber-200 text-amber-900 px-1.5 py-0.5 rounded">staged</span>
-        {% endif %}
       </div>
       <div class="text-xs opacity-70 font-mono">
         slug: <strong>{{ diff.slug }}</strong>
@@ -145,7 +142,7 @@
           </p>
         {% endif %}
         <form hx-post="/api/cmd" hx-target="#cmd-result" hx-swap="innerHTML"
-              hx-confirm="{% if kind == 'graduate' %}Stage a Graduate verdict for {{ diff.slug }}? This writes a journal block and queues a trunk swap; you'll still need to run `graduate-confirm` separately.{% else %}Apply this {{ kind }} verdict to the lab? This edits configs.md.{% endif %}"
+              hx-confirm="Apply this {{ kind }} verdict to the current checkout? This updates the lab tree and journal for {{ diff.slug }}."
               class="flex items-center gap-2">
           <input type="hidden" name="cmd_id" value="tree-apply">
           <input type="hidden" name="slug" value="{{ diff.slug }}">

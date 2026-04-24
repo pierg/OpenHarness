@@ -215,14 +215,15 @@ Reply with:
 
 -   Never edit `## Proposed`, `## Trying`, `## Graduated`,
     `## Rejected` in `lab/ideas.md`. Only `## Auto-proposed` is
-    yours (shared with `lab-reflect-and-plan`).
+    yours (shared with `lab-replan-roadmap`).
 -   Never edit `lab/roadmap.md`. Suggesting roadmap entries is
-    `lab-reflect-and-plan`'s job; this skill stays in the
+    `lab-replan-roadmap`'s job; this skill stays in the
     `## Auto-proposed` lane of `lab/ideas.md`.
 -   Never edit `lab/experiments.md` (journal entries are written
     by `lab-run-experiment` + `experiments synthesize` + `tree
     apply`), `lab/configs.md` (the configuration tree is mutated
-    only by `lab tree apply` and `lab graduate confirm`), or
+    by `lab tree apply` on the experiment branch and then merged by
+    finalize), or
     `lab/components.md` (the catalog is bumped automatically by
     `lab tree apply` and edited explicitly via `lab components`).
     **In particular, do not write any verdict, AddBranch, Reject,

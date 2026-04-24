@@ -317,7 +317,8 @@ def test_you_owe_partial_renders_or_is_empty_state() -> None:
     # throw an UndefinedError.
     body = r.text
     assert any(token in body for token in (
-        "You owe", "Nothing", "Graduate", "Discard", "Promote", "queue",
+        "Nothing waiting", "up to date", "Discard", "Promote",
+        "Auto-proposed", "Daemon suggestions",
         # In empty state the partial still has to render *something*
         # benign — any non-empty body is acceptable as long as no
         # template error leaked through.
@@ -370,6 +371,13 @@ def test_tree_page_renders_with_pr_badge_template_available() -> None:
     assert "Configuration tree" in body
     # Verdict workflow surface is part of the redesigned tree page.
     assert "Verdicts" in body
+
+
+def test_phase_reset_command_accepts_replan() -> None:
+    spec = labcmd.COMMANDS["phases-reset-one"]
+    params = labcmd._validate_params(spec, {"slug": "tb2-foo", "phase": "replan"})
+    argv = labcmd._build_argv(spec, params)
+    assert argv == ["phases", "reset", "tb2-foo", "--phase", "replan"]
 
 
 def test_sidebar_reflects_new_six_page_ia() -> None:

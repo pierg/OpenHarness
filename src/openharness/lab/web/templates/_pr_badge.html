@@ -5,16 +5,15 @@
    where the caller has set ``pr`` to a PRStateRow (or None).
 
    Renders:
-     · #123 OPEN ✓ ci  (auto-merge)        for an open AddBranch PR
+     · #123 OPEN ✓ ci  (auto-merge)        for an open experiment PR
      · #124 MERGED                          once merged
-     · #125 OPEN · awaiting review          for a Graduate PR
      · #126 status unknown (gh missing)     when the cache has an error
      · nothing at all if pr is None.
 
-   Color encoding mirrors the lab methodology:
+   Color encoding mirrors the lab finalize contract:
      - emerald: merged
-     - amber:   open (AddBranch — daemon waits for merge)
-     - violet:  open (Graduate — human reviewer is the gate)
+     - amber:   open (normal experiment PR)
+     - violet:  open metadata-only PR (reject / no_op)
      - rose:    closed without merge
      - slate:   unknown (gh not installed / api error)
 #}
@@ -22,9 +21,9 @@
   {%- if pr.is_merged -%}
     {%- set _palette = ("border-emerald-300", "bg-emerald-50", "text-emerald-900") -%}
     {%- set _label = "MERGED" -%}
-  {%- elif pr.state == "OPEN" and pr.kind == "graduate" -%}
+  {%- elif pr.state == "OPEN" and pr.kind in ("reject", "no_op") -%}
     {%- set _palette = ("border-violet-300", "bg-violet-50", "text-violet-900") -%}
-    {%- set _label = "OPEN · awaiting review" -%}
+    {%- set _label = "OPEN · metadata-only" -%}
   {%- elif pr.state == "OPEN" -%}
     {%- set _palette = ("border-amber-300", "bg-amber-50", "text-amber-900") -%}
     {%- set _label = "OPEN" -%}
@@ -40,8 +39,8 @@
      title="{{ pr.title or pr.pr_url }}{% if pr.error %} — {{ pr.error }}{% endif %}">
     <span class="font-mono">PR #{{ pr.pr_number or "?" }}</span>
     <span>{{ _label }}</span>
-    {%- if pr.checks_status == "PASS" %} <span class="text-emerald-700">✓ ci</span>
-    {%- elif pr.checks_status == "FAIL" %} <span class="text-rose-700">✕ ci</span>
+    {%- if pr.checks_status == "SUCCESS" %} <span class="text-emerald-700">✓ ci</span>
+    {%- elif pr.checks_status == "FAILURE" %} <span class="text-rose-700">✕ ci</span>
     {%- elif pr.checks_status == "PENDING" %} <span class="text-slate-500">… ci</span>
     {%- endif %}
     {%- if pr.auto_merge_enabled and not pr.is_merged %} <span class="text-slate-500">(auto-merge)</span>{%- endif %}

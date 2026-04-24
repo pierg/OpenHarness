@@ -36,7 +36,7 @@
   <div class="flex items-baseline justify-between gap-3 flex-wrap mb-3">
     <h2 class="font-semibold">Verdicts</h2>
     <span class="text-xs text-slate-500">
-      {{ staged_graduates|length }} staged ·
+      {{ pending_merge|length }} pending merge ·
       {{ pending_eval|length }} unevaluated
     </span>
   </div>
@@ -44,16 +44,16 @@
   {# Container the preview button swaps into. #}
   <div id="tree-diff-preview" class="mb-4 empty:hidden"></div>
 
-  {% if staged_graduates %}
+  {% if pending_merge %}
     <div class="mb-4">
-      <h3 class="text-sm font-semibold text-amber-800 mb-2">Staged (awaiting graduate-confirm)</h3>
+      <h3 class="text-sm font-semibold text-amber-800 mb-2">Pending merge</h3>
       <ul class="space-y-2">
-        {% for d in staged_graduates %}
+        {% for d in pending_merge %}
           <li class="border border-amber-200 bg-amber-50 rounded-md p-3 text-sm flex items-baseline gap-3 flex-wrap">
             <div class="flex-1 min-w-0">
               <div class="font-mono text-xs flex flex-wrap items-baseline gap-2">
                 <a href="/runs/{{ d.instance_id }}" class="text-blue-700 hover:underline">{{ d.slug or d.instance_id }}</a>
-                <span class="text-slate-500">→ {{ d.target_id }}</span>
+                <span class="text-slate-500">{{ d.kind }} → {{ d.target_id }}</span>
                 {% set pr = pr_by_slug.get(d.slug) or pr_by_instance.get(d.instance_id) %}
                 {% include "_pr_badge.html" with context %}
               </div>
@@ -64,24 +64,6 @@
                     class="text-xs bg-white border border-slate-300 hover:border-slate-500 rounded px-2.5 py-1">
               Preview verdict
             </button>
-            {% set pr_for_gate = pr_by_slug.get(d.slug) or pr_by_instance.get(d.instance_id) %}
-            {% if identity.can_write %}
-              {% if pr_for_gate and not pr_for_gate.is_merged %}
-                <span class="text-xs italic text-slate-500"
-                      title="lab graduate confirm refuses unless gh pr view reports state=MERGED">
-                  PR not merged — confirm blocked
-                </span>
-              {% else %}
-                <form hx-post="/api/cmd" hx-target="#cmd-result" hx-swap="innerHTML"
-                      hx-confirm="Confirm trunk swap to {{ d.target_id }}? This swaps the active trunk yaml.">
-                  <input type="hidden" name="cmd_id" value="graduate-confirm">
-                  <input type="hidden" name="slug" value="{{ d.slug or d.instance_id }}">
-                  <button class="text-xs bg-amber-700 hover:bg-amber-800 text-white rounded px-2.5 py-1 font-semibold">
-                    Confirm trunk swap
-                  </button>
-                </form>
-              {% endif %}
-            {% endif %}
           </li>
         {% endfor %}
       </ul>
@@ -125,7 +107,7 @@
       <ul class="mt-2 space-y-1 text-xs">
         {% for d in recent_diffs %}
           <li class="border-b border-slate-100 pb-1 last:border-b-0 flex items-baseline gap-2 flex-wrap">
-            <span class="px-1.5 py-0.5 border rounded {{ verdict_color(d.kind, d.applied) }}">{{ d.kind }}{% if not d.applied %} · staged{% endif %}</span>
+            <span class="px-1.5 py-0.5 border rounded {{ verdict_color(d.kind, d.applied) }}">{{ d.kind }}{% if not d.applied %} · pending merge{% endif %}</span>
             <a href="/runs/{{ d.instance_id }}" class="font-mono text-blue-700 hover:underline">{{ d.slug or d.instance_id }}</a>
             <span class="text-slate-500">→ {{ d.target_id }}</span>
             {% set pr = pr_by_slug.get(d.slug) or pr_by_instance.get(d.instance_id) %}
@@ -140,7 +122,7 @@
     </details>
   {% endif %}
 
-  {% if not staged_graduates and not pending_eval and not recent_diffs %}
+  {% if not pending_merge and not pending_eval and not recent_diffs %}
     <p class="text-sm text-slate-500 italic">
       No verdicts yet. Run an experiment, then return here once it's
       ingested to preview and apply its <code>tree apply</code> diff.

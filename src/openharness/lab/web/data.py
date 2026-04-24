@@ -210,7 +210,7 @@ class LabReader:
         3. ``None`` — daemon has never run anything on this host
            (fresh checkout). The cockpit renders an empty state.
 
-        Always returns six phase rows in canonical order so the strip
+        Always returns seven phase rows in canonical order so the strip
         in :file:`_daemon_pipeline.html` can render unconditionally.
         Skipped phases (e.g. design+implement on a baseline) carry
         ``status="skipped"`` so they render dimmed rather than
@@ -281,11 +281,26 @@ class LabReader:
                 summary = f"{n} commit{'' if n == 1 else 's'}"
             elif name == "run" and payload.get("instance_id"):
                 summary = f"instance {str(payload['instance_id'])[:18]}"
-            elif name == "critique" and payload.get("verdict"):
-                summary = f"verdict: {payload['verdict']}"
-            elif name == "finalize" and payload.get("pr_url"):
-                pr = str(payload["pr_url"]).rsplit("/", 1)[-1]
-                summary = f"PR #{pr}"
+            elif name == "critique" and payload.get("verdict_kind"):
+                summary = f"verdict: {payload['verdict_kind']}"
+            elif name == "replan" and rec.status == "ok":
+                summary = (
+                    payload.get("summary")
+                    or "roadmap updated"
+                )
+            elif name == "finalize" and payload.get("merged"):
+                pr_urls = payload.get("pr_urls")
+                if isinstance(pr_urls, list) and pr_urls:
+                    summary = (
+                        "merged 1 PR"
+                        if len(pr_urls) == 1
+                        else f"merged {len(pr_urls)} PRs"
+                    )
+                elif payload.get("pr_url"):
+                    pr = str(payload["pr_url"]).rsplit("/", 1)[-1]
+                    summary = f"merged PR #{pr}"
+                else:
+                    summary = "merged to main"
             elif rec.status == "skipped":
                 summary = str(payload.get("skip_reason") or "skipped")
             phases.append(PhaseView(
@@ -828,7 +843,6 @@ class LabReader:
     # ---- pending-actions inbox ------------------------------------------
 
     def pending_actions(self, *, recent_window: timedelta = timedelta(hours=24)) -> PendingActions:
-        staged = self.tree_diffs(applied=False, kind="graduate")
         _, suggested, _ = self.roadmap()
         auto = [i for i in self.ideas() if i.section == "Auto-proposed"]
         misconf = 0
@@ -838,7 +852,6 @@ class LabReader:
             misconf = int(rows[0][0]) if rows else 0  # type: ignore[arg-type]
         failed = self.failed_spawns_since(datetime.now(timezone.utc) - recent_window)
         return PendingActions(
-            staged_graduates=staged,
             suggested=suggested,
             auto_proposed=auto,
             misconfig_recent=misconf,
@@ -1151,7 +1164,7 @@ class LabReader:
     def pr_states(
         self,
         *,
-        kinds: tuple[str, ...] = ("add_branch", "graduate"),
+        kinds: tuple[str, ...] = ("add_branch", "graduate", "reject", "no_op"),
     ) -> list[PRStateRow]:
         """Snapshot of every experiment PR known to the lab.
 
@@ -1216,10 +1229,10 @@ class LabReader:
     ) -> DaemonIdleReason:
         """Why is the daemon doing what it's doing right now?
 
-        Combines daemon status + state + PR cache to produce one
-        actionable badge. Computation order matches the runner's
-        ``loop()`` priority: status < paused < pr_blocked < no_queue
-        < manual_no_appr < running.
+        Combines daemon status + state to produce one actionable
+        badge. Computation order matches the runner's ``loop()``
+        priority: status < paused < no_queue < manual_no_appr <
+        running.
         """
         from openharness.lab import daemon_state as _ds
 
@@ -1243,23 +1256,6 @@ class LabReader:
             return DaemonIdleReason(
                 code="paused",
                 detail="Mode is paused. The daemon will not pick up entries.",
-            )
-
-        # PR-blocked: any unmerged AddBranch PRs prevent the next tick
-        # from forking off main. Mirrors runner._find_unmerged_addbranch_prs.
-        unmerged = [
-            pr for pr in self.pr_states(kinds=("add_branch",))
-            if pr.state in (None, "OPEN") and not pr.is_merged
-        ]
-        if unmerged:
-            return DaemonIdleReason(
-                code="pr_blocked",
-                detail=(
-                    f"{len(unmerged)} AddBranch PR(s) still open. "
-                    "Daemon won't fork the next experiment off main "
-                    "until they merge."
-                ),
-                blocking_prs=[pr.pr_url for pr in unmerged],
             )
 
         if ready_slugs is None:
@@ -1389,7 +1385,7 @@ class LabReader:
                     actor=d.applied_by or "?",
                     title=f"{d.slug}: {d.kind}",
                     detail=(
-                        ("staged" if not d.applied else "applied")
+                        ("pending merge" if not d.applied else "merged to main")
                         + (f" → {d.target_id}" if d.target_id else "")
                     ),
                     slug=d.slug,

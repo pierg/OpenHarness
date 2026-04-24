@@ -1,7 +1,7 @@
 """Orchestrator daemon — autonomous driver of the phased lab pipeline.
 
 Each top entry in ``lab/roadmap.md > ## Up next`` advances through a
-fixed 6-phase pipeline. Each phase has its own status in
+fixed 7-phase pipeline. Each phase has its own status in
 ``runs/lab/state/<slug>/phases.json`` (see :mod:`phase_state`), so a
 crashed daemon resumes exactly where it left off — no re-running the
 design phase just because implement timed out.
@@ -9,9 +9,10 @@ design phase just because implement timed out.
 Phases, in order:
 
     0. preflight (deterministic, this module)
-        - Assert parent repo is clean; create worktree
+        - Assert parent repo is clean, checked out on ``main``, and
+          fast-forwarded to ``origin/main``; create worktree
           ``../OpenHarness.worktrees/lab-<slug>/`` on branch
-          ``lab/<slug>`` rooted at the current HEAD.
+          ``lab/<slug>`` rooted at that exact ``main`` SHA.
         - Idempotent: a warm worktree at the same SHA is reused.
 
     1. design (codex spawn `lab-design-variant`)
@@ -28,8 +29,8 @@ Phases, in order:
         - Skipped when ``needs_variant=False``.
 
     3. run (deterministic, this module + :mod:`phase_run`)
-        - Append the journal entry stub to ``lab/experiments.md``
-          (in the parent repo's working copy).
+        - Append the journal entry stub to the worktree copy of
+          ``lab/experiments.md``.
         - Launch ``uv run exec`` from inside the worktree, with
           ``--root`` pinned at the parent repo's
           ``runs/experiments/<instance-id>/`` so existing lab
@@ -41,21 +42,31 @@ Phases, in order:
         - Fan out ``trial-critic`` and ``task-features`` spawns.
         - Run ``experiment-critic`` once all trial critiques land.
         - ``ingest-critiques``, ``journal_synth.synthesize``,
-          ``tree_ops.evaluate`` + ``tree.apply_diff``.
-        - Spawn ``lab-reflect-and-plan`` (writes Suggested
-          follow-ups) and (gated on ``xexp_every``)
-          ``cross-experiment-critic``.
+          ``tree_ops.evaluate`` + ``tree.apply_diff`` on the
+          worktree copy of ``lab/``.
         - The verdict (AddBranch / Graduate / Reject / NoOp) is
           recorded in ``phases.json`` so phase 5 can read it.
 
-    5. finalize (codex spawn `lab-finalize-pr`)
-        - Workspace-write sandbox. On AddBranch/Graduate, push the
-          branch and open a PR. On Reject/NoOp, mark the journal
-          entry's Branch bullet "not opened (<reason>)" and signal
-          worktree cleanup.
-        - After the spawn returns, this module deletes the
-          worktree (if cleanup was signalled) and runs
-          ``lab-plan-next`` to move the entry to ``## Done``.
+    5. replan (codex spawn ``lab-replan-roadmap``)
+        - Deep postmortem over the finished run + verdict + current
+          tree state.
+        - May run ``cross-experiment-critic`` first to refresh the
+          cross-run view.
+        - Mutates the worktree copies of ``lab/roadmap.md`` and
+          ``lab/ideas.md``: move the just-ran slug to ``## Done``,
+          add / demote / remove / reprioritise roadmap entries, and
+          record follow-ups.
+
+    6. finalize (codex spawn ``lab-finalize-pr``)
+        - Workspace-write sandbox. Rebase/resolve against latest
+          ``main`` as needed, create 1 or 2 PR artifacts, and merge
+          the experiment outcome back to ``main`` before the loop
+          advances.
+        - ``add_branch`` / ``graduate`` merge the experiment branch
+          itself. ``reject`` / ``noop`` merge a metadata-only branch
+          while recording the discarded implementation SHA.
+        - After merge, this module fast-forwards the parent repo's
+          ``main`` checkout and deletes the worktree.
 
 The daemon is **single-tenant**: it acquires
 ``runs/lab/orchestrator.lock`` at startup and refuses to run if
@@ -71,6 +82,7 @@ import logging
 import os
 import re
 import signal
+import subprocess
 import threading
 import time
 from dataclasses import dataclass, field
@@ -81,6 +93,7 @@ from openharness.lab import codex as codex_adapter
 from openharness.lab import critic_io
 from openharness.lab import daemon_state as ds
 from openharness.lab import db as labdb
+from openharness.lab import gcs_sync
 from openharness.lab import ingest as labingest
 from openharness.lab import journal_synth
 from openharness.lab import lab_docs
@@ -275,6 +288,20 @@ def _codex_cfg(cfg: OrchestratorConfig) -> codex_adapter.CodexConfig:
         enforce_orchestrator_lock=True,
         record_in_db=True,
     )
+
+
+def _worktree_cx(
+    cfg: OrchestratorConfig,
+    *,
+    worktree: Path,
+) -> codex_adapter.CodexConfig:
+    cx = _codex_cfg(cfg)
+    cx.cwd = worktree
+    return cx
+
+
+def _worktree_lab_root(worktree: Path) -> Path:
+    return worktree / "lab"
 
 
 def trials_needing_critique(instance_id: str) -> list[tuple[str, str]]:
@@ -539,49 +566,89 @@ def _repair_args(slug: str, phase: phase_state.PhaseName, state: phase_state.Slu
     ]
 
 
-def _commit_lab_changes(
+def _git_env() -> dict[str, str]:
+    return {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
+
+
+def _commit_worktree_changes(
     *,
+    worktree: Path,
     slug: str,
     phase: str,
     summary: str,
-    auto_push: bool = False,
-) -> None:
-    """Stage and commit any pending edits under ``lab/`` in the parent repo.
+    paths: tuple[str, ...],
+) -> str | None:
+    """Commit tracked lab/tree changes inside the experiment worktree.
 
-    Each phase that mutates the markdown surface (run, critique,
-    finalize) calls this at exit so the audit trail is one commit per
-    phase. ``auto_push`` is opt-in via ``LAB_AUTO_PUSH=1`` because
-    the daemon often runs on a feature branch the human is also
-    pushing to manually — we don't want to fight them.
+    The refactored loop keeps all durable experiment state on the
+    experiment branch until finalize merges it back to ``main``.
+    Returning the commit SHA lets finalize cherry-pick metadata-only
+    history for ``reject`` / ``noop`` verdicts.
     """
-    import subprocess
-    env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
+    env = _git_env()
     diff = subprocess.run(
-        ["git", "status", "--porcelain", "lab/"],
-        cwd=str(REPO_ROOT), env=env, text=True, capture_output=True,
+        ["git", "status", "--porcelain", "--", *paths],
+        cwd=str(worktree), env=env, text=True, capture_output=True,
     )
     if not diff.stdout.strip():
-        return
+        return None
     msg = f"lab({slug}): {phase} — {_summary_truncate(summary, n=72)}"
     subprocess.run(
-        ["git", "add", "lab/"],
-        cwd=str(REPO_ROOT), env=env, check=True, capture_output=True,
+        ["git", "add", "--", *paths],
+        cwd=str(worktree), env=env, check=True, capture_output=True,
     )
     subprocess.run(
         ["git", "commit", "-m", msg],
+        cwd=str(worktree), env=env, check=True, capture_output=True,
+    )
+    sha = subprocess.run(
+        ["git", "rev-parse", "HEAD"],
+        cwd=str(worktree), env=env, check=True, text=True, capture_output=True,
+    ).stdout.strip()
+    logger.info(
+        "committed worktree changes for %s phase=%s sha=%s",
+        slug, phase, sha[:8],
+    )
+    return sha
+
+
+def _append_commit(payload: dict[str, object], sha: str | None) -> None:
+    if not sha:
+        return
+    commits = payload.setdefault("lab_commits", [])
+    if not isinstance(commits, list):
+        commits = []
+        payload["lab_commits"] = commits
+    if sha not in commits:
+        commits.append(sha)
+
+
+def _collect_lab_commits(
+    state: phase_state.SlugPhases,
+    *,
+    phases: tuple[str, ...] = ("run", "critique", "replan"),
+) -> list[str]:
+    ordered: list[str] = []
+    for phase_name in phases:
+        payload = state.get(phase_name).payload
+        for sha in payload.get("lab_commits") or []:
+            s = str(sha).strip()
+            if s and s not in ordered:
+                ordered.append(s)
+    return ordered
+
+
+def _fast_forward_parent_main() -> None:
+    """Refresh the parent repo after finalize merged the experiment PR."""
+    env = _git_env()
+    subprocess.run(
+        ["git", "fetch", "origin", "main"],
         cwd=str(REPO_ROOT), env=env, check=True, capture_output=True,
     )
-    logger.info("committed lab/ changes for %s phase=%s", slug, phase)
-    if auto_push or os.environ.get("LAB_AUTO_PUSH") == "1":
-        proc = subprocess.run(
-            ["git", "push"], cwd=str(REPO_ROOT),
-            env=env, text=True, capture_output=True,
-        )
-        if proc.returncode != 0:
-            logger.warning(
-                "auto-push of lab/ commit failed (non-fatal): %s",
-                proc.stderr.strip()[:200],
-            )
+    subprocess.run(
+        ["git", "merge", "--ff-only", "origin/main"],
+        cwd=str(REPO_ROOT), env=env, check=True, capture_output=True,
+    )
 
 
 # ----- phase 0: preflight ---------------------------------------------------
@@ -597,10 +664,13 @@ def _phase_preflight(
     Records ``{worktree, branch, base_sha, base_branch}`` into the
     preflight payload so every later phase can read them.
     """
-    ds.update_tick(phase="preflight", note="git clean-check + worktree create")
+    ds.update_tick(phase="preflight", note="main sync + worktree create")
     phase_state.mark_running(entry.slug, "preflight")
     try:
-        result = preflight_mod.run_preflight(entry.slug)
+        result = preflight_mod.run_preflight(
+            entry.slug,
+            base_branch=preflight_mod.DEFAULT_BASE_BRANCH,
+        )
     except preflight_mod.PreflightError as exc:
         msg = f"preflight: {exc}"
         logger.error("preflight failed for %s: %s", entry.slug, exc)
@@ -641,8 +711,9 @@ def _phase_design(
         )
         return None
 
-    cx = _codex_cfg(cfg)
     pre = state.get("preflight").payload
+    worktree = Path(pre.get("worktree", ""))
+    cx = _worktree_cx(cfg, worktree=worktree)
     design_path = phase_state.slug_dir(entry.slug) / "design.md"
     design_path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -654,7 +725,7 @@ def _phase_design(
         [
             entry.slug,
             f"--idea={entry.idea_id or 'baseline'}",
-            f"--worktree={pre.get('worktree', '')}",
+            f"--worktree={worktree}",
             f"--design-path={design_path}",
             f"--hypothesis={entry.hypothesis}",
             # Pass the full roadmap entry body so the agent has the
@@ -711,8 +782,9 @@ def _phase_implement(
         )
         return None
 
-    cx = _codex_cfg(cfg)
     pre = state.get("preflight").payload
+    worktree = Path(pre.get("worktree", ""))
+    cx = _worktree_cx(cfg, worktree=worktree)
     design_path = state.get("design").payload.get("design_path")
     implement_path = phase_state.slug_dir(entry.slug) / "implement.json"
 
@@ -723,7 +795,7 @@ def _phase_implement(
         "lab-implement-variant",
         [
             entry.slug,
-            f"--worktree={pre.get('worktree', '')}",
+            f"--worktree={worktree}",
             f"--design-path={design_path or ''}",
             f"--implement-json={implement_path}",
             f"--base-sha={pre.get('base_sha', '')}",
@@ -840,6 +912,8 @@ def _phase_run(
     spec_name = impl.get("spec_name") or entry.slug
     profile = impl.get("profile")
     worktree = Path(pre["worktree"])
+    lab_root = _worktree_lab_root(worktree)
+    run_payload: dict[str, object] = {}
 
     # Determine the trunk for the journal header. We re-resolve it
     # at run-time rather than design-time so a graduate that landed
@@ -866,17 +940,22 @@ def _phase_run(
             mutation=mutation,
             hypothesis=entry.hypothesis,
             branch=pre["branch"],
+            repo_root=worktree,
         )
     except lab_docs.LabDocError as exc:
         msg = f"journal stub failed: {exc}"
         phase_state.mark_failed(entry.slug, "run", error=msg)
         return TickResult(ok=False, outcome="error", summary=msg)
 
-    # Commit the new journal entry up front so the next attempt can
-    # see it and the operator can spot the in-flight run from main.
-    _commit_lab_changes(
-        slug=entry.slug, phase="run-start",
-        summary=f"append journal entry for {entry.slug}",
+    _append_commit(
+        run_payload,
+        _commit_worktree_changes(
+            worktree=worktree,
+            slug=entry.slug,
+            phase="run-start",
+            summary=f"append journal entry for {entry.slug}",
+            paths=("lab/",),
+        ),
     )
 
     ds.update_tick(
@@ -904,11 +983,19 @@ def _phase_run(
     # Now we know the instance id — patch the Run: bullet in the journal.
     try:
         lab_docs.set_journal_run_path(
-            slug=entry.slug, instance_id=outcome.instance_id,
+            slug=entry.slug,
+            instance_id=outcome.instance_id,
+            lab_root=lab_root,
         )
-        _commit_lab_changes(
-            slug=entry.slug, phase="run-done",
-            summary=f"link runs/experiments/{outcome.instance_id}",
+        _append_commit(
+            run_payload,
+            _commit_worktree_changes(
+                worktree=worktree,
+                slug=entry.slug,
+                phase="run-done",
+                summary=f"link runs/experiments/{outcome.instance_id}",
+                paths=("lab/",),
+            ),
         )
     except lab_docs.LabDocError as exc:
         # Non-fatal — the entry already exists; the Run bullet just
@@ -918,12 +1005,17 @@ def _phase_run(
             entry.slug, exc,
         )
 
-    phase_state.mark_ok(entry.slug, "run", payload={
+    run_payload.update({
         "instance_id": outcome.instance_id,
         "run_dir": str(outcome.run_dir),
         "spec_name": outcome.spec_name,
         "log_path": str(outcome.log_path),
+        "trunk_at_runtime": trunk_id,
     })
+    phase_state.mark_ok(entry.slug, "run", payload=run_payload)
+    gcs_sync.maybe_auto_push(
+        instance_id=outcome.instance_id, include_lab_wide=False,
+    )
     return None
 
 
@@ -936,10 +1028,14 @@ def _phase_critique(
     cfg: OrchestratorConfig,
 ) -> TickResult | None:
     """Ingest, fan-out critic spawns, synthesize, and apply tree diff."""
-    cx = _codex_cfg(cfg)
+    pre = state.get("preflight").payload
+    worktree = Path(pre["worktree"])
+    lab_root = _worktree_lab_root(worktree)
+    cx = _worktree_cx(cfg, worktree=worktree)
     run_payload = state.get("run").payload
     instance_id = run_payload["instance_id"]
     run_dir = Path(run_payload["run_dir"])
+    critique_payload: dict[str, object] = {}
 
     ds.update_tick(phase="critique", note=f"ingest {instance_id}")
     phase_state.mark_running(entry.slug, "critique")
@@ -1006,70 +1102,150 @@ def _phase_critique(
     # Journal narrative + tree apply (deterministic).
     try:
         sections = journal_synth.synthesize(
-            slug=entry.slug, instance_id=summary.instance_id,
+            slug=entry.slug,
+            instance_id=summary.instance_id,
+            lab_root=lab_root,
         )
         logger.info("synthesize wrote %d section(s)", len(sections))
     except Exception:
         logger.exception("journal synthesize failed for %s", entry.slug)
 
+    diff: tree_ops.TreeDiff | None = None
     verdict_kind = "unknown"
     verdict_target: str | None = None
-    verdict_applied = False
+    verdict_branch_applied = False
     try:
         diff = tree_ops.evaluate(summary.instance_id)
         result = labtree.apply_diff(
-            slug=entry.slug, diff=diff, applied_by="auto:daemon",
+            slug=entry.slug,
+            diff=diff,
+            applied_by="auto:critique",
+            lab_root=lab_root,
+            repo_root=worktree,
+            mark_applied=False,
         )
         verdict_kind = diff.kind
         verdict_target = diff.target_id
-        verdict_applied = result.applied
+        verdict_branch_applied = result.applied
         logger.info(
-            "tree apply %s: kind=%s applied=%s target=%s",
+            "tree apply %s: kind=%s branch_applied=%s target=%s",
             entry.slug, diff.kind, result.applied, diff.target_id,
         )
     except Exception:
         logger.exception("tree apply failed for %s", entry.slug)
 
-    _commit_lab_changes(
-        slug=entry.slug, phase="critique",
-        summary=f"verdict={verdict_kind} applied={verdict_applied}",
+    _append_commit(
+        critique_payload,
+        _commit_worktree_changes(
+            worktree=worktree,
+            slug=entry.slug,
+            phase="critique",
+            summary=f"verdict={verdict_kind} branch_applied={verdict_branch_applied}",
+            paths=("lab/", "src/openharness/agents/configs/trunk.yaml"),
+        ),
     )
 
-    # Tree-aware planner — writes Suggested follow-ups.
-    try:
-        codex_adapter.run(
-            "lab-reflect-and-plan",
-            [f"--instance={summary.instance_id}"],
-            cfg=cx, parent_run_dir=run_dir,
-            expected_orchestrator_pid=my_pid,
-        )
-    except Exception:
-        logger.exception("lab-reflect-and-plan failed (non-fatal)")
+    critique_payload.update({
+        "instance_id": summary.instance_id,
+        "verdict_kind": verdict_kind,
+        "verdict_target": verdict_target,
+        "verdict_branch_applied": verdict_branch_applied,
+        "verdict_rationale": diff.rationale if diff else None,
+        "verdict_confidence": diff.confidence if diff else None,
+        "use_when": diff.use_when if diff else None,
+        "cluster_evidence": diff.cluster_evidence if diff else [],
+    })
+    phase_state.mark_ok(entry.slug, "critique", payload=critique_payload)
+    gcs_sync.maybe_auto_push(
+        instance_id=summary.instance_id, include_lab_wide=True,
+    )
+    return None
+
+
+# ----- phase 5: replan -----------------------------------------------------
+
+
+def _phase_replan(
+    entry: RoadmapEntry,
+    state: phase_state.SlugPhases,
+    cfg: OrchestratorConfig,
+) -> TickResult | None:
+    """Deep postmortem + roadmap mutation on the experiment branch."""
+    pre = state.get("preflight").payload
+    worktree = Path(pre["worktree"])
+    run_payload = state.get("run").payload
+    critique_payload = state.get("critique").payload
+    run_dir = Path(run_payload["run_dir"])
+    instance_id = str(run_payload["instance_id"])
+    cx = _worktree_cx(cfg, worktree=worktree)
+    replan_json = phase_state.slug_dir(entry.slug) / "replan.json"
+    replan_payload: dict[str, object] = {}
+
+    ds.update_tick(phase="replan", note="deep reflection + roadmap rewrite")
+    phase_state.mark_running(entry.slug, "replan")
 
     if _completed_runs_count() % max(cfg.xexp_every, 1) == 0:
         try:
             codex_adapter.run(
-                "cross-experiment-critic", [], cfg=cx, parent_run_dir=run_dir,
-                expected_orchestrator_pid=my_pid,
+                "cross-experiment-critic",
+                [],
+                cfg=cx,
+                parent_run_dir=run_dir,
+                expected_orchestrator_pid=os.getpid(),
             )
         except Exception:
-            logger.exception("cross-experiment-critic failed (non-fatal)")
+            logger.exception("cross-experiment-critic failed during replan (non-fatal)")
 
-    _commit_lab_changes(
-        slug=entry.slug, phase="critique-followups",
-        summary="reflect-and-plan + xexp critic",
+    repair_args = _repair_args(entry.slug, "replan", state)
+    res = codex_adapter.run(
+        "lab-replan-roadmap",
+        [
+            entry.slug,
+            f"--worktree={worktree}",
+            f"--instance-id={instance_id}",
+            f"--verdict={critique_payload.get('verdict_kind', 'unknown')}",
+            f"--replan-json={replan_json}",
+            *repair_args,
+        ],
+        cfg=cx,
+        parent_run_dir=run_dir,
+        expected_orchestrator_pid=os.getpid(),
     )
+    last = (res.last_message or "").strip()
+    if last.upper().startswith("REFUSE"):
+        msg = f"replan refused: {_summary_truncate(last, n=160)}"
+        phase_state.mark_failed(entry.slug, "replan", error=last[:500])
+        return TickResult(ok=False, outcome="refuse", summary=msg)
+    if not res.ok:
+        tail = _tail_log_for_summary(res.log_path) if not last else ""
+        body = last[:160] or tail or f"(see log {res.log_path.name})"
+        msg = f"replan spawn exit={res.exit_code}: {body}"
+        phase_state.mark_failed(entry.slug, "replan", error=msg)
+        return TickResult(ok=False, outcome="error", summary=msg)
 
-    phase_state.mark_ok(entry.slug, "critique", payload={
-        "instance_id": summary.instance_id,
-        "verdict_kind": verdict_kind,
-        "verdict_target": verdict_target,
-        "verdict_applied": verdict_applied,
-    })
+    if replan_json.is_file():
+        try:
+            raw = json.loads(replan_json.read_text())
+            if isinstance(raw, dict):
+                replan_payload.update(raw)
+        except json.JSONDecodeError:
+            logger.warning("replan.json for %s is malformed; ignoring payload", entry.slug)
+
+    _append_commit(
+        replan_payload,
+        _commit_worktree_changes(
+            worktree=worktree,
+            slug=entry.slug,
+            phase="replan",
+            summary="roadmap + ideas reprioritized",
+            paths=("lab/",),
+        ),
+    )
+    phase_state.mark_ok(entry.slug, "replan", payload=replan_payload)
     return None
 
 
-# ----- phase 5: finalize ---------------------------------------------------
+# ----- phase 6: finalize ---------------------------------------------------
 
 
 def _phase_finalize(
@@ -1077,8 +1253,7 @@ def _phase_finalize(
     state: phase_state.SlugPhases,
     cfg: OrchestratorConfig,
 ) -> TickResult | None:
-    """Open (or skip) the PR via ``lab-finalize-pr`` and close the entry."""
-    cx = _codex_cfg(cfg)
+    """Merge the experiment outcome back to ``main`` and clean up."""
     pre = state.get("preflight").payload
     crit = state.get("critique").payload
     run_payload = state.get("run").payload
@@ -1086,6 +1261,8 @@ def _phase_finalize(
     instance_id = crit.get("instance_id") or run_payload.get("instance_id")
     branch = pre.get("branch", "")
     worktree = Path(pre.get("worktree", ""))
+    cx = _worktree_cx(cfg, worktree=worktree)
+    lab_commits = _collect_lab_commits(state)
 
     ds.update_tick(phase="finalize", note=f"lab-finalize-pr verdict={verdict_kind}")
     phase_state.mark_running(entry.slug, "finalize")
@@ -1104,9 +1281,11 @@ def _phase_finalize(
                 entry.slug,
                 f"--worktree={worktree}",
                 f"--branch={branch}",
+                f"--base-branch={preflight_mod.DEFAULT_BASE_BRANCH}",
                 f"--verdict={verdict_kind}",
                 f"--instance-id={instance_id or ''}",
                 f"--finalize-json={finalize_path}",
+                *[f"--lab-commit={sha}" for sha in lab_commits],
                 *repair_args,
             ],
             cfg=cx,
@@ -1135,42 +1314,50 @@ def _phase_finalize(
         else:
             finalize_data = json.loads(finalize_path.read_text())
 
-    _commit_lab_changes(
-        slug=entry.slug, phase="finalize",
-        summary=f"branch={branch} verdict={verdict_kind}",
-    )
+    if not finalize_data.get("merged"):
+        msg = (
+            "finalize did not merge the experiment outcome back to main; "
+            "refusing to advance the daemon"
+        )
+        phase_state.mark_failed(entry.slug, "finalize", error=msg)
+        return TickResult(ok=False, outcome="error", summary=_summary_truncate(msg))
+
+    if finalize_data.get("merged"):
+        try:
+            _fast_forward_parent_main()
+        except Exception as exc:
+            msg = f"main fast-forward failed after finalize merge: {exc}"
+            phase_state.mark_failed(entry.slug, "finalize", error=msg)
+            return TickResult(ok=False, outcome="error", summary=_summary_truncate(msg))
+
+        try:
+            labtree.mark_diff_merged(
+                slug=entry.slug,
+                instance_id=str(instance_id or ""),
+                kind=str(verdict_kind),
+                target_id=str(crit.get("verdict_target") or ""),
+                applied_by="auto:finalize",
+                rationale=str(crit.get("verdict_rationale") or ""),
+                from_id=str(run_payload.get("trunk_at_runtime") or "") or None,
+                pr_url=str(finalize_data.get("pr_url") or "") or None,
+                branch_sha=str(finalize_data.get("discarded_sha") or "") or None,
+            )
+        except Exception:
+            logger.exception("failed to mark merged diff for %s", entry.slug)
 
     # Worktree cleanup (deterministic, this module).
-    if finalize_data.get("cleanup_worktree"):
+    if finalize_data.get("cleanup_worktree", True):
         try:
             preflight_mod.remove_worktree(entry.slug)
             logger.info("removed worktree for %s after %s", entry.slug, verdict_kind)
         except Exception:
             logger.exception("worktree cleanup failed for %s (non-fatal)", entry.slug)
 
-    # Move the roadmap entry to ## Done.
-    try:
-        codex_adapter.run(
-            "lab-plan-next",
-            ["done", entry.slug,
-             f"--ran=runs/experiments/{instance_id}" if instance_id else "",
-             "--outcome=auto"],
-            cfg=cx,
-            expected_orchestrator_pid=os.getpid(),
-            parent_run_dir=Path(run_payload["run_dir"]) if run_payload.get("run_dir") else None,
-        )
-        _commit_lab_changes(
-            slug=entry.slug, phase="finalize-done",
-            summary="moved to ## Done",
-        )
-    except Exception:
-        logger.exception(
-            "lab-plan-next failed for %s; entry may stay in Up next "
-            "(operator should investigate)", entry.slug,
-        )
-
     phase_state.mark_ok(entry.slug, "finalize", payload=finalize_data)
-    ds.update_tick(phase="done", note=f"closed runs/experiments/{instance_id}")
+    ds.update_tick(
+        phase="done",
+        note=f"merged experiment outcome for runs/experiments/{instance_id}",
+    )
     return None
 
 
@@ -1190,6 +1377,7 @@ _PHASE_DISPATCH: tuple[
     ("implement", _phase_implement),
     ("run",       _phase_run),
     ("critique",  _phase_critique),
+    ("replan",    _phase_replan),
     ("finalize",  _phase_finalize),
 )
 
@@ -1292,83 +1480,6 @@ def _process_entry(entry: RoadmapEntry, cfg: OrchestratorConfig) -> TickResult:
     )
 
 
-# Cache for `_find_unmerged_addbranch_prs` so the daemon doesn't
-# spam the GitHub API at every poll (`gh pr view` is rate-limited).
-# Keyed by PR URL → (checked_at_monotonic, is_merged_bool).
-_PR_MERGE_CACHE: dict[str, tuple[float, bool]] = {}
-_PR_MERGE_CACHE_TTL_SEC = 90.0
-
-
-def _find_unmerged_addbranch_prs() -> list[str]:
-    """Return PR URLs of AddBranch experiments that have NOT yet merged.
-
-    `lab/configs.md` is auto-applied at critique time and committed
-    straight to `main`; the matching code lives in `lab/<slug>` and
-    only lands on `main` when its PR merges. Between those two
-    events the trunk-branch graph references files that don't exist
-    yet on `main`, so the daemon must wait before forking the next
-    experiment off `main`.
-
-    The check is best-effort: if `gh` is missing or the call fails,
-    we return ``[]`` (don't block) and log a one-line warning. The
-    safety net is the per-experiment preflight, which would notice
-    a missing file before billing the operator for a real spawn.
-    """
-    import json as _json
-    import shutil
-    import subprocess
-
-    if not shutil.which("gh"):
-        return []
-    try:
-        with labdb.reader() as conn:
-            rows = conn.execute(
-                "SELECT pr_url FROM tree_diffs "
-                "WHERE kind = 'add_branch' AND pr_url IS NOT NULL"
-            ).fetchall()
-    except Exception:  # noqa: BLE001
-        logger.exception("could not query tree_diffs for AddBranch PRs (non-fatal)")
-        return []
-
-    now = time.monotonic()
-    open_urls: list[str] = []
-    for (url,) in rows:
-        if not url:
-            continue
-        cached = _PR_MERGE_CACHE.get(url)
-        if cached and (now - cached[0]) < _PR_MERGE_CACHE_TTL_SEC:
-            if not cached[1]:
-                open_urls.append(url)
-            continue
-        try:
-            proc = subprocess.run(
-                ["gh", "pr", "view", url, "--json", "state,mergedAt"],
-                check=False, capture_output=True, text=True, timeout=20,
-            )
-        except Exception:  # noqa: BLE001
-            logger.exception("`gh pr view %s` raised; treating as unknown", url)
-            continue
-        if proc.returncode != 0:
-            logger.warning(
-                "`gh pr view %s` exit=%d: %s",
-                url, proc.returncode, proc.stderr.strip()[:200],
-            )
-            continue
-        try:
-            data = _json.loads(proc.stdout or "{}")
-        except _json.JSONDecodeError:
-            logger.warning("`gh pr view %s` returned invalid JSON", url)
-            continue
-        is_merged = (
-            (data.get("state") or "").upper() == "MERGED"
-            and bool(data.get("mergedAt"))
-        )
-        _PR_MERGE_CACHE[url] = (now, is_merged)
-        if not is_merged:
-            open_urls.append(url)
-    return open_urls
-
-
 def _select_next_entry(
     ready: list[RoadmapEntry], state: ds.DaemonState,
 ) -> RoadmapEntry | None:
@@ -1460,27 +1571,6 @@ def loop(cfg: OrchestratorConfig | None = None) -> None:
                 )
             else:
                 _idle_log("no ready roadmap entries", cfg.idle_sleep_sec)
-            _idle_wait(cfg.idle_sleep_sec)
-            continue
-
-        # Block on unmerged AddBranch PRs from prior experiments.
-        # `lab/configs.md` on `main` already references those
-        # branches as nodes in the configuration tree; if the next
-        # experiment forks `main` while the supporting code is still
-        # in an open PR, the worktree's tree resolution will refer to
-        # files that don't yet exist on the base branch. Auto-merge
-        # is enabled for AddBranch PRs (see lab-finalize-pr) so this
-        # is normally a sub-minute wait — only blocks when CI fails
-        # or a required check is slow. See lab/METHODOLOGY.md §6.
-        unmerged_open = _find_unmerged_addbranch_prs()
-        if unmerged_open:
-            preview = ", ".join(unmerged_open[:3])
-            extra = f" (+{len(unmerged_open) - 3} more)" if len(unmerged_open) > 3 else ""
-            _idle_log(
-                f"waiting on {len(unmerged_open)} unmerged AddBranch PR(s): "
-                f"{preview}{extra}",
-                cfg.idle_sleep_sec,
-            )
             _idle_wait(cfg.idle_sleep_sec)
             continue
 

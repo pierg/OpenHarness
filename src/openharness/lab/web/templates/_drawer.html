@@ -11,33 +11,6 @@
   </div>
 {% endif %}
 
-{% if pending.staged_graduates %}
-  <div class="mb-4">
-    <div class="text-xs font-semibold uppercase text-slate-500 mb-1">Trunk swap (graduate)</div>
-    {% for d in pending.staged_graduates %}
-      <div class="border border-amber-300 bg-amber-50 rounded-md p-2 mb-2">
-        <a href="/experiments/{{ d.instance_id }}" class="block hover:underline">
-          <div class="font-medium text-amber-900">{{ d.target_id }}</div>
-          <div class="text-xs text-amber-800 truncate">{{ d.rationale or "—" }}</div>
-        </a>
-        {% if identity.can_write %}
-        <form class="mt-2 flex gap-1.5"
-              hx-post="/api/cmd" hx-target="#cmd-result" hx-swap="innerHTML"
-              hx-confirm="Confirm trunk swap to {{ d.target_id }}? This rewrites trunk.yaml.">
-          <input type="hidden" name="cmd_id" value="graduate-confirm">
-          <input type="hidden" name="slug" value="{{ d.slug }}">
-          <input type="text" name="applied_by" value="{{ identity.email or 'human:webui' }}"
-                 class="flex-1 min-w-0 text-xs border border-amber-300 rounded px-1.5 py-1 font-mono">
-          <button class="text-xs bg-amber-700 hover:bg-amber-800 text-white rounded px-2 py-1 whitespace-nowrap">
-            Confirm
-          </button>
-        </form>
-        {% endif %}
-      </div>
-    {% endfor %}
-  </div>
-{% endif %}
-
 {% if pending.suggested %}
   <div class="mb-4">
     <div class="text-xs font-semibold uppercase text-slate-500 mb-1">Suggested experiments</div>

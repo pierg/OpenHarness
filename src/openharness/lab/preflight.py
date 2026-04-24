@@ -1,24 +1,23 @@
 """Deterministic git preflight + worktree management for the lab pipeline.
 
-The autonomous lab loop runs experiments by branching off the current HEAD
-of the parent repo into an isolated worktree. This module owns every git
+The autonomous lab loop runs experiments by branching off ``main``
+into an isolated worktree. This module owns every git
 operation in that path: it never spawns a codex agent, never touches a
 markdown file, and refuses to do anything if the parent repo is in an
 ambiguous state.
 
 Why a separate module:
 
--   The phase-0 contract is "the worktree exists, on a known branch,
-    pointing at a recorded SHA, with the parent repo provably clean".
+-   The phase-0 contract is "the parent repo is on a clean, synced
+    `main`; the worktree exists on a known branch at a recorded SHA".
     Failing fast here costs nothing; failing inside an LLM spawn costs
     money and produces noisy logs.
 -   Worktree create/remove is a primitive several phases need:
     preflight creates one, finalize removes one (after Reject/NoOp), the
     operator-facing ``lab preflight`` CLI lets a human do either.
--   The base-branch policy is configurable but defaults to "whatever
-    HEAD is checked out in the parent repo right now". This matches the
-    intuition that experiments should test the code the operator is
-    currently iterating on, not a stale ``main``.
+-   The base-branch policy is intentionally strict: experiments always
+    fork from ``main`` so each merged experiment PR is the only way the
+    daemon advances shared state.
 
 Layout:
 
@@ -53,6 +52,9 @@ WORKTREES_ROOT: Path = REPO_ROOT.parent / f"{REPO_ROOT.name}.worktrees"
 DEFAULT_BRANCH_PREFIX: str = "lab/"
 """All experiment branches are named ``lab/<slug>``."""
 
+DEFAULT_BASE_BRANCH: str = "main"
+"""Experiments always fork from ``main`` under the refactored loop."""
+
 
 class PreflightError(RuntimeError):
     """Base class for all preflight failures.
@@ -77,6 +79,14 @@ class NoUpstreamError(PreflightError):
 
 class WorktreeExistsError(PreflightError):
     """Asked to create a worktree that already exists at a different SHA."""
+
+
+class WrongBaseBranchError(PreflightError):
+    """Parent repo is not checked out on the required base branch."""
+
+
+class DivergedBaseBranchError(PreflightError):
+    """Local ``main`` is ahead of or diverged from ``origin/main``."""
 
 
 @dataclass(slots=True, frozen=True)
@@ -233,6 +243,48 @@ def assert_pushed(
     _git(["push"], cwd=repo_root)
 
 
+def assert_on_branch(expected: str, *, repo_root: Path = REPO_ROOT) -> None:
+    """Raise if the parent repo is not checked out on ``expected``."""
+    actual = current_branch(repo_root)
+    if actual != expected:
+        raise WrongBaseBranchError(
+            f"Parent repo must stay on {expected!r}; currently on {actual!r}. "
+            f"Switch back to `{expected}` before running preflight."
+        )
+
+
+def sync_branch_to_origin(branch: str, *, repo_root: Path = REPO_ROOT) -> None:
+    """Fast-forward ``branch`` to ``origin/<branch>`` or fail loudly.
+
+    The daemon's source of truth is ``main`` on the remote. Local
+    commits ahead of or diverged from ``origin/main`` would make the
+    experiment's base ambiguous, so we refuse them instead of pushing
+    directly to main.
+    """
+    _git(["fetch", "origin", branch], cwd=repo_root)
+    proc = _git(
+        ["rev-list", "--left-right", "--count", f"{branch}...origin/{branch}"],
+        cwd=repo_root,
+    )
+    left_s, right_s = (proc.stdout.strip() or "0\t0").split()
+    local_only = int(left_s)
+    remote_only = int(right_s)
+    if local_only and remote_only:
+        raise DivergedBaseBranchError(
+            f"Local {branch!r} diverged from origin/{branch}; reconcile it "
+            "manually before running the lab daemon."
+        )
+    if local_only:
+        raise DivergedBaseBranchError(
+            f"Local {branch!r} is {local_only} commit(s) ahead of origin/{branch}. "
+            "The daemon will not push directly to main; merge or reset these "
+            "changes manually first."
+        )
+    if remote_only:
+        _git(["merge", "--ff-only", f"origin/{branch}"], cwd=repo_root)
+        logger.info("fast-forwarded %s to origin/%s", branch, branch)
+
+
 # ---------------------------------------------------------------------------
 # Worktree lifecycle
 # ---------------------------------------------------------------------------
@@ -259,6 +311,27 @@ def list_worktrees(repo_root: Path = REPO_ROOT) -> list[Path]:
 def worktree_exists(slug: str, repo_root: Path = REPO_ROOT) -> bool:
     target = _worktree_path_for(slug).resolve()
     return any(p == target for p in list_worktrees(repo_root))
+
+
+def _ensure_shared_runs_link(*, worktree: Path, repo_root: Path) -> None:
+    """Point ``<worktree>/runs`` at the parent repo's shared ``runs/``.
+
+    The worktree owns branch-local tracked files (source + ``lab/``),
+    while the parent repo owns machine-local run artifacts under
+    ``runs/``. A symlink keeps both truths visible when a skill
+    executes ``uv run lab`` from inside the worktree.
+    """
+    target = repo_root / "runs"
+    link = worktree / "runs"
+    if link.is_symlink():
+        current = link.resolve(strict=False)
+        if current == target.resolve():
+            return
+        link.unlink()
+    elif link.exists():
+        return
+    link.symlink_to(target)
+    logger.info("linked %s -> %s", link, target)
 
 
 def create_worktree(
@@ -289,6 +362,7 @@ def create_worktree(
         existing_sha = _git(["rev-parse", "HEAD"], cwd=wt_path).stdout.strip()
         if existing_sha == base_sha:
             logger.info("worktree %s already exists at %s; reusing", wt_path, base_sha[:8])
+            _ensure_shared_runs_link(worktree=wt_path, repo_root=repo_root)
             return WorktreeInfo(
                 slug=slug, path=wt_path, branch=branch,
                 base_sha=base_sha, base_branch=base_branch,
@@ -319,6 +393,7 @@ def create_worktree(
         args = ["worktree", "add", "-b", branch, str(wt_path), base_sha]
 
     _git(args, cwd=repo_root)
+    _ensure_shared_runs_link(worktree=wt_path, repo_root=repo_root)
     logger.info(
         "created worktree %s on branch %s at %s",
         wt_path, branch, base_sha[:8],
@@ -390,20 +465,18 @@ def run_preflight(
     slug: str,
     *,
     repo_root: Path = REPO_ROOT,
-    base_branch: str | None = None,
+    base_branch: str | None = DEFAULT_BASE_BRANCH,
     auto_push: bool = False,
-    allow_lab_markdown_dirty: bool = True,
+    allow_lab_markdown_dirty: bool = False,
 ) -> PreflightResult:
     """The full phase-0 contract in one call.
 
     Steps, in order:
 
-    1. Resolve the base branch — either the explicit ``base_branch``
-       argument, or the parent repo's current HEAD branch.
-    2. Assert the parent repo is clean (allowing lab/*.md edits the
-       daemon may have queued for its own next commit).
-    3. (If ``auto_push``) Push any unpushed commits on the base branch.
-       Otherwise just verify HEAD == upstream.
+    1. Assert the parent repo is checked out on ``main`` (or the
+       explicit ``base_branch`` override).
+    2. Assert the parent repo is clean.
+    3. Fast-forward the base branch to ``origin/<base_branch>``.
     4. Capture the base SHA.
     5. Create / reuse the worktree.
 
@@ -411,26 +484,27 @@ def run_preflight(
     side effects. Rerunning after a partial failure (e.g. dirty repo)
     raises the same error until the operator fixes it.
     """
-    branch = base_branch or current_branch(repo_root)
+    branch = base_branch or DEFAULT_BASE_BRANCH
     if branch == "HEAD":
         raise PreflightError(
             f"Parent repo {repo_root} is in detached HEAD; "
             "checkout a branch before running preflight."
         )
 
+    assert_on_branch(branch, repo_root=repo_root)
+
     assert_clean(
         repo_root=repo_root,
         allow_lab_markdown_dirty=allow_lab_markdown_dirty,
     )
 
-    # Push enforcement is opt-in: many dev workflows iterate locally
-    # before pushing, and we don't want preflight to gate on network.
-    # The daemon turns this on; the operator CLI can override.
     if auto_push:
-        try:
-            assert_pushed(branch, repo_root=repo_root, auto_push=True)
-        except NoUpstreamError as exc:
-            logger.warning("skipping push enforcement: %s", exc)
+        logger.info(
+            "preflight --auto-push is deprecated for the main-branch loop; "
+            "ignoring and syncing %s from origin instead",
+            branch,
+        )
+    sync_branch_to_origin(branch, repo_root=repo_root)
 
     base_sha = head_sha(repo_root)
     info = create_worktree(

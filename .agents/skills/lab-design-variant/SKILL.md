@@ -97,9 +97,10 @@ roadmap entry's Hypothesis verbatim if useful.>
 ## Slice
 
 The slice is the contract the run phase will execute. **You MUST
-satisfy [`lab/METHODOLOGY.md`](../../../lab/METHODOLOGY.md) §2** —
-declare a shape, cite evidence, count trials, and confirm the
-§6 verdict floor (`MIN_TRIALS_PER_LEG_FOR_VERDICT = 5`) is clearable.
+satisfy [`lab/METHODOLOGY.md`](../../../lab/METHODOLOGY.md) §§2, 4,
+and 6** — declare a shape, cite evidence, count trials, pick a sane
+`n_attempts`, and confirm the verdict floor
+(`MIN_TRIALS_PER_LEG_FOR_VERDICT = 5`) is clearable.
 
 Two named slices, both running on the **same** experiment spec — the
 implement phase distinguishes them via the spec's `profiles:` block.
@@ -111,20 +112,19 @@ implement phase distinguishes them via the spec's `profiles:` block.
   is **not** required — only "no crash". Reuse the standard smoke
   task list from `experiments/tb2-baseline.yaml > profiles.smoke`
   unless the variant needs different tasks (state which and why).
-  **Smoke never produces a verdict** (METHODOLOGY §8 / §9).
+  **Smoke never produces a verdict** (METHODOLOGY §9).
 - **Full (verdict-bearing):** the meaningful slice the run phase
   executes with `uv run exec <spec>` (no `--profile`). Pick exactly
   one allowed shape from METHODOLOGY §2:
     - `full-bench` — every task in `terminal-bench@2.0` (~89
       tasks/leg). Default for any variant claiming to move the
       aggregate pass rate. **Required for `Graduate` verdicts.**
-    - `cluster: <names>` — only the task-feature clusters this
-      variant claims to address. **You MUST cite Appendix B of
-      METHODOLOGY.md** for the cluster sizes; in `tb2` only
-      `python_data` and `python_ml` (n=7) clear the floor at
-      `n_attempts=1`. Any other cluster needs `cluster_combined:`
-      (DEFERRED, see ideas.md > Framework) or `paired-double`
-      repetitions.
+    - `cluster:<name>` — only the task-feature cluster this variant
+      claims to address. Keep the cluster size explicit and make sure
+      `n_tasks × n_attempts >= 5`.
+    - `cluster_combined:<a,b,...>` — when one cluster is too small
+      on its own but the combined population still matches the
+      hypothesis.
     - `near-miss` — the failing-by-≤K-turns subset of a prior run
       (budget / compaction / loop-guard style variants). Cite the
       prior `instance_id` and the exact selection criterion.
@@ -145,19 +145,19 @@ implement phase distinguishes them via the spec's `profiles:` block.
 
 How many times each `(leg, task)` cell runs. Bounds per-cell noise;
 does NOT extend coverage. **You MUST satisfy METHODOLOGY §4** — pick
-one mode and justify against the decision matrix there.
+the smallest `n_attempts` that matches the slice size and expected
+mechanism noise.
 
-- **Mode:** one of `single-shot` (n_attempts=1) | `paired-double`
-  (n_attempts=2) | `replication: r` (Graduate gate only, see
-  METHODOLOGY §7).
+- **Mode:** one of `single-shot` (n_attempts=1) or `paired-double`
+  (n_attempts=2).
 - **Justification:** name the slice size band (small ≤ 30 / large
   ≥ 30 trials/leg) and the mechanism noise band (high if the
   variant has stochastic internal state — sampled plans, runtime
-  nudges, retries; low for pure config / prompt tweaks). The
-  matrix in METHODOLOGY §4 picks the mode from those two axes.
+  nudges, retries; low for pure config / prompt tweaks). In
+  general, `full-bench` uses 1 and smaller/noisier slices use 2.
 - **Spec mapping:** the chosen `n_attempts` becomes the
   experiment spec's global `n_attempts:` value. Per-leg overrides
-  are forbidden (METHODOLOGY §8 anti-pattern).
+  are forbidden (METHODOLOGY §9 anti-pattern).
 
 ## Slice > Control
 
@@ -181,7 +181,7 @@ A flat list, repo-relative. Be specific.
   structure demands it (METHODOLOGY §3 — variable has > 2 levels,
   or two independent variables share a slice for ~50% marginal
   cost). Each leg differs from its control in **exactly one
-  axis** — confounded ablations are forbidden (METHODOLOGY §8).
+  axis** — confounded ablations are forbidden (METHODOLOGY §9).
   MUST include `task_filter:` (the full slice) at the top level AND
   a `profiles.smoke` block (the smoke slice) so the implement phase
   can run both. The spec's `n_attempts:` is global per Slice >

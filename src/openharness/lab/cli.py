@@ -39,6 +39,7 @@ from __future__ import annotations
 
 import json
 import os
+import subprocess
 import sys
 from datetime import datetime, timezone
 import time
@@ -51,6 +52,7 @@ from rich.table import Table
 
 from openharness.lab import critic_io
 from openharness.lab import db as labdb
+from openharness.lab import gcs_sync
 from openharness.lab import ingest as labingest
 from openharness.lab import lab_docs
 from openharness.lab.paths import (
@@ -74,7 +76,7 @@ roadmap_app = typer.Typer(no_args_is_help=True, help="Edit lab/roadmap.md.")
 daemon_app = typer.Typer(no_args_is_help=True, help="Orchestrator daemon (Phase 2).")
 tree_app = typer.Typer(no_args_is_help=True, help="Inspect / mutate the configuration tree (lab/configs.md).")
 trunk_app = typer.Typer(no_args_is_help=True, help="Show / set the trunk pointer.")
-graduate_app = typer.Typer(no_args_is_help=True, help="Confirm or reject staged trunk swaps.")
+graduate_app = typer.Typer(no_args_is_help=True, help="Legacy staged-graduate repair helpers.")
 components_app = typer.Typer(no_args_is_help=True, help="Inspect / mutate the components catalog (lab/components.md).")
 runs_app = typer.Typer(no_args_is_help=True, help="Manage runs/experiments/<id>/ directories on disk.")
 preflight_app = typer.Typer(
@@ -643,8 +645,10 @@ def cmd_exp_set_branch(
     rejected_reason: Optional[str] = typer.Option(
         None,
         "--rejected-reason",
-        help="One-line reason. Renders as `Branch: <branch> — not "
-             "opened (<reason>)`. Mutually exclusive with --pr-url.",
+        help="One-line reason. Without --pr-url this renders as "
+             "`Branch: <branch> — not opened (<reason>)`. With "
+             "--pr-url it becomes a metadata-only merge note for "
+             "reject/noop outcomes.",
     ),
     discarded_sha: Optional[str] = typer.Option(
         None,
@@ -661,15 +665,12 @@ def cmd_exp_set_branch(
     push the experiment branch and open a PR (verdict AddBranch /
     Graduate) or to discard the worktree (verdict Reject / NoOp).
     Also writes the PR URL / discarded SHA into the `tree_diffs`
-    cache so downstream tooling (web UI, `lab graduate confirm`,
-    daemon block-on-unmerged check) can find them with a SQL query.
+    cache so downstream tooling (web UI, audit queries, finalize
+    recovery) can find them with a SQL query.
     Idempotent — safe to re-run with the same arguments.
     """
-    if pr_url and rejected_reason:
-        typer.echo("[red]--pr-url and --rejected-reason are mutually exclusive[/red]")
-        raise typer.Exit(2)
-    if discarded_sha and pr_url:
-        typer.echo("[red]--discarded-sha and --pr-url are mutually exclusive[/red]")
+    if discarded_sha and not rejected_reason:
+        typer.echo("[red]--discarded-sha requires --rejected-reason[/red]")
         raise typer.Exit(2)
     lab_docs.set_journal_branch(
         slug=slug,
@@ -699,7 +700,13 @@ def cmd_exp_set_branch(
                         "UPDATE tree_diffs SET branch_sha = ? WHERE instance_id = ?",
                         [discarded_sha, instance_id],
                     )
-    if pr_url:
+    if pr_url and rejected_reason:
+        suffix = f"; discarded={discarded_sha[:7]}" if discarded_sha else ""
+        typer.echo(
+            f"set Branch bullet for {slug!r} -> PR {pr_url} "
+            f"(metadata-only merge: {rejected_reason}{suffix})"
+        )
+    elif pr_url:
         typer.echo(f"set Branch bullet for {slug!r} -> PR {pr_url}")
     elif rejected_reason:
         suffix = f"; head={discarded_sha[:7]}" if discarded_sha else ""
@@ -759,6 +766,36 @@ def cmd_roadmap_done(
 ) -> None:
     lab_docs.move_roadmap_entry_to_done(slug=slug, ran_link=ran, outcome=outcome)
     typer.echo(f"moved roadmap entry {slug!r} → ## Done")
+
+
+@roadmap_app.command("move")
+def cmd_roadmap_move(
+    slug: str,
+    before: Optional[str] = typer.Option(None, "--before"),
+    after: Optional[str] = typer.Option(None, "--after"),
+    to_top: bool = typer.Option(False, "--to-top"),
+    to_bottom: bool = typer.Option(False, "--to-bottom"),
+) -> None:
+    """Reorder one `## Up next` entry inside the main queue."""
+    try:
+        lab_docs.move_roadmap_entry(
+            slug=slug,
+            before=before,
+            after=after,
+            to_top=to_top,
+            to_bottom=to_bottom,
+        )
+    except lab_docs.LabDocError as exc:
+        typer.echo(f"[red]{exc}[/red]")
+        raise typer.Exit(2)
+    if before:
+        typer.echo(f"moved roadmap entry {slug!r} before {before!r}")
+    elif after:
+        typer.echo(f"moved roadmap entry {slug!r} after {after!r}")
+    elif to_top:
+        typer.echo(f"moved roadmap entry {slug!r} to the top of ## Up next")
+    else:
+        typer.echo(f"moved roadmap entry {slug!r} to the bottom of ## Up next")
 
 
 @app.command()
@@ -1106,8 +1143,8 @@ def analyze(
 #
 #   lab experiments synthesize <slug>      # write Aggregate / Mutation impact
 #   lab tree apply <slug>                  # tree_ops.evaluate + tree.apply_diff
-#   lab roadmap suggest <new_slug> ...     # if the verdict surfaces a follow-up
-#   lab graduate confirm <slug>            # human-only step for trunk swaps
+#   lab roadmap suggest <new_slug> ...     # legacy suggestion stream
+#   lab graduate confirm <slug>            # legacy/manual escape hatch
 
 
 def _lookup_instance_for_slug(conn: object, slug: str) -> str | None:
@@ -1231,9 +1268,15 @@ def tree_apply(
         help="Print the diff that would be applied; do not write.",
     ),
 ) -> None:
-    """Recompute the TreeDiff for `slug` and apply it to the lab."""
+    """Recompute the TreeDiff for `slug` and apply it to the current checkout.
+
+    On `main`, this is treated as a direct main-line mutation and the
+    DB cache is marked `applied=true`. On any non-`main` branch/worktree
+    it is treated as branch-local materialization pending finalize.
+    """
     from openharness.lab import tree as _tree
     from openharness.lab import tree_ops as _tree_ops
+    from openharness.lab import preflight as _preflight
 
     if instance:
         diff = _tree_ops.evaluate(instance)
@@ -1247,9 +1290,28 @@ def tree_apply(
         typer.echo("(dry-run; no edits)")
         raise typer.Exit(0)
 
-    result = _tree.apply_diff(slug=slug, diff=diff, applied_by=applied_by)
+    try:
+        proc = subprocess.run(
+            ["git", "branch", "--show-current"],
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+        current_branch = proc.stdout.strip() if proc.returncode == 0 else ""
+    except Exception:
+        current_branch = ""
+    mark_applied = current_branch == _preflight.DEFAULT_BASE_BRANCH
+
+    result = _tree.apply_diff(
+        slug=slug,
+        diff=diff,
+        applied_by=applied_by,
+        mark_applied=mark_applied,
+    )
     typer.echo(
-        f"\napplied={result.applied} (by={result.applied_by}); "
+        f"\nbranch_materialized={result.applied} "
+        f"(db_applied={mark_applied}, by={result.applied_by}); "
         f"journal_block_written={result.journal_block_written}"
     )
     for note in result.notes:
@@ -1281,8 +1343,8 @@ def trunk_set(
     """Manually set the `## Trunk` pointer in configs.md (and audit it).
 
     NOTE: this only edits the markdown + audit log. It does NOT copy
-    `<trunk_id>.yaml → trunk.yaml`. Use `lab graduate confirm` for
-    that — it's the path that swaps the actual agent file.
+    `<trunk_id>.yaml → trunk.yaml`. Use `lab graduate confirm` only
+    for legacy staged-graduate repairs.
     """
     from openharness.lab.tree_ops import current_trunk_id, insert_trunk_change
 
@@ -1376,12 +1438,9 @@ def _check_pr_merged(slug: str) -> tuple[bool, str]:
     """Return ``(merged, human_message)`` for the slug's PR.
 
     Looks up `tree_diffs.pr_url` for the latest diff on this slug,
-    then asks `gh` whether the PR has been merged. Used by
-    ``graduate confirm`` (hard gate) and by the daemon's
-    block-on-unmerged check (soft gate — daemon idles instead of
-    failing). Treats any communication error with ``gh`` as
-    "unknown, do not advance" — the operator can override with the
-    documented escape hatch.
+    then asks `gh` whether the PR has been merged. Used only by the
+    legacy ``graduate confirm`` escape hatch. Treats any communication
+    error with ``gh`` as "unknown, do not advance".
     """
     import json as _json
     import shutil
@@ -1481,7 +1540,7 @@ def cmd_roadmap_suggest(
     hypothesis: str = typer.Option(..., "--hypothesis"),
     source: str = typer.Option(
         ..., "--source",
-        help="e.g. 'cross-experiment-critic@2026-04-18' or 'lab-reflect-and-plan'.",
+        help="e.g. 'cross-experiment-critic@2026-04-18' or 'lab-replan-roadmap'.",
     ),
     cost: Optional[str] = typer.Option(None, "--cost"),
 ) -> None:
@@ -2152,6 +2211,127 @@ def runs_prune(
     )
 
 
+@runs_app.command("push-gcs")
+def runs_push_gcs(
+    uri: Optional[str] = typer.Option(
+        None, "--uri",
+        help=(
+            "Portable-artifact mirror root, e.g. gs://my-bucket/openharness/runs. "
+            f"Defaults to ${gcs_sync.GCS_URI_ENV}."
+        ),
+    ),
+    instance_id: Optional[str] = typer.Option(
+        None, "--instance-id",
+        help="Restrict the upload to one runs/experiments/<id>/ directory.",
+    ),
+    include_lab_wide: bool = typer.Option(
+        True, "--lab-wide/--no-lab-wide",
+        help=(
+            "Also sync portable lab-wide file artifacts (task_features, "
+            "cross_experiment, components_perf, auto_proposed, spawns)."
+        ),
+    ),
+    dry_run: bool = typer.Option(
+        False, "--dry-run",
+        help="Print what rsync would do without mutating GCS.",
+    ),
+    delete_unmatched: bool = typer.Option(
+        False, "--delete-unmatched",
+        help=(
+            "Delete GCS objects absent locally. Off by default because a shared "
+            "bucket is typically a merge target, not a destructive mirror."
+        ),
+    ),
+) -> None:
+    """Upload the portable run artifacts to GCS."""
+    try:
+        summary = gcs_sync.sync_portable_runs(
+            direction="push",
+            uri=uri,
+            instance_id=instance_id,
+            include_lab_wide=include_lab_wide,
+            dry_run=dry_run,
+            delete_unmatched=delete_unmatched,
+        )
+    except gcs_sync.GCSRunsSyncError as exc:
+        typer.echo(f"push-gcs failed: {exc}", err=True)
+        raise typer.Exit(1) from exc
+    typer.echo(f"push-gcs: uri={summary.uri}")
+    typer.echo(f"  synced : {', '.join(summary.synced) or '(none)'}")
+    typer.echo(f"  skipped: {', '.join(summary.skipped) or '(none)'}")
+
+
+@runs_app.command("pull-gcs")
+def runs_pull_gcs(
+    uri: Optional[str] = typer.Option(
+        None, "--uri",
+        help=(
+            "Portable-artifact mirror root, e.g. gs://my-bucket/openharness/runs. "
+            f"Defaults to ${gcs_sync.GCS_URI_ENV}."
+        ),
+    ),
+    instance_id: Optional[str] = typer.Option(
+        None, "--instance-id",
+        help="Restrict the download to one runs/experiments/<id>/ directory.",
+    ),
+    include_lab_wide: bool = typer.Option(
+        True, "--lab-wide/--no-lab-wide",
+        help=(
+            "Also pull portable lab-wide file artifacts (task_features, "
+            "cross_experiment, components_perf, auto_proposed, spawns)."
+        ),
+    ),
+    refresh_cache: bool = typer.Option(
+        True, "--refresh-cache/--no-refresh-cache",
+        help=(
+            "Rebuild runs/lab/trials.duckdb from the pulled portable files after "
+            "download. Recommended on laptops; skip if another local writer is active."
+        ),
+    ),
+    dry_run: bool = typer.Option(
+        False, "--dry-run",
+        help="Print what rsync would do without writing local files.",
+    ),
+    delete_unmatched: bool = typer.Option(
+        False, "--delete-unmatched",
+        help=(
+            "Delete local files absent from GCS. Off by default to preserve "
+            "machine-local artifacts outside the shared mirror."
+        ),
+    ),
+) -> None:
+    """Download the portable run artifacts from GCS."""
+    try:
+        summary = gcs_sync.sync_portable_runs(
+            direction="pull",
+            uri=uri,
+            instance_id=instance_id,
+            include_lab_wide=include_lab_wide,
+            dry_run=dry_run,
+            delete_unmatched=delete_unmatched,
+        )
+    except gcs_sync.GCSRunsSyncError as exc:
+        typer.echo(f"pull-gcs failed: {exc}", err=True)
+        raise typer.Exit(1) from exc
+    typer.echo(f"pull-gcs: uri={summary.uri}")
+    typer.echo(f"  synced : {', '.join(summary.synced) or '(none)'}")
+    typer.echo(f"  skipped: {', '.join(summary.skipped) or '(none)'}")
+    if dry_run or not refresh_cache:
+        return
+    refresh = gcs_sync.refresh_local_cache()
+    typer.echo(
+        "  cache   : "
+        f"runs={refresh.runs_ingested} "
+        f"legs={refresh.legs_inserted} "
+        f"trials={refresh.trials_inserted} "
+        f"trial_critiques={refresh.trial_critiques} "
+        f"comparisons={refresh.comparisons} "
+        f"task_features={refresh.task_features} "
+        f"components_perf={refresh.components_perf} "
+        f"spawns={refresh.spawns}"
+    )
+
+
 # ===== preflight (Phase 0 of the lab pipeline) ==============================
 
 
@@ -2263,7 +2443,7 @@ def cmd_phases_reset(
     phase: Optional[str] = typer.Option(
         None, "--phase",
         help="Reset only this phase (preflight | design | implement | "
-             "run | critique | finalize). Omit to delete the entire "
+             "run | critique | replan | finalize). Omit to delete the entire "
              "phases.json.",
     ),
 ) -> None:

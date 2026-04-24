@@ -273,7 +273,7 @@ Reply to the orchestrator / user with:
     `### Tree effect` block is written by `uv run lab tree apply`,
     which calls `tree_ops.evaluate`. Follow-up ideas in
     `## Auto-proposed` are written by `cross-experiment-critic` /
-    `lab-reflect-and-plan`. **You only write JSON files.**
+    `lab-replan-roadmap`. **You only write JSON files.**
 -   Never ingest, never run new agents, never modify any
     `runs/experiments/*` artifact other than
     `results/critic_summary.md` and the files under `critic/`.

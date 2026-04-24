@@ -19,10 +19,9 @@ the single ``TreeDiff`` that the experiment justifies.
 
 ``evaluate(instance_id) -> TreeDiff`` is the only public entry
 point. It is **deterministic**: same DB + same critic JSONs in,
-same ``TreeDiff`` out. The verdict is then either auto-applied
-(``add_branch`` / ``reject`` / ``no_op``) by the daemon or staged
-for human confirmation (``graduate``) via
-``uv run lab graduate confirm``.
+same ``TreeDiff`` out. The critique phase materializes that verdict
+on the experiment branch; finalize then turns the branch outcome
+into one or more merged PRs back to ``main``.
 
 The thresholds below are module-level constants so they can be
 tuned without touching the rest of the pipeline. Their semantic
@@ -62,8 +61,8 @@ REJECT_PASS_RATE_DELTA_PP: float = -2.0
 REJECT_COST_PER_PASS_DELTA_PCT: float = 50.0
 
 # NoOp confidence is `1 - (effect_size / smallest_meaningful_effect)`,
-# clamped to [0, 1]. Drives `lab-reflect-and-plan`'s decision on
-# whether to re-run at higher N.
+# clamped to [0, 1]. Drives the replan step's decision on whether to
+# queue a wider re-run.
 SMALLEST_MEANINGFUL_EFFECT_PP: float = 5.0
 
 # Verdict floor: an experiment whose smallest leg has fewer trials
@@ -86,15 +85,16 @@ class TreeDiff:
     """A single proposed mutation of the configuration tree.
 
     Produced by ``evaluate(instance_id)`` and consumed by
-    ``uv run lab tree apply <slug>``. Applying a TreeDiff:
+    ``uv run lab tree apply <slug>`` or the daemon's critique phase.
+    Materializing a TreeDiff on an experiment branch:
 
-    - ``graduate``: ``trunk.yaml`` swaps to ``target_id``; the old
-      trunk moves to a branch (or is rejected if regressions were
-      observed). HUMAN-CONFIRMED.
-    - ``add_branch``: ``target_id`` is appended to ``configs.md
-      > ## Branches`` with ``use_when`` as the predicate. AUTO.
-    - ``reject``: ``target_id`` is appended to ``configs.md
-      > ## Rejected`` with ``rationale`` as the reason. AUTO.
+    - ``graduate``: the candidate becomes the branch-local trunk and
+      the previous trunk is archived as a branch.
+    - ``add_branch``: ``target_id`` is appended to
+      ``configs.md > ## Branches`` with ``use_when`` as the
+      predicate.
+    - ``reject``: ``target_id`` is appended to
+      ``configs.md > ## Rejected`` with ``rationale`` as the reason.
     - ``no_op``: nothing changes; ``confidence`` records how
       surprised we'd be by a different verdict on a re-run.
     """

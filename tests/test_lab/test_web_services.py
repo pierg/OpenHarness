@@ -282,7 +282,39 @@ def client(monkeypatch: pytest.MonkeyPatch) -> TestClient:
     return TestClient(create_app())
 
 
-def test_daemon_page_renders_services_and_process_tree(client: TestClient) -> None:
+def _sample_unit_rows() -> list[labsvc.UnitStatus]:
+    """Deterministic rows so the services partial is assertable without systemctl."""
+    return [
+        labsvc.UnitStatus(
+            unit_id="openharness-lab",
+            description="FastAPI web UI (this process)",
+            load_state="loaded",
+            active_state="active",
+            sub_state="running",
+            is_active=True,
+            is_enabled=True,
+            is_installed=True,
+            main_pid=123,
+            started_at=None,
+        ),
+        labsvc.UnitStatus(
+            unit_id="openharness-daemon",
+            description="Orchestrator daemon (walks the roadmap)",
+            load_state="loaded",
+            active_state="inactive",
+            sub_state="dead",
+            is_active=False,
+            is_enabled=True,
+            is_installed=True,
+            main_pid=None,
+            started_at=None,
+        ),
+    ]
+
+
+def test_daemon_page_renders_services_and_process_tree(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """The redesigned daemon cockpit still surfaces services + process tree.
 
     After the redesign these panels live inside the collapsed
@@ -292,6 +324,10 @@ def test_daemon_page_renders_services_and_process_tree(client: TestClient) -> No
     and only shows up after the panel is opened — see
     :func:`test_hx_partials_return_200` for the unit-id check).
     """
+    # Hosts without ``systemctl`` (macOS, minimal CI) get a stub partial;
+    # assert full table content using a fixed snapshot.
+    monkeypatch.setattr(labsvc, "available", lambda: True)
+    monkeypatch.setattr(labsvc, "all_status", _sample_unit_rows)
     r = client.get("/daemon")
     assert r.status_code == 200
     body = r.text
