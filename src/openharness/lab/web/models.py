@@ -34,7 +34,7 @@ class DaemonStatus:
 
 @dataclass(eq=False, slots=True)
 class PhaseView:
-    """One step inside the orchestrator's 6-phase pipeline.
+    """One step inside the orchestrator's 7-phase pipeline.
 
     Mirrors :class:`openharness.lab.phase_state.PhaseRecord` plus the
     fields the cockpit's pipeline strip needs to render a status pill
@@ -67,7 +67,7 @@ class PipelineView:
     so the operator still sees a meaningful narrative ("here's where
     the last run got to").
 
-    Always carries six :class:`PhaseView` rows in
+    Always carries seven :class:`PhaseView` rows in
     :data:`openharness.lab.phase_state.PHASE_ORDER` so the template
     can render the strip without conditional bookkeeping.
     """
@@ -260,7 +260,6 @@ class JournalEntryView:
 class PendingActions:
     """Aggregated human-gate inbox (the right-rail drawer)."""
 
-    staged_graduates: list[TreeDiffRow]
     suggested: list[SuggestedEntryView]
     auto_proposed: list[IdeaEntryView]
     misconfig_recent: int
@@ -269,8 +268,7 @@ class PendingActions:
     @property
     def total(self) -> int:
         return (
-            len(self.staged_graduates)
-            + len(self.suggested)
+            len(self.suggested)
             + len(self.auto_proposed)
             + (1 if self.misconfig_recent else 0)
             + (1 if self.failed_spawns_recent else 0)
@@ -507,7 +505,6 @@ class DaemonIdleReason:
       - ``paused``         — daemon mode == "paused"
       - ``manual_no_appr`` — manual mode, no approved+ready entries
       - ``no_queue``       — autonomous (or manual) but nothing ready
-      - ``pr_blocked``     — at least one AddBranch PR is unmerged
       - ``stopped``        — daemon is not running at all
       - ``unknown``        — fallback so the UI never renders "" badge
     """

@@ -1,7 +1,7 @@
 {# The "what is the daemon doing right now" centerpiece.
 
-   Renders a horizontal 6-step pipeline (preflight → design → implement
-   → run → critique → finalize) as a strip of status pills, with the
+   Renders a horizontal 7-step pipeline (preflight → design → implement
+   → run → critique → replan → finalize) as a strip of status pills, with the
    active phase visually pulsing and finished phases collapsing their
    duration into the cell.
 
@@ -30,7 +30,8 @@
   "implement": "lab-implement-variant codex spawn (worktree-write)",
   "run": "harbor exec + poll for results/summary.md",
   "critique": "ingest + per-trial critic + tree apply",
-  "finalize": "lab-finalize-pr codex spawn + cleanup",
+  "replan": "lab-replan-roadmap codex spawn + roadmap rewrite",
+  "finalize": "lab-finalize-pr codex spawn + merge to main",
 } %}
 {% set PHASE_GLYPHS = {
   "ok": "✓",
@@ -196,7 +197,7 @@
       {% endif %}
 
       {% if pipeline.current_phase and pipeline.current_phase in (
-        "preflight", "design", "implement", "run", "critique", "finalize"
+        "preflight", "design", "implement", "run", "critique", "replan", "finalize"
       ) %}
         <form hx-post="/api/cmd" hx-target="#cmd-result" hx-swap="innerHTML"
               hx-confirm="Re-run the {{ pipeline.current_phase }} phase on the next tick? Earlier OK phases stay; later phases re-run too.">

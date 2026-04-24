@@ -2,7 +2,7 @@
 
 Each roadmap entry the orchestrator picks up advances through a fixed
 sequence of phases (preflight → design → implement → run → critique →
-finalize). This module owns the durable record of "where in that
+replan → finalize). This module owns the durable record of "where in that
 sequence are we, and what artifact did each phase produce", stored as
 one JSON file per slug under ``runs/lab/state/<slug>/phases.json``.
 
@@ -58,10 +58,11 @@ PhaseName = Literal[
     "implement",
     "run",
     "critique",
+    "replan",
     "finalize",
 ]
 PHASE_ORDER: tuple[PhaseName, ...] = (
-    "preflight", "design", "implement", "run", "critique", "finalize",
+    "preflight", "design", "implement", "run", "critique", "replan", "finalize",
 )
 
 

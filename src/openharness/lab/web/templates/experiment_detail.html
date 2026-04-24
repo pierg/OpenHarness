@@ -11,67 +11,27 @@
   {% endif %}
   {% if verdict %}
     <span class="ml-auto px-2 py-1 border rounded text-xs {{ verdict_color(verdict.kind, verdict.applied) }}">
-      Verdict: {{ verdict.kind }}{% if not verdict.applied %} · staged{% endif %}
+      Verdict: {{ verdict.kind }}{% if not verdict.applied %} · pending merge{% endif %}
       {% if verdict.target_id %} · <span class="font-mono">{{ verdict.target_id }}</span>{% endif %}
     </span>
   {% endif %}
   {% set pr = pr_for_run if pr_for_run is defined else none %}
   {% if pr %}
-    {# Inline PR badge — methodology-aligned: AddBranch auto-merges,
-       Graduate waits for human review. The badge is a direct link to
-       GitHub so reviewers can act in one click. #}
     {% include "_pr_badge.html" with context %}
   {% endif %}
 </header>
 
-{% if verdict and verdict.kind == 'graduate' and not verdict.applied %}
-  {% set pr_for_gate = pr_for_run if pr_for_run is defined else none %}
+{% if verdict and not verdict.applied %}
   <section class="border border-amber-300 bg-amber-50 rounded-lg p-4 mb-6">
-    <div class="font-semibold text-amber-900">Trunk swap awaiting confirmation</div>
-    <p class="text-sm text-amber-800 mt-1">{{ verdict.rationale or "—" }}</p>
-
-    {# PR/merge gate. The methodology binds graduate-confirm to PR
-       state=MERGED. Show the operator exactly why the button is or
-       isn't available so they aren't confused by the disabled CTA. #}
-    {% if pr_for_gate %}
-      <p class="text-xs text-amber-800 mt-2">
-        Graduate PR: {% include "_pr_badge.html" with context %}
-        {% if not pr_for_gate.is_merged %}
-          <span class="ml-1 italic">— <code>lab graduate-confirm</code> refuses until the PR is merged.</span>
-        {% else %}
-          <span class="ml-1 italic">— PR merged; trunk swap unblocked.</span>
-        {% endif %}
-      </p>
-    {% else %}
-      <p class="text-xs text-amber-800 mt-2 italic">
-        No graduate PR yet. <code>lab finalize</code> opens it; until then the trunk-swap CLI is the only path.
-      </p>
-    {% endif %}
-
-    {% if identity.can_write %}
-      {% if pr_for_gate and not pr_for_gate.is_merged %}
-        <button class="mt-2 text-xs bg-slate-200 text-slate-500 rounded px-3 py-1.5 font-semibold cursor-not-allowed"
-                disabled
-                title="lab graduate-confirm refuses unless gh pr view reports state=MERGED">
-          Confirm trunk swap (PR not merged)
-        </button>
-      {% else %}
-        <form hx-post="/api/cmd" hx-target="#cmd-result" hx-swap="innerHTML"
-              hx-confirm="Confirm trunk swap to {{ verdict.target_id }}? This swaps the active trunk yaml."
-              class="mt-2 flex items-center gap-2 flex-wrap">
-          <input type="hidden" name="cmd_id" value="graduate-confirm">
-          <input type="hidden" name="slug" value="{{ verdict.slug or instance_id }}">
-          <button class="text-xs bg-amber-700 hover:bg-amber-800 text-white rounded px-3 py-1.5 font-semibold">
-            Confirm trunk swap
-          </button>
-          <span class="text-xs text-amber-800">
-            CLI equivalent:
-            <code class="font-mono">uv run lab graduate-confirm {{ verdict.slug or instance_id }}</code>
-          </span>
-        </form>
-      {% endif %}
-    {% else %}
-      <div class="mt-2 font-mono text-xs bg-white px-2 py-1 rounded border border-amber-200 inline-block select-all">uv run lab graduate-confirm {{ verdict.slug or instance_id }}</div>
+    <div class="font-semibold text-amber-900">Outcome pending merge</div>
+    <p class="text-sm text-amber-800 mt-1">
+      Critique has materialized the verdict on the experiment branch.
+      Finalize is responsible for merging the experiment PR back to <code>main</code>.
+    </p>
+    {% if pr %}
+      <div class="mt-2 text-xs text-amber-800">
+        {% include "_pr_badge.html" with context %}
+      </div>
     {% endif %}
   </section>
 {% endif %}

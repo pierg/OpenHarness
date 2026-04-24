@@ -186,8 +186,8 @@ COMMANDS: dict[str, CommandSpec] = {
         cmd_id="graduate-confirm",
         label="Confirm trunk swap",
         description=(
-            "Promote the staged Graduate diff to trunk: copies the new "
-            "branch YAML into trunk.yaml and writes an audit row."
+            "Legacy escape hatch for historical staged-graduate rows: "
+            "copies the new branch YAML into trunk.yaml and writes an audit row."
         ),
         argv_template=["graduate", "confirm", "{slug}", "--applied-by", "{applied_by}"],
         params=[
@@ -377,8 +377,8 @@ COMMANDS: dict[str, CommandSpec] = {
         label="Apply tree verdict",
         description=(
             "Recompute the TreeDiff for an experiment slug and apply it. "
-            "AddBranch / Reject / NoOp land immediately; Graduate is "
-            "STAGED for `graduate confirm`."
+            "On `main` this records a direct main-line verdict; on a "
+            "worktree branch it materializes branch-local state pending finalize."
         ),
         argv_template=["tree", "apply", "{slug}", "--applied-by", "{applied_by}"],
         params=[
@@ -397,9 +397,8 @@ COMMANDS: dict[str, CommandSpec] = {
             ),
         ],
         confirm_text=(
-            "Apply this verdict to the lab? AddBranch / Reject / NoOp "
-            "edit configs.md immediately; Graduate stages a trunk swap "
-            "that you'll then need to confirm separately."
+            "Apply this verdict to the current checkout? This updates "
+            "the lab tree and journal deterministically."
         ),
         events=[
             "lab-pending-changed",
@@ -868,7 +867,7 @@ COMMANDS: dict[str, CommandSpec] = {
             ParamSpec(
                 name="phase",
                 pattern=re.compile(
-                    r"^(?:preflight|design|implement|run|critique|finalize)$"
+                    r"^(?:preflight|design|implement|run|critique|replan|finalize)$"
                 ),
                 label="Phase",
             ),
@@ -885,7 +884,7 @@ COMMANDS: dict[str, CommandSpec] = {
         description=(
             "Delete ../OpenHarness.worktrees/lab-<slug>/ and its lab/<slug> "
             "branch. Idempotent. Use to free disk after a tick crashed "
-            "before phase 5 (which normally cleans up on its own)."
+            "before phase 6 (which normally cleans up on its own)."
         ),
         argv_template=["preflight", "remove", "{slug}"],
         params=[

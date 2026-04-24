@@ -583,6 +583,50 @@ def move_roadmap_entry_to_done(
     return new_text
 
 
+def move_roadmap_entry(
+    *,
+    slug: str,
+    before: str | None = None,
+    after: str | None = None,
+    to_top: bool = False,
+    to_bottom: bool = False,
+    lab_root: Path = LAB_ROOT,
+) -> str:
+    """Reorder one ``## Up next > ### <slug>`` entry within the main queue."""
+    choices = [bool(before), bool(after), to_top, to_bottom]
+    if sum(int(v) for v in choices) != 1:
+        raise LabDocError(
+            "roadmap move requires exactly one of before/after/to_top/to_bottom"
+        )
+    path = _roadmap_path(lab_root)
+    text = _read(path)
+    parts = _split_top_sections(text, level=2)
+    rebuilt: list[str] = []
+    moved = False
+    for heading, body in parts:
+        if heading is None:
+            if body.strip():
+                rebuilt.append(body.rstrip())
+            continue
+        if heading != "Up next":
+            rebuilt.append(f"## {heading}\n\n{body.rstrip()}")
+            continue
+        new_body, moved = _move_up_next_entry(
+            body,
+            slug=slug,
+            before=before,
+            after=after,
+            to_top=to_top,
+            to_bottom=to_bottom,
+        )
+        rebuilt.append(f"## Up next\n\n{new_body.rstrip()}")
+    if not moved:
+        raise LabDocError(f"No `## Up next > ### {slug}` entry to move in roadmap.md.")
+    new_text = "\n\n".join(c for c in rebuilt if c.strip()).rstrip() + "\n"
+    _write(path, new_text)
+    return new_text
+
+
 # ----- summary.md → results table renderer ---------------------------------
 
 
@@ -817,10 +861,15 @@ def set_journal_branch(
     Rendering modes (controlled by which arguments are set):
 
     -   ``pr_url`` provided -> "Branch: [<branch>](<pr_url>)".
-    -   ``rejected_reason`` provided -> "Branch: <branch> — not
-        opened (<reason>)". When ``discarded_sha`` is also passed the
-        short SHA is appended so a curious human can fetch the
-        deleted branch back later (`git fetch origin <sha>:retro/...`).
+        When ``rejected_reason`` / ``discarded_sha`` are also passed,
+        append a metadata-only merge note so reject/noop outcomes can
+        link to the merged PR without pretending the discarded code
+        landed on ``main``.
+    -   ``rejected_reason`` provided without ``pr_url`` -> "Branch:
+        <branch> — not opened (<reason>)". When ``discarded_sha`` is
+        also passed the short SHA is appended so a curious human can
+        fetch the deleted branch back later (`git fetch origin
+        <sha>:retro/...`).
     -   Neither -> just "Branch: <branch>". Used for intermediate
         states (e.g. preflight finished, branch exists, no PR yet).
 
@@ -833,14 +882,18 @@ def set_journal_branch(
     start, end, entry = _entry_text(text, slug)
 
     if pr_url:
-        rendered = f"-   **Branch:** [`{branch}`]({pr_url})"
+        suffix = ""
+        if rejected_reason:
+            suffix = f" — metadata-only merge ({rejected_reason}"
+            if discarded_sha:
+                suffix += f"; discarded=`{discarded_sha[:7]}`"
+            suffix += ")"
+        rendered = f"-   **Branch:** [`{branch}`]({pr_url}){suffix}"
     elif rejected_reason:
         suffix = ""
         if discarded_sha:
             suffix = f"; head=`{discarded_sha[:7]}`"
-        rendered = (
-            f"-   **Branch:** `{branch}` — not opened ({rejected_reason}{suffix})"
-        )
+        rendered = f"-   **Branch:** `{branch}` — not opened ({rejected_reason}{suffix})"
     else:
         rendered = f"-   **Branch:** `{branch}`"
 
@@ -1367,6 +1420,68 @@ def _strip_level3_block(body: str, slug: str) -> tuple[str, bool]:
     if not m:
         return body, False
     return (body[: m.start()] + body[m.end():]).strip(), True
+
+
+def _move_up_next_entry(
+    up_next_body: str,
+    *,
+    slug: str,
+    before: str | None,
+    after: str | None,
+    to_top: bool,
+    to_bottom: bool,
+) -> tuple[str, bool]:
+    suggested_re = re.compile(
+        r"^### Suggested\s*\n(?P<body>.*?)(?=\n### (?!Suggested)|\Z)",
+        re.DOTALL | re.MULTILINE,
+    )
+    suggested_match = suggested_re.search(up_next_body)
+    suggested_block = ""
+    main_body = up_next_body
+    if suggested_match:
+        suggested_block = suggested_match.group(0).strip()
+        main_body = (
+            up_next_body[: suggested_match.start()] + up_next_body[suggested_match.end():]
+        ).strip()
+
+    pattern = re.compile(
+        r"^### (?P<slug>(?!Suggested)\S+)\s*\n.*?(?=^### (?!Suggested)|\Z)",
+        re.DOTALL | re.MULTILINE,
+    )
+    entries = [
+        (m.group("slug"), m.group(0).strip())
+        for m in pattern.finditer(main_body)
+    ]
+    if not entries:
+        return up_next_body, False
+    index_by_slug = {name: i for i, (name, _) in enumerate(entries)}
+    if slug not in index_by_slug:
+        return up_next_body, False
+
+    moving = entries.pop(index_by_slug[slug])
+    if before:
+        if before not in {name for name, _ in entries}:
+            raise LabDocError(f"Cannot move before unknown slug {before!r}.")
+        idx = next(i for i, (name, _) in enumerate(entries) if name == before)
+        entries.insert(idx, moving)
+    elif after:
+        if after not in {name for name, _ in entries}:
+            raise LabDocError(f"Cannot move after unknown slug {after!r}.")
+        idx = next(i for i, (name, _) in enumerate(entries) if name == after)
+        entries.insert(idx + 1, moving)
+    elif to_top:
+        entries.insert(0, moving)
+    elif to_bottom:
+        entries.append(moving)
+
+    pieces: list[str] = []
+    if entries:
+        pieces.append("\n\n".join(block for _, block in entries).strip())
+    else:
+        pieces.append("_(none)_")
+    if suggested_block:
+        pieces.append(suggested_block)
+    return "\n\n".join(p for p in pieces if p.strip()).strip(), True
 
 
 def _strip_level4_block(body: str, slug: str) -> tuple[str, bool]:

@@ -30,6 +30,16 @@ def lab_root(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     return tmp_path
 
 
+@pytest.fixture
+def repo_root(tmp_path: Path) -> Path:
+    root = tmp_path / "repo"
+    cfg_dir = root / "src" / "openharness" / "agents" / "configs"
+    cfg_dir.mkdir(parents=True)
+    (cfg_dir / "planner_executor.yaml").write_text("name: planner_executor\n")
+    (cfg_dir / "trunk.yaml").write_text("name: basic\n")
+    return root
+
+
 def _make_diff(kind: str, **overrides) -> TreeDiff:
     base = dict(
         kind=kind,
@@ -57,20 +67,21 @@ def test_render_tree_effect_block_includes_verdict_badge() -> None:
     diff = _make_diff("add_branch")
     out = tree_mod.render_tree_effect_block(diff, slug="x", applied=True)
     assert "Add branch" in out
-    assert "auto-applied" in out
+    assert "supports a specialized branch" in out
     assert "`planner_executor`" in out
     assert "Δ pass-rate" in out
     assert "+4.50 pp" in out
     assert "multi_file" in out
 
 
-def test_render_graduate_staged_vs_applied_differs() -> None:
+def test_render_graduate_block_uses_outcome_wording_not_stage_badges() -> None:
     diff = _make_diff("graduate")
-    staged = tree_mod.render_tree_effect_block(diff, slug="x", applied=False)
+    pending_merge = tree_mod.render_tree_effect_block(diff, slug="x", applied=False)
     applied = tree_mod.render_tree_effect_block(diff, slug="x", applied=True)
-    assert "STAGED" in staged
+    assert pending_merge == applied
+    assert "supports trunk promotion" in applied
     assert "STAGED" not in applied
-    assert "APPLIED" in applied
+    assert "APPLIED" not in applied
 
 
 def test_apply_add_branch_writes_configs_and_journal(
@@ -172,8 +183,8 @@ def test_apply_reject_appends_to_rejected(
     assert any(r.branch_id == "bad_thing" for r in snap.rejected)
 
 
-def test_apply_graduate_stages_only(
-    lab_root: Path, monkeypatch: pytest.MonkeyPatch
+def test_apply_graduate_materializes_on_branch(
+    lab_root: Path, repo_root: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     lab_docs.append_journal_entry(
         slug="grad-x", type_="paired", trunk_at_runtime="basic",
@@ -184,17 +195,27 @@ def test_apply_graduate_stages_only(
     diff = _make_diff("graduate", pass_rate_delta_pp=10.0)
     with patch.object(tree_mod, "labdb") as mock_db:
         mock_db.writer.side_effect = RuntimeError("no DB in test")
-        result = tree_mod.apply_diff(slug="grad-x", diff=diff, lab_root=lab_root)
+        result = tree_mod.apply_diff(
+            slug="grad-x",
+            diff=diff,
+            lab_root=lab_root,
+            repo_root=repo_root,
+            mark_applied=False,
+        )
 
-    assert result.applied is False
-    assert result.applied_by == "proposed"
+    assert result.applied is True
+    assert result.applied_by == "auto:daemon"
 
     snap = lab_docs.tree_snapshot(lab_root=lab_root)
-    # Trunk should NOT have changed; we only staged the verdict.
-    assert snap.trunk_id != "planner_executor" or snap.trunk_id == "basic"
+    assert snap.trunk_id == "planner_executor"
+    assert any(b.branch_id == "basic" for b in snap.branches)
+
+    trunk_yaml = repo_root / "src" / "openharness" / "agents" / "configs" / "trunk.yaml"
+    assert "planner_executor" in trunk_yaml.read_text()
 
     journal = (lab_root / "experiments.md").read_text()
-    assert "STAGED" in journal
+    assert "supports trunk promotion" in journal
+    assert "STAGED" not in journal
 
 
 def test_apply_no_op_writes_journal_only(

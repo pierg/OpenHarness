@@ -32,7 +32,7 @@ Do **not** use this skill for:
 - Producing the design doc itself → `lab-design-variant`.
 - Running the experiment → the orchestrator does that
   deterministically as soon as you mark this phase done.
-- Opening a PR → `lab-finalize-pr` (phase 5).
+- Opening a PR → `lab-finalize-pr` (phase 6).
 
 ## Inputs
 
@@ -144,7 +144,7 @@ is marked `failed` and the run phase is **not** spawned.
    leg must reach a non-`ERRORED` status, and at least one trial
    per leg must complete (pass or fail). **Pass-rate is not a
    criterion — smoke is wiring validation only, never a verdict**
-   (see [`lab/METHODOLOGY.md`](../../../lab/METHODOLOGY.md) §8 / §9).
+   (see [`lab/METHODOLOGY.md`](../../../lab/METHODOLOGY.md) §9).
 
    Inspect the resulting `runs/experiments/<spec>-smoke-<ts>/`
    directory:
@@ -168,7 +168,7 @@ is marked `failed` and the run phase is **not** spawned.
    ```
 
    Multiple commits are fine; the implementer keeps the history
-   readable. Do NOT push from this skill; phase 5
+   readable. Do NOT push from this skill; phase 6
    (`lab-finalize-pr`) handles push + PR.
 
 7. **Write `implement.json`** with the structure above. Use
@@ -188,7 +188,7 @@ is marked `failed` and the run phase is **not** spawned.
   path. Editing files outside the worktree (including `lab/*.md`
   in the parent repo) is the orchestrator's job, not yours.
 - You may run `uv run …` and `pytest` freely inside the worktree.
-- You may NOT push (`git push`) or open PRs. Phase 5 owns the
+- You may NOT push (`git push`) or open PRs. Phase 6 owns the
   remote interaction.
 - If you cannot complete the implementation (missing context,
   ambiguous design, validation that fails repeatedly), refuse
@@ -216,11 +216,11 @@ previous attempt failed (or refused). Behaviour:
       but only 28 qualify, or "use spec foo" but `foo.yaml`
       doesn't exist). Use the **design-amendment channel** below
       rather than another bare REFUSE.
-    - "your previous code touched the wrong files" — start a
-      fresh commit chain (you can `git reset --hard <base-sha>`
-      first if the prior commits were spurious; the orchestrator
-      will recompute `commits` and `files_touched` from the new
-      `git log`).
+    - "your previous code touched the wrong files" — correct the
+      worktree without destructive history rewrites. Prefer targeted
+      reverts or follow-up commits that restore the intended file
+      set; the orchestrator will recompute `commits` and
+      `files_touched` from the resulting branch state.
 3. **Design-amendment channel.** When the design itself is the
    blocker, write `runs/lab/state/<slug>/design_amendment.md`
    *next to* `design.md`. The amendment is a strictly bounded

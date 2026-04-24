@@ -5,12 +5,12 @@
 {# Three-zone control room.
 
    1. Now           — the in-flight pipeline + control bar.
-   2. Waiting on    — the daemon's idle reason: paused, PR-blocked,
-                      no-queue, manual-no-approvals, etc. Replaces
+   2. Waiting on    — the daemon's idle reason: paused, no-queue,
+                      manual-no-approvals, etc. Replaces
                       the old log-tail bottom panel with one
                       actionable sentence.
-   3. You owe       — actionable cards (graduate-confirm gates,
-                      auto-proposed ideas, pending verdicts,
+   3. You owe       — actionable cards (roadmap curation,
+                      auto-proposed ideas,
                       misconfigurations). Replaces the right rail.
    4. Recent        — last 5 experiments + 5 ticks for context.
 #}
@@ -100,7 +100,7 @@
               <td class="text-xs">
                 {% if e.verdict %}
                   <span class="px-1.5 py-0.5 border rounded {{ verdict_color(e.verdict.kind, e.verdict.applied) }}">
-                    {{ e.verdict.kind }}{% if not e.verdict.applied %} · staged{% endif %}
+                    {{ e.verdict.kind }}{% if not e.verdict.applied %} · pending merge{% endif %}
                   </span>
                 {% else %}<span class="text-slate-400">—</span>{% endif %}
               </td>

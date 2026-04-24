@@ -2,43 +2,6 @@
    command emits ``lab-pending-changed``. #}
 <div class="space-y-6">
   <section>
-    <h2 class="font-semibold mb-2">Staged trunk swaps ({{ pending.staged_graduates|length }})</h2>
-    {% if pending.staged_graduates %}
-      <ul class="space-y-3">
-        {% for d in pending.staged_graduates %}
-          <li class="border border-amber-300 bg-amber-50 rounded-md p-4">
-            <div class="flex items-baseline justify-between">
-              <div>
-                <div class="font-mono text-sm">{{ d.target_id }}</div>
-                <div class="text-xs text-amber-800">slug: <a href="/experiments/{{ d.instance_id }}" class="underline">{{ d.slug }}</a> · instance {{ d.instance_id }}</div>
-              </div>
-              <div class="text-xs text-slate-500">{{ fmt_dt(d.applied_at) }}</div>
-            </div>
-            <p class="text-sm text-amber-900 mt-2">{{ d.rationale or "—" }}</p>
-            {% if identity.can_write %}
-            <form class="mt-3 flex flex-wrap items-center gap-2"
-                  hx-post="/api/cmd" hx-target="#cmd-result" hx-swap="innerHTML"
-                  hx-confirm="Confirm trunk swap to {{ d.target_id }}? This rewrites trunk.yaml.">
-              <input type="hidden" name="cmd_id" value="graduate-confirm">
-              <input type="hidden" name="slug" value="{{ d.slug }}">
-              <label class="text-xs text-amber-900">Applied by</label>
-              <input type="text" name="applied_by" value="{{ identity.email or 'human:webui' }}"
-                     class="text-xs border border-amber-300 rounded px-2 py-1 font-mono w-48">
-              <button class="text-xs bg-amber-700 hover:bg-amber-800 text-white rounded px-3 py-1">
-                Confirm trunk swap
-              </button>
-              <span class="text-xs text-slate-500 font-mono">uv run lab graduate confirm {{ d.slug }} --applied-by …</span>
-            </form>
-            {% endif %}
-          </li>
-        {% endfor %}
-      </ul>
-    {% else %}
-      <p class="text-sm text-slate-500">No graduates waiting.</p>
-    {% endif %}
-  </section>
-
-  <section>
     <h2 class="font-semibold mb-2">Suggested experiments ({{ pending.suggested|length }})</h2>
     {% if pending.suggested %}
       <ul class="space-y-3">
