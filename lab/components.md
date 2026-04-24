@@ -13,7 +13,7 @@
 
 | ID | Status | Description | Used by | Evidence |
 |----|--------|-------------|---------|----------|
-| `loop-guard` | proposed | detects no-progress turns (repeated tool calls, empty assistant) and steers toward recovery | — | [idea](ideas.md#loop-guard), queued: [loop-guard-paired-ablation](roadmap.md#loop-guard-paired-ablation) |
+| `loop-guard` | rejected | detects no-progress turns (repeated tool calls, empty assistant) and steers toward recovery | — | [loop-guard-on-basic-near-miss](experiments.md#2026-04-24--loop-guard-on-basic-near-miss) scored 1/46 vs trunk 2/46; re-add only as part of a concrete recovery playbook, not as a standalone brake |
 | `context-compaction` | proposed | truncates large tool-stdout blocks above a threshold | — | [idea](ideas.md#reflection-context-compaction) (no roadmap entry yet — re-queue under the original `reflection-context-compaction` idea on a meaningful slice) |
 
 ## Tools
@@ -32,4 +32,6 @@ _(none)_
 | ID | Status | Description | Used by | Evidence |
 |----|--------|-------------|---------|----------|
 | `gemini-3.1-flash-lite-preview` | validated | default coding/reasoning model on the smoke + full sweeps | `basic`, `planner_executor`, `react`, `reflection` | [tb2-baseline-full-sweep](experiments.md#2026-04-17--tb2-baseline-full-sweep) |
-| `gemini-2.5-pro` | proposed | stronger SKU, ~10× cost; used to disambiguate "agent too weak" vs "model too weak" | — | queued: [stronger-model-baseline](roadmap.md#stronger-model-baseline) |
+| `gemini-3-flash-preview` | proposed | current Gemini 3 Flash preview candidate for the trunk `basic` model floor | — | queued: [tb2-gemini3-model-baseline](roadmap.md#tb2-gemini3-model-baseline) |
+| `gemini-3.1-pro-preview` | proposed | current Gemini 3.1 Pro preview candidate for the trunk `basic` model floor | — | queued: [tb2-gemini3-model-baseline](roadmap.md#tb2-gemini3-model-baseline) |
+| `gemini-2.5-pro` | deferred | superseded stronger-model candidate from the older near-miss baseline proposal | — | superseded by [tb2-gemini3-model-baseline](roadmap.md#tb2-gemini3-model-baseline) |
