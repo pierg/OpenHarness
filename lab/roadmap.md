@@ -10,30 +10,41 @@
 > phase always runs the full slice. There are no separate `-smoke`
 > / `-full-sweep` roadmap entries.
 
+### loop-guard-on-basic-near-miss
+
+-   **Idea:** [`loop-guard`](ideas.md#loop-guard)
+-   **Hypothesis:** enabling `LoopGuardConfig.enabled` on trunk `basic` recovers a meaningful share of the loop-heavy near-miss failures from `extended-budget-paired-on-trunk` by breaking repeated command / timeout spirals without the cost blow-up of longer budgets.
+-   **Slice:** `near-miss` — tasks from `extended-budget-paired-on-trunk` where all three budget legs failed and at least one trial logged `repeated_failed_command` or `timeout_no_recovery`. Current evidence suggests `n_tasks ≈ 20-24`; with `n_attempts=2`, expect `n_trials/leg ≈ 40-48`.
+-   **Legs:** 2-leg paired ablation. Leg A: trunk `basic`. Leg B: `basic` + loop-guard enabled. One axis only: loop-guard on/off.
+-   **Repetitions:** `paired-double` (n_attempts=2) — the mechanism is stochastic, and the slice is a derived near-miss population where single-shot noise would be hard to read.
+-   **Control:** `fresh`.
+-   **Why first:** both completed experiments say "more budget" is not the answer, while no-progress loops are the dominant shared failure shape. This is the cheapest trunk-facing test of the strongest current hypothesis.
+-   **Depends on:** `extended-budget-paired-on-trunk`
+-   **Cost:** ~$3-5.
+
+### planner-schema-guard-paired
+
+-   **Idea:** [`planner-schema-guardrail`](ideas.md#planner-schema-guardrail)
+-   **Hypothesis:** forcing `planner_executor` to repair invalid or empty planner JSON before executor handoff cuts planner-side `ValidationError` / `structured-output-failure` enough to recover trustworthy signal on the planner-positive slice.
+-   **Slice:** `cluster_combined: python_data, system_administration, security_certificates` from `tb2-baseline-full-sweep`. Current counts are 7 + 3 + 1 tasks = 11 tasks, so with `n_attempts=2` this yields `n_trials/leg = 22`.
+-   **Legs:** 2-leg paired ablation. Leg A: current `planner_executor`. Leg B: `planner_executor` + planner schema guard. No tool or model changes in this experiment; isolate the guardrail itself.
+-   **Repetitions:** `paired-double` (n_attempts=2) — small slice, planner behavior is stochastic, and the baseline branch evidence was contaminated by planner-output failures.
+-   **Control:** `fresh`.
+-   **Why second:** the current planner branch is not interpretable until planner-side schema breakage is separated from real execution quality. This is the decontamination run before either confirming or retiring the branch.
+-   **Depends on:** `tb2-baseline-full-sweep`
+-   **Cost:** ~$4-6.
 
 ### planner-executor-cluster-confirmation
 
--   **Idea:** confirms the live `AddBranch` from `tb2-baseline-full-sweep`; folds in the `grounded-planner-tools` ablation as Leg C for marginal cost.
--   **Hypothesis:** (a) the `add_branch` predicate `{python_data, system_administration, security_certificates}` for `planner_executor` survives a re-run with adequate per-cluster `n` (the original verdict rests on n=7/3/1); (b) the planner subagent's read-only tools materially contribute to the win — removing them on Leg C demonstrates the dependency.
--   **Slice:** `cluster_combined: python_data, system_administration, security_certificates` (DEFERRED slice shape — until it lands, declare as `cluster: python_data, system_administration, security_certificates` and rely on `paired-double` to clear the floor). `n_tasks/leg = 7+3+1 = 11`. `n_trials/leg = 22` (with `n_attempts=2`).
--   **Legs:** 3-leg multi-arm (METHODOLOGY §3 — two questions share the slice). Leg A: `basic` (trunk). Leg B: `planner_executor` (current YAML). Leg C: `planner_executor` with planner subagent `tools: []`. Each pairwise contrast differs in exactly one axis.
--   **Repetitions:** `paired-double` (n_attempts=2) — small slice (11 tasks), planner has stochastic internal state (sampled plan), and the original verdict rests on n=1/3/7 so we want noise-bounded per-cell estimates.
+-   **Idea:** confirms the live `AddBranch` from `tb2-baseline-full-sweep`, but only after repairing the planner schema failure mode; still folds in the `grounded-planner-tools` ablation as Leg C for marginal cost.
+-   **Hypothesis:** (a) `planner_executor` with the schema guard still beats trunk on `{python_data, system_administration, security_certificates}` with adequate `n`; (b) the planner subagent's read-only tools materially contribute to any recovered win, so removing them on Leg C should hurt.
+-   **Slice:** same `cluster_combined: python_data, system_administration, security_certificates` slice as `planner-schema-guard-paired`. Current counts are 11 tasks total, so with `n_attempts=2`, `n_trials/leg = 22`.
+-   **Legs:** 3-leg multi-arm (METHODOLOGY §3 — two questions share one slice). Leg A: trunk `basic`. Leg B: `planner_executor` + schema guard. Leg C: Leg B plus planner subagent `tools: []`. Each pairwise contrast differs in exactly one axis.
+-   **Repetitions:** `paired-double` (n_attempts=2) — small slice, planner behavior is stochastic, and the original add-branch evidence rested on n=1/3/7.
 -   **Control:** `fresh`.
--   **Why second:** retires the highest-value piece of methodological debt (the n=1/3/7 wobble); folds in `grounded-planner-tools` for ~50% extra cost; gates every future planner_executor variant.
--   **Depends on:** `tb2-baseline-full-sweep`
+-   **Why third:** once the schema guard decontaminates the planner branch, this run answers the actual branch question: keep `planner_executor` as a specialization, or stop spending on it.
+-   **Depends on:** `planner-schema-guard-paired`
 -   **Cost:** ~$5-8 (3 legs × 22 trials × ~$0.07-0.10/trial).
-
-### loop-guard-paired-ablation
-
--   **Idea:** [`loop-guard`](ideas.md#loop-guard)
--   **Hypothesis:** enabling `LoopGuardConfig.enabled` on `planner_executor` reduces wasted turns on the near-miss slice — tasks where the original `planner_executor` leg hit the turn budget without progress — by ≥5pp.
--   **Slice:** `near-miss` — tasks where `planner_executor` hit `n_turns=30` in `tb2-baseline-20260417-234913` (TBD: extract exact list during design phase; expect ~15-25 tasks). `n_tasks/leg ≈ 20`, `n_trials/leg ≈ 40` (with `n_attempts=2`).
--   **Legs:** 2-leg paired ablation. Leg A: `planner_executor` (loop-guard off — byte-identical to current YAML). Leg B: `planner_executor` (loop-guard on). **Trunk-anchor caveat:** the design phase MUST verify that `tree_ops.evaluate` accepts a non-trunk anchor without complaining; if it doesn't, add `basic` (trunk) as Leg C purely so the comparator has a trunk reference.
--   **Repetitions:** `paired-double` (n_attempts=2) — loop-guard's nudges fire stochastically on observed empty turns / repeated calls; cell variance is its core characteristic.
--   **Control:** `fresh` — required by selection bias on the near-miss slice.
--   **Why third:** stronger evidence after #1 tells us if budget alone explains near-miss failures, and after #2 confirms the planner_executor predicate.
--   **Depends on:** `tb2-baseline-full-sweep`, `extended-budget-paired-on-trunk` (informative but not blocking)
--   **Cost:** ~$5-10 (2 legs × ~40 trials × ~$0.07/trial; planner_executor cost band).
 
 ### Suggested
 
@@ -50,19 +61,33 @@
 -   **Control:** `fresh`.
 -   **Source:** lab-reflect-and-plan@2026-04-22 (methodology revision)
 -   **Cost:** ~$2 (2 legs × 22 trials × ~$0.05/trial).
--   **When to run:** before or alongside `planner-executor-cluster-confirmation` to calibrate how much we should trust the cluster-level deltas it produces.
+-   **When to run:** only if `planner-schema-guard-paired` and `planner-executor-cluster-confirmation` still leave the cluster-level signal borderline; not a front-of-queue item while larger behavioral failures remain unresolved.
 
-#### loop-guard-on-basic-near-miss
+#### timeout-aware-retry-on-needs-network
 
--   **Hypothesis:** tests whether the 64/84 repeated_failed_command or timeout_no_recovery failures in extended-budget-paired-on-trunk are recoverable by steering basic off no-progress loops instead of buying more turns
--   **Source:** lab-reflect-and-plan@2026-04-23
--   **Cost:** ~$3-5
+-   **Hypothesis:** timeout-aware retry / background polling recovers a meaningful share of the `needs_network` + `high_env_complexity` failures that currently collapse into repeated command loops or unrecovered bash timeouts.
+-   **Source:** cross-experiment-critic@2026-04-23
+-   **Cost:** ~$5-8
+
 
 #### stronger-model-baseline
 
--   **Hypothesis:** tests whether the 24/28 all-leg failures that ignored extra budget are capability-bound rather than budget-bound by swapping trunk basic to gemini-2.5-pro on the same near-miss slice
+-   **Hypothesis:** tests whether the 24/28 all-leg failures that ignored extra budget are capability-bound rather than guardrail-bound by swapping trunk basic to gemini-2.5-pro on the same near-miss slice.
 -   **Source:** lab-reflect-and-plan@2026-04-23
 -   **Cost:** ~$10-20
+-   **When to run:** after loop / retry / verification guardrails if the same slice still washes out; model spend is lower-priority than mechanism fixes right now.
+
+#### loop-guard-paired-ablation
+
+-   **Idea:** [`loop-guard`](ideas.md#loop-guard)
+-   **Hypothesis:** enabling `LoopGuardConfig.enabled` on `planner_executor` reduces wasted turns on the near-miss slice — tasks where the original `planner_executor` leg hit the turn budget without progress — by ≥5pp.
+-   **Slice:** `near-miss` — tasks where `planner_executor` hit `n_turns=30` in `tb2-baseline-20260417-234913` (TBD: extract exact list during design phase; expect ~15-25 tasks). `n_tasks/leg ≈ 20`, `n_trials/leg ≈ 40` (with `n_attempts=2`).
+-   **Legs:** 2-leg paired ablation. Leg A: `planner_executor` (loop-guard off — byte-identical to current YAML). Leg B: `planner_executor` (loop-guard on). **Trunk-anchor caveat:** the design phase MUST verify that `tree_ops.evaluate` accepts a non-trunk anchor without complaining; if it doesn't, add `basic` (trunk) as Leg C purely so the comparator has a trunk reference.
+-   **Repetitions:** `paired-double` (n_attempts=2) — loop-guard's nudges fire stochastically on observed empty turns / repeated calls; cell variance is its core characteristic.
+-   **Control:** `fresh` — required by selection bias on the near-miss slice.
+-   **Why later:** this stacks a second fix on top of a planner branch we still have not cleanly re-validated. Run it only after the schema-guard and branch-confirmation work say `planner_executor` is still worth specializing.
+-   **Depends on:** `planner-executor-cluster-confirmation`, `extended-budget-paired-on-trunk`
+-   **Cost:** ~$5-10 (2 legs × ~40 trials × ~$0.07/trial; planner_executor cost band).
 
 ## Done
 
