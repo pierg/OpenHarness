@@ -26,6 +26,7 @@ from typing import Any, Sequence
 
 from openharness.lab import codex as skill_runtime
 from openharness.lab import critic_io, trial_evidence
+from openharness.lab.env import apply_repo_dotenv
 from openharness.lab.paths import LAB_LOGS_DIR, REPO_ROOT, ensure_lab_runs_dir
 from openharness.lab.usage import augment_spawn_record
 
@@ -299,33 +300,7 @@ def _build_argv(
 
 def _build_env() -> dict[str, str]:
     env = os.environ.copy()
-    dotenv_path = REPO_ROOT / ".env"
-    if dotenv_path.is_file():
-        for key, value in _read_dotenv(dotenv_path).items():
-            env.setdefault(key, value)
-    if not env.get("GEMINI_API_KEY") and env.get("GOOGLE_API_KEY"):
-        env["GEMINI_API_KEY"] = env["GOOGLE_API_KEY"]
-    return env
-
-
-def _read_dotenv(path: Path) -> dict[str, str]:
-    values: dict[str, str] = {}
-    for raw in path.read_text(encoding="utf-8").splitlines():
-        line = raw.strip()
-        if not line or line.startswith("#") or "=" not in line:
-            continue
-        key, value = line.split("=", 1)
-        key = key.strip()
-        if not key:
-            continue
-        values[key] = _clean_dotenv_value(value.strip())
-    return values
-
-
-def _clean_dotenv_value(value: str) -> str:
-    if len(value) >= 2 and value[0] == value[-1] and value[0] in {"'", '"'}:
-        return value[1:-1]
-    return value
+    return apply_repo_dotenv(env, REPO_ROOT / ".env")
 
 
 def _render_trial_prompt(

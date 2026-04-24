@@ -46,6 +46,7 @@ from pathlib import Path
 from typing import Callable
 
 from openharness.lab import lab_docs
+from openharness.lab.env import apply_repo_dotenv
 from openharness.lab.paths import EXPERIMENTS_RUNS_ROOT, LAB_LOGS_DIR, REPO_ROOT
 
 logger = logging.getLogger(__name__)
@@ -233,18 +234,7 @@ def _exec_env(worktree: Path) -> dict[str, str]:
     # started without sourcing .env (e.g. from a systemd unit or a
     # bare Python invocation rather than scripts/exp/start.sh).
     env = {**os.environ, "PYTHONUNBUFFERED": "1"}
-    dotenv_path = REPO_ROOT / ".env"
-    if dotenv_path.is_file():
-        for raw in dotenv_path.read_text().splitlines():
-            raw = raw.strip()
-            if not raw or raw.startswith("#") or "=" not in raw:
-                continue
-            k, _, v = raw.partition("=")
-            k = k.strip()
-            # Never override already-set vars; the parent daemon's env
-            # wins. This preserves intentional overrides set before launch.
-            if k and k not in os.environ:
-                env[k] = v.strip()
+    apply_repo_dotenv(env, REPO_ROOT / ".env")
 
     env.pop("VIRTUAL_ENV", None)
     env.pop("VIRTUAL_ENV_PROMPT", None)

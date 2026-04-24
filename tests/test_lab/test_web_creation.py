@@ -321,10 +321,13 @@ def test_home_page_renders_three_zones_and_pr_aware_idle_reason() -> None:
     body = r.text
     # The three zones the operator sees first.
     assert "Now" in body
+    assert "Roadmap" in body
+    assert 'id="roadmap-queue"' in body
     # Zone anchors used by the "You owe" pill in the header.
     assert 'id="you-owe"' in body or "You owe" in body
     # HTMX partials mounted on first render.
     assert "/_hx/idle-reason" in body
+    assert "/_hx/status-roadmap-queue" in body
     assert "/_hx/you-owe" in body
 
 
@@ -365,6 +368,25 @@ def test_you_owe_partial_renders_or_is_empty_state() -> None:
             # In empty state the partial still has to render *something*
             # benign — any non-empty body is acceptable as long as no
             # template error leaked through.
+        )
+    )
+
+
+def test_status_roadmap_queue_partial_renders_queue_or_empty_state() -> None:
+    r = _client().get("/_hx/status-roadmap-queue")
+    assert r.status_code == 200
+    body = r.text
+    assert "Processing" in body
+    assert "Done" in body
+    assert "Daemon queue" in body
+    assert any(
+        token in body
+        for token in (
+            "No roadmap entries",
+            "ready",
+            "approved",
+            "running",
+            "blocked",
         )
     )
 

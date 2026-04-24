@@ -52,6 +52,35 @@ def test_exec_env_drops_parent_virtualenv(monkeypatch, tmp_path: Path) -> None:
     assert pythonpath_entries.count(str((worktree / "src").resolve())) == 1
 
 
+def test_exec_env_prefers_repo_google_api_key(monkeypatch, tmp_path: Path) -> None:
+    from openharness.lab import phase_run
+
+    parent = tmp_path / "parent"
+    worktree = tmp_path / "worktree"
+    parent.mkdir()
+    worktree.mkdir()
+    (parent / ".env").write_text(
+        "\n".join(
+            [
+                "GOOGLE_API_KEY=from-dotenv-google",
+                "GEMINI_API_KEY=from-dotenv-gemini",
+                "OPENHARNESS_EXAMPLE=from-dotenv",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(phase_run, "REPO_ROOT", parent)
+    monkeypatch.setenv("GOOGLE_API_KEY", "from-shell-google")
+    monkeypatch.setenv("GEMINI_API_KEY", "from-shell-gemini")
+    monkeypatch.setenv("OPENHARNESS_EXAMPLE", "from-shell")
+
+    env = phase_run._exec_env(worktree)
+
+    assert env["GOOGLE_API_KEY"] == "from-dotenv-google"
+    assert "GEMINI_API_KEY" not in env
+    assert env["OPENHARNESS_EXAMPLE"] == "from-shell"
+
+
 def test_validate_complete_run_rejects_no_trial_leg(tmp_path: Path) -> None:
     from openharness.lab import phase_run
 
