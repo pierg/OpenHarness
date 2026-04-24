@@ -38,8 +38,9 @@ Overall pass rate moved 0.0 percentage points: `planner_executor_control` stayed
 | `system_administration` | 3/6 | 4/6 | +16.7 |
 | `python_data` | 4/14 | 4/14 | +0.0 |
 ### Linked follow-ups
-
-_(pending)_
+-   **roadmap** `timeout-aware-retry-on-needs-network`: promoted to the top of `## Up next` because repeated command loops and unrecovered timeouts remain the strongest cross-experiment blocker after schema repair only reduced cost.
+-   **roadmap** `planner-executor-cluster-confirmation`: demoted to `### Suggested` because `planner-schema-guard-paired` was a score wash, so the higher-cost planner confirmation is no longer front-of-queue.
+-   **idea** `planner-empty-glob-breaker`: remains the narrower planner-specific follow-up if the trunk-facing timeout-recovery run still leaves planner path-grounding failures unresolved.
 ## 2026-04-24 — loop-guard-on-basic-near-miss
 
 -   **Type:** paired-ablation

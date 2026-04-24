@@ -10,30 +10,16 @@
 > phase always runs the full slice. There are no separate `-smoke`
 > / `-full-sweep` roadmap entries.
 
+### timeout-aware-retry-on-needs-network
 
-### planner-schema-guard-paired
-
--   **Idea:** [`planner-schema-guardrail`](ideas.md#planner-schema-guardrail)
--   **Hypothesis:** forcing `planner_executor` to repair invalid or empty planner JSON before executor handoff cuts planner-side `ValidationError` / `structured-output-failure` enough to recover trustworthy signal on the planner-positive slice.
--   **Slice:** `cluster_combined: python_data, system_administration, security_certificates` from `tb2-baseline-full-sweep`. Current counts are 7 + 3 + 1 tasks = 11 tasks, so with `n_attempts=2` this yields `n_trials/leg = 22`.
--   **Legs:** 2-leg paired ablation. Leg A: current `planner_executor`. Leg B: `planner_executor` + planner schema guard. No tool or model changes in this experiment; isolate the guardrail itself.
--   **Repetitions:** `paired-double` (n_attempts=2) — small slice, planner behavior is stochastic, and the baseline branch evidence was contaminated by planner-output failures.
+-   **Idea:** [`executor-bash-timeout-aware-retry`](ideas.md#executor-bash-timeout-aware-retry)
+-   **Hypothesis:** timeout-aware retry / background polling recovers a meaningful share of the `needs_network` + `high_env_complexity` failures that currently collapse into repeated command loops or unrecovered bash timeouts.
+-   **Slice:** derived `needs_network + high_env_complexity` slice from the current bench, restricted to tasks whose recent failed trials skewed toward `repeated_failed_command` or `timeout_no_recovery`. The implement phase MUST resolve the predicate from recorded artefacts and encode the final task list in `task_filter.include_tasks:`; floor §6 requires at least 5 tasks.
+-   **Legs:** 2-leg paired ablation. Leg A: trunk `basic`. Leg B: `basic` + executor timeout-aware retry / background polling. One axis only: timeout recovery path on/off.
+-   **Repetitions:** `paired-double` (n_attempts=2) — the recovery path is runtime-sensitive, and the derived slice is composed of unstable long-running tasks where single-shot noise would be hard to interpret.
 -   **Control:** `fresh`.
--   **Why second:** the current planner branch is not interpretable until planner-side schema breakage is separated from real execution quality. This is the decontamination run before either confirming or retiring the branch.
--   **Depends on:** `tb2-baseline-full-sweep`
--   **Cost:** ~$4-6.
-
-### planner-executor-cluster-confirmation
-
--   **Idea:** confirms the live `AddBranch` from `tb2-baseline-full-sweep`, but only after repairing the planner schema failure mode; still folds in the `grounded-planner-tools` ablation as Leg C for marginal cost.
--   **Hypothesis:** (a) `planner_executor` with the schema guard still beats trunk on `{python_data, system_administration, security_certificates}` with adequate `n`; (b) the planner subagent's read-only tools materially contribute to any recovered win, so removing them on Leg C should hurt.
--   **Slice:** same `cluster_combined: python_data, system_administration, security_certificates` slice as `planner-schema-guard-paired`. Current counts are 11 tasks total, so with `n_attempts=2`, `n_trials/leg = 22`.
--   **Legs:** 3-leg multi-arm (METHODOLOGY §3 — two questions share one slice). Leg A: trunk `basic`. Leg B: `planner_executor` + schema guard. Leg C: Leg B plus planner subagent `tools: []`. Each pairwise contrast differs in exactly one axis.
--   **Repetitions:** `paired-double` (n_attempts=2) — small slice, planner behavior is stochastic, and the original add-branch evidence rested on n=1/3/7.
--   **Control:** `fresh`.
--   **Why third:** once the schema guard decontaminates the planner branch, this run answers the actual branch question: keep `planner_executor` as a specialization, or stop spending on it.
--   **Depends on:** `planner-schema-guard-paired`
--   **Cost:** ~$5-8 (3 legs × 22 trials × ~$0.07-0.10/trial).
+-   **Why first:** four completed experiments still concentrate failures in repeated command loops and unrecovered timeouts, while `planner-schema-guard-paired` only reduced spend on the planner slice without recovering score. This is now the strongest trunk-facing mechanism question with cross-experiment support.
+-   **Cost:** ~$5-8
 
 ### Suggested
 
@@ -52,12 +38,6 @@
 -   **Cost:** ~$2 (2 legs × 22 trials × ~$0.05/trial).
 -   **When to run:** only if `planner-schema-guard-paired` and `planner-executor-cluster-confirmation` still leave the cluster-level signal borderline; not a front-of-queue item while larger behavioral failures remain unresolved.
 
-#### timeout-aware-retry-on-needs-network
-
--   **Hypothesis:** timeout-aware retry / background polling recovers a meaningful share of the `needs_network` + `high_env_complexity` failures that currently collapse into repeated command loops or unrecovered bash timeouts.
--   **Source:** cross-experiment-critic@2026-04-23
--   **Cost:** ~$5-8
-
 
 #### stronger-model-baseline
 
@@ -66,7 +46,34 @@
 -   **Cost:** ~$10-20
 -   **When to run:** after loop / retry / verification guardrails if the same slice still washes out; model spend is lower-priority than mechanism fixes right now.
 
+#### planner-executor-cluster-confirmation
+
+-   **Idea:** confirms the live `AddBranch` from `tb2-baseline-full-sweep`, but only after repairing the planner schema failure mode; still folds in the `grounded-planner-tools` ablation as Leg C for marginal cost.
+-   **Hypothesis:** (a) `planner_executor` with the schema guard still beats trunk on `{python_data, system_administration, security_certificates}` with adequate `n`; (b) the planner subagent's read-only tools materially contribute to any recovered win, so removing them on Leg C should hurt.
+-   **Slice:** same `cluster_combined: python_data, system_administration, security_certificates` slice as `planner-schema-guard-paired`. Current counts are 11 tasks total, so with `n_attempts=2`, `n_trials/leg = 22`.
+-   **Legs:** 3-leg multi-arm (METHODOLOGY §3 — two questions share one slice). Leg A: trunk `basic`. Leg B: `planner_executor` + schema guard. Leg C: Leg B plus planner subagent `tools: []`. Each pairwise contrast differs in exactly one axis.
+-   **Repetitions:** `paired-double` (n_attempts=2) — small slice, planner behavior is stochastic, and the original add-branch evidence rested on n=1/3/7.
+-   **Control:** `fresh`.
+-   **Why third:** once the schema guard decontaminates the planner branch, this run answers the actual branch question: keep `planner_executor` as a specialization, or stop spending on it.
+-   **Depends on:** `planner-schema-guard-paired`
+-   **Cost:** ~$5-8 (3 legs × 22 trials × ~$0.07-0.10/trial).
+
 ## Done
+
+### planner-schema-guard-paired
+
+-   **Idea:** [`planner-schema-guardrail`](ideas.md#planner-schema-guardrail)
+-   **Hypothesis:** forcing `planner_executor` to repair invalid or empty planner JSON before executor handoff cuts planner-side `ValidationError` / `structured-output-failure` enough to recover trustworthy signal on the planner-positive slice.
+-   **Slice:** `cluster_combined: python_data, system_administration, security_certificates` from `tb2-baseline-full-sweep`. Current counts are 7 + 3 + 1 tasks = 11 tasks, so with `n_attempts=2` this yields `n_trials/leg = 22`.
+-   **Legs:** 2-leg paired ablation. Leg A: current `planner_executor`. Leg B: `planner_executor` + planner schema guard. No tool or model changes in this experiment; isolate the guardrail itself.
+-   **Repetitions:** `paired-double` (n_attempts=2) — small slice, planner behavior is stochastic, and the baseline branch evidence was contaminated by planner-output failures.
+-   **Control:** `fresh`.
+-   **Why second:** the current planner branch is not interpretable until planner-side schema breakage is separated from real execution quality. This is the decontamination run before either confirming or retiring the branch.
+-   **Depends on:** `tb2-baseline-full-sweep`
+-   **Cost:** ~$4-6.
+
+-   **Ran:** [runs/experiments/planner-schema-guard-paired-20260424-154436](../runs/experiments/planner-schema-guard-paired-20260424-154436)
+-   **Outcome:** no_op: schema guard matched control at 8/22 passes and only lowered cost, so the branch stays unpromoted.
 
 ### loop-guard-on-basic-near-miss
 
