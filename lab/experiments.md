@@ -6,7 +6,7 @@
 -   **Trunk at run-time:** [`trunk`](../src/openharness/agents/configs/trunk.yaml)
 -   **Hypothesis:** timeout-aware retry / background polling recovers a meaningful share of the `needs_network` + `high_env_complexity` failures that currently collapse into repeated command loops or unrecovered bash timeouts.
 -   **Run:** [`runs/experiments/timeout-aware-retry-on-needs-network-smoke-20260424-193153`](../runs/experiments/timeout-aware-retry-on-needs-network-smoke-20260424-193153)
--   **Branch:** `lab/timeout-aware-retry-on-needs-network`
+-   **Branch:** [`lab/timeout-aware-retry-on-needs-network`](https://github.com/pierg/OpenHarness/pull/38) — metadata-only merge (no_op: smoke tied control at 2/4 passes per leg and was under the evidence floor.; discarded=`a4ca455`)
 
 ### Aggregate
 | Leg | Agent | Trials | Passed | Failed | Pass rate | Cost (USD) |
