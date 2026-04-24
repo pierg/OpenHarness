@@ -62,6 +62,12 @@
 -   **Sketch:** Add a runtime completion gate that reruns a narrow clean-environment smoke check or verifier-aligned command against the produced artifacts before the final answer, and blocks success when the fix depends on undeclared packages or misses global constraints. Test it first on `openssl-selfsigned-cert`, `reshard-c4-data`, `raman-fitting`, and another clean-env-sensitive control task.
 -   **Auto-proposed by:** cross-experiment-critic@2026-04-24
 
+#### timeout-aware-retry-needs-network-confirmation
+
+-   **Motivation:** [low confidence: 4 active trials / 4 control trials] The timeout-aware retry smoke did not exercise the intended network-dependent slice, so it produced no >=5-trial component_perf row and leaves the needs_network hypothesis unanswered.
+-   **Sketch:** Run a paired confirmation on at least 10 trials per side from network_dependent plus high_env_complexity tasks, including c_build/download-heavy cases, and compare timeout-aware retry against current basic on decisive wins and timeout_no_recovery tags.
+-   **Auto-proposed by:** cross-experiment-critic@2026-04-24
+
 ## Proposed
 
 ### Architecture

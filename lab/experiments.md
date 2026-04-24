@@ -32,7 +32,7 @@ _(pending)_
 -   **Rationale:** insufficient_data: smallest leg has n=4 trials (< floor of 5); under-sampled legs: {'basic': 4, 'basic_timeout_aware_retry': 4}. Re-run on a wider slice (the design's `## Slice > Full` section) before drawing a verdict.
 ### Linked follow-ups
 
-_(pending)_
+-   **roadmap** `timeout-aware-retry-needs-network-confirmation`: queued at the top of `## Up next` because this smoke run tied control at 2/4 passes per leg and fell below the evidence floor, leaving the full needs_network timeout-recovery hypothesis unresolved.
 
 ## 2026-04-24 — planner-schema-guard-paired
 
