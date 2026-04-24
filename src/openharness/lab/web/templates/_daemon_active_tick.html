@@ -24,7 +24,7 @@
     {% if identity.can_write %}
     <div class="ml-auto flex items-center gap-2">
       <form hx-post="/api/cmd" hx-target="#cmd-result" hx-swap="innerHTML"
-            hx-confirm="Cancel the in-flight tick and SIGTERM the codex spawn? Operator override — does NOT count toward the auto-demote gate.">
+            hx-confirm="Cancel the in-flight tick and SIGTERM the codex spawn? Operator override — does NOT count toward the failure gate.">
         <input type="hidden" name="cmd_id" value="daemon-cancel">
         <button class="text-xs bg-rose-700 hover:bg-rose-800 text-white rounded px-3 py-1.5">
           Cancel tick

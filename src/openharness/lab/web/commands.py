@@ -748,7 +748,7 @@ COMMANDS: dict[str, CommandSpec] = {
         description=(
             "SIGTERM the active codex spawn (if any) and clear the "
             "active tick. Operator override — does NOT count toward "
-            "the auto-demote gate."
+            "the failure gate."
         ),
         argv_template=["daemon", "cancel", "--actor", "{actor}"],
         params=[
@@ -767,7 +767,7 @@ COMMANDS: dict[str, CommandSpec] = {
         label="Reset failure counter",
         description=(
             "Clear the recorded consecutive-failure count for a slug, "
-            "so the next approval starts from zero (won't auto-demote "
+            "so the next approval starts from zero (won't block "
             "until N more failures in a row)."
         ),
         argv_template=["daemon", "reset-failures", "{slug}", "--actor", "{actor}"],
@@ -802,7 +802,7 @@ COMMANDS: dict[str, CommandSpec] = {
         ],
         confirm_text=(
             "Clear ALL failure counters? After this, every approved "
-            "slug starts from zero — no auto-demote until N consecutive "
+            "slug starts from zero — no block until N consecutive "
             "failures."
         ),
         events=["lab-daemon-state-changed"],

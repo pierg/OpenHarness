@@ -176,7 +176,7 @@ def test_history_ring_caps_at_50(isolated_lab: Path) -> None:
 
 
 def test_failure_counter_increments_then_resets_on_success(isolated_lab: Path) -> None:
-    """Per-slug failure counter feeds the auto-demote gate."""
+    """Per-slug failure counter feeds the failure gate."""
     import openharness.lab.daemon_state as ds
 
     for _ in range(2):
@@ -365,6 +365,22 @@ def test_select_next_entry_autonomous_picks_first(isolated_lab: Path) -> None:
         "autonomous must ignore approval list and pick top of queue"
 
 
+def test_select_next_entry_skips_failure_blocked_slugs(isolated_lab: Path) -> None:
+    from openharness.lab.runner import _select_next_entry
+    import openharness.lab.daemon_state as ds
+
+    ready = [_entry("a"), _entry("b"), _entry("c")]
+    state = ds.DaemonState(
+        mode="autonomous",
+        max_failures_before_demote=2,
+        entry_failures={"a": ds.FailureRecord(count=2, last_outcome="error")},
+    )
+
+    chosen = _select_next_entry(ready, state)
+
+    assert chosen is not None and chosen.slug == "b"
+
+
 def test_select_next_entry_manual_picks_highest_approved(isolated_lab: Path) -> None:
     """Roadmap order beats approval order — that lets the operator
     approve out of order without changing the queue."""
@@ -389,6 +405,44 @@ def test_select_next_entry_manual_no_approvals_picks_nothing(
     ready = [_entry("a"), _entry("b")]
     state = ds.DaemonState(mode="manual", approved_slugs=[])
     assert _select_next_entry(ready, state) is None
+
+
+def test_loop_blocks_without_mutating_roadmap(
+    isolated_lab: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The failure gate must not dirty lab/roadmap.md on main."""
+    import openharness.lab.daemon_state as ds
+    import openharness.lab.runner as runner
+
+    importlib.reload(runner)
+
+    roadmap = isolated_lab / "lab" / "roadmap.md"
+    original = (
+        "# Roadmap\n\n"
+        "## Up next\n\n"
+        "### alpha\n\n"
+        "-   **Hypothesis:** h\n\n"
+        "### beta\n\n"
+        "-   **Hypothesis:** h\n\n"
+        "## Done\n\n"
+        "_(none)_\n"
+    )
+    roadmap.write_text(original)
+    with ds.mutate(actor="test") as state:
+        state.mode = "autonomous"
+        state.max_failures_before_demote = 1
+
+    def _fail(_entry, _cfg):
+        return runner.TickResult(ok=False, outcome="error", summary="boom")
+
+    monkeypatch.setattr(runner, "_process_entry", _fail)
+
+    runner.loop(runner.OrchestratorConfig(once=True, idle_sleep_sec=0))
+
+    state = ds.load()
+    assert roadmap.read_text() == original
+    assert state.entry_failures["alpha"].count == 1
+    assert [h.outcome for h in state.history] == ["error", "blocked"]
 
 
 def test_parse_up_next_ignores_suggested_subsection(tmp_path: Path) -> None:

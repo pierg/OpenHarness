@@ -237,7 +237,7 @@ def test_process_entry_short_circuits_when_repair_budget_exhausted(
 
     Without this gate the runner would loop forever on a phase the
     skill keeps refusing for the same reason. The ds.end_tick failure
-    counter (cross-tick) then takes over and may auto-demote the entry.
+    counter (cross-tick) then takes over and may block the entry.
     """
     import openharness.lab.phase_state as ps
     import openharness.lab.runner as runner
@@ -272,7 +272,45 @@ def test_process_entry_short_circuits_when_repair_budget_exhausted(
     assert "repair budget exhausted" in (result.summary or "")
     assert spawned == [], "no spawn should have been attempted"
 
-    # The phase remains failed so the cross-tick demote gate sees it.
+    # The phase remains failed so the cross-tick failure gate sees it.
     rec = ps.load("alpha").get("design")
     assert rec.status == "failed"
     assert rec.failure_count == 1
+
+
+def test_process_entry_retries_failed_preflight_after_host_cleanup(
+    isolated_lab: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Preflight failures are host-state dependent, so stale failures retry."""
+    import openharness.lab.phase_state as ps
+    import openharness.lab.runner as runner
+    importlib.reload(runner)
+
+    monkeypatch.setattr(ps, "MAX_REPAIRS_PER_PHASE", 0)
+    ps.mark_failed("alpha", "preflight", error="parent repo dirty")
+    ps.mark_failed("alpha", "preflight", error="parent repo dirty again")
+
+    calls: list[str] = []
+
+    def _preflight(entry, _state, _cfg):
+        calls.append(entry.slug)
+        ps.mark_ok("alpha", "preflight", payload={
+            "worktree": "/tmp/wt",
+            "branch": "lab/alpha",
+            "base_sha": "abc",
+            "base_branch": "main",
+        })
+        return None
+
+    monkeypatch.setattr(runner, "_PHASE_DISPATCH", (("preflight", _preflight),))
+
+    result = runner._process_entry(
+        runner.RoadmapEntry(
+            slug="alpha", body="", idea_id="some-idea", hypothesis="h",
+        ),
+        runner.OrchestratorConfig(once=True),
+    )
+
+    assert calls == ["alpha"]
+    assert result.ok is True
+    assert ps.load("alpha").get("preflight").status == "ok"

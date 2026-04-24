@@ -26,8 +26,8 @@ Three orthogonal pieces live here:
 
 3. ``entry_failures`` — per-slug failure counter. After
    ``max_failures_before_demote`` consecutive failures, the slug is
-   automatically demoted to ``Suggested`` so it stops eating quota.
-   The counter resets on success.
+   blocked in daemon state so it stops eating quota. The counter
+   resets on success or by operator command.
 
 Plus two pieces of "what's happening right now" data the web UI
 relies on:
@@ -75,10 +75,10 @@ maturity. Switch to ``autonomous`` when you trust the gates."""
 
 DEFAULT_MAX_FAILURES_BEFORE_DEMOTE = 2
 """After this many consecutive REFUSE / no-run-dir / spawn-error
-outcomes for the same slug, the daemon auto-demotes it to
-``Suggested`` and resets the counter. 2 is conservative — one bad
-config → at most ~6 minutes of looping at the typical ~3-min tick
-cadence — but high enough to tolerate a flaky network.
+outcomes for the same slug, the daemon skips it until the operator
+resets the failure counter. 2 is conservative — one bad config → at
+most ~6 minutes of looping at the typical ~3-min tick cadence — but
+high enough to tolerate a flaky network.
 """
 
 HISTORY_LIMIT = 50
@@ -116,7 +116,8 @@ TickOutcome = Literal[
     "timeout",             # results/summary.md never landed
     "error",               # unhandled exception in the pipeline
     "cancelled",           # operator pressed Cancel
-    "auto-demoted",        # exit gate fired — entry pushed to Suggested
+    "auto-demoted",        # legacy: exit gate pushed entry to Suggested
+    "blocked",             # exit gate fired — skipped until failures reset
 ]
 """How a tick ended. Drives both the failure counter and the history
 panel rendering (color, icon, retry suggestion)."""
@@ -146,7 +147,7 @@ class ActiveTick:
 
 @dataclass(eq=False, slots=True)
 class FailureRecord:
-    """Per-slug failure counter feeding the auto-demote gate."""
+    """Per-slug failure counter feeding the block gate."""
 
     count: int = 0
     last_error: str | None = None
@@ -481,7 +482,7 @@ def end_tick(
     """Clear the active tick and record one history entry.
 
     On a non-success outcome, increment the slug's failure counter
-    and return it so the runner can decide whether to auto-demote.
+    and return it so the runner can decide whether to block the slug.
     On success, reset the counter.
 
     Return shape ``(state, failure_record_or_none)``: the second
@@ -531,7 +532,7 @@ def clear_active_tick(*, actor: str | None = None) -> DaemonState:
 
     Used by the signal handler on shutdown — the tick wasn't
     properly closed out, but neither did it fail in a way we want
-    to count toward the demote gate. The next start sees a clean
+    to count toward the failure gate. The next start sees a clean
     slate.
     """
     with mutate(actor=actor) as st:

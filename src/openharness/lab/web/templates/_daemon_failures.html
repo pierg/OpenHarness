@@ -1,9 +1,9 @@
 {# Failure counters per slug.
 
-   Only renders if there's at least one row. The auto-demote gate
-   fires at `daemon_state.max_failures_before_demote`; this panel
-   makes that number visible so the operator can predict when an
-   approval is about to be lost. #}
+   Only renders if there's at least one row. The failure gate fires at
+   `daemon_state.max_failures_before_demote`; this panel makes that
+   number visible so the operator can predict when a slug will be
+   skipped until reset. #}
 {% if daemon_state.entry_failures %}
   <ul class="space-y-2">
     {% for slug, rec in daemon_state.entry_failures.items() %}
@@ -32,8 +32,9 @@
   </ul>
   <div class="flex items-center justify-between mt-3 gap-3 flex-wrap">
     <p class="text-xs text-slate-500">
-      The daemon auto-demotes a slug to <em>Suggested</em> after
-      {{ daemon_state.max_failures_before_demote }} consecutive non-success ticks.
+      The daemon blocks a slug after {{ daemon_state.max_failures_before_demote }}
+      consecutive non-success ticks. Roadmap markdown is left unchanged; reset
+      the counter to retry after fixing the cause.
     </p>
     {% if identity.can_write and daemon_state.entry_failures %}
       {# Bulk reset — useful after fixing a host-level cause (PATH,

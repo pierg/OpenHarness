@@ -505,6 +505,7 @@ class DaemonIdleReason:
       - ``paused``         — daemon mode == "paused"
       - ``manual_no_appr`` — manual mode, no approved+ready entries
       - ``no_queue``       — autonomous (or manual) but nothing ready
+      - ``blocked``        — ready entries exist but hit the failure gate
       - ``stopped``        — daemon is not running at all
       - ``unknown``        — fallback so the UI never renders "" badge
     """

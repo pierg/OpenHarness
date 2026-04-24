@@ -188,7 +188,7 @@
     <div class="flex flex-wrap items-center gap-2 pt-3 border-t border-slate-100">
       {% if pipeline.is_active %}
         <form hx-post="/api/cmd" hx-target="#cmd-result" hx-swap="innerHTML"
-              hx-confirm="Cancel the active tick and SIGTERM the codex spawn? Operator override — does NOT count toward the auto-demote gate.">
+              hx-confirm="Cancel the active tick and SIGTERM the codex spawn? Operator override — does NOT count toward the failure gate.">
           <input type="hidden" name="cmd_id" value="daemon-cancel">
           <button class="text-xs px-3 py-1.5 rounded-md bg-rose-600 text-white hover:bg-rose-700 font-medium">
             Cancel tick

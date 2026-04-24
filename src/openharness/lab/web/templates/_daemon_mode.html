@@ -24,7 +24,7 @@
     {% for m in ["paused", "manual", "autonomous"] %}
       {% set is_active = daemon_state.mode == m %}
       <form hx-post="/api/cmd" hx-target="#cmd-result" hx-swap="innerHTML"
-            {% if m == "autonomous" %}hx-confirm="Switch to autonomous? Daemon will pick from the top of Up next without waiting for approval. Exit gate (auto-demote after {{ daemon_state.max_failures_before_demote }} failures) is still on."{% endif %}>
+            {% if m == "autonomous" %}hx-confirm="Switch to autonomous? Daemon will pick from the top of Up next without waiting for approval. Exit gate (block after {{ daemon_state.max_failures_before_demote }} failures) is still on."{% endif %}>
         <input type="hidden" name="cmd_id" value="daemon-mode">
         <input type="hidden" name="mode" value="{{ m }}">
         <button class="text-xs rounded px-3 py-1.5 transition

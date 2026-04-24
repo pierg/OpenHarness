@@ -98,7 +98,7 @@
     <div class="border border-amber-200 bg-amber-50/50 rounded-md p-3">
       <div class="flex items-baseline gap-3 mb-2">
         <h3 class="text-sm font-semibold text-amber-900">Failure counters</h3>
-        <span class="text-xs text-amber-700">auto-demote at {{ daemon_state.max_failures_before_demote }}</span>
+        <span class="text-xs text-amber-700">block at {{ daemon_state.max_failures_before_demote }}</span>
       </div>
       <div hx-get="/_hx/daemon-failures"
            hx-trigger="lab-daemon-state-changed from:body, every 10s"

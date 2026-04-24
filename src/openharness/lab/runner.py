@@ -395,7 +395,7 @@ class TickResult:
     """Outcome of one full ``_process_entry`` call.
 
     ``loop`` consults ``outcome`` to decide what to record in
-    history and whether to fire the auto-demote gate. The legacy
+    history and whether to fire the failure gate. The legacy
     boolean return path is retained for callers (smoke tests) that
     only care about success.
     """
@@ -506,7 +506,7 @@ def _format_repair_context(
         "with current code, REFUSE again with a one-paragraph "
         "blocker that names exactly what is missing — the "
         "orchestrator will then exhaust the repair budget and "
-        "escalate via auto-demote, which is the right outcome.",
+        "block the slug, which is the right outcome.",
         "",
         "Do **not** repeat the previous failure's mistake. If you "
         "REFUSE a second time for the same reason, the orchestrator "
@@ -1497,7 +1497,7 @@ def _process_entry(entry: RoadmapEntry, cfg: OrchestratorConfig) -> TickResult:
         )
 
     # If the next phase is already failed, decide whether to attempt
-    # an auto-repair retry or surface the failure to the demote gate.
+    # an auto-repair retry or surface the failure to the block gate.
     #
     # The repair budget is per-phase (see
     # :data:`phase_state.MAX_REPAIRS_PER_PHASE`). On a repair attempt
@@ -1509,10 +1509,10 @@ def _process_entry(entry: RoadmapEntry, cfg: OrchestratorConfig) -> TickResult:
     failed_rec = state.get(next_phase)
     if failed_rec.status == "failed":
         budget = phase_state.MAX_REPAIRS_PER_PHASE
-        if failed_rec.failure_count > budget:
+        if next_phase != "preflight" and failed_rec.failure_count > budget:
             logger.warning(
                 "%s for %s exhausted repair budget (%d failures, max=%d); "
-                "leaving sticky-failed for the demote gate",
+                "leaving sticky-failed for the failure gate",
                 next_phase, entry.slug, failed_rec.failure_count, budget,
             )
             err = failed_rec.error or "(no error message recorded)"
@@ -1523,6 +1523,13 @@ def _process_entry(entry: RoadmapEntry, cfg: OrchestratorConfig) -> TickResult:
                     f"attempt(s); repair budget exhausted: "
                     f"{_summary_truncate(err, n=160)}"
                 ),
+            )
+        if next_phase == "preflight":
+            logger.info(
+                "retrying preflight for %s despite %d prior failure(s); "
+                "preflight is host-state dependent and may recover after cleanup",
+                entry.slug,
+                failed_rec.failure_count,
             )
         logger.info(
             "retrying %s for %s (repair attempt %d of %d)",
@@ -1562,10 +1569,12 @@ def _select_next_entry(
                         order, not approval order, so the operator
                         can approve out of order without changing
                         the queue.)
-    - ``autonomous``  → picks ``ready[0]`` (legacy behaviour).
+    - ``autonomous``  → picks the first non-blocked ready entry.
     """
     if state.mode == "paused":
         return None
+    blocked = _blocked_failure_slugs(state)
+    ready = [entry for entry in ready if entry.slug not in blocked]
     if state.mode == "autonomous":
         return ready[0] if ready else None
     # manual mode
@@ -1574,6 +1583,45 @@ def _select_next_entry(
         if e.slug in approved:
             return e
     return None
+
+
+def _blocked_failure_slugs(state: ds.DaemonState) -> set[str]:
+    """Return slugs that exhausted the daemon failure gate.
+
+    The roadmap is reconciled through the replan/finalize PR path, not
+    by direct daemon edits on ``main``. Blocking is therefore a runtime
+    decision: skip the slug until ``lab daemon reset-failures`` clears it.
+    """
+    return {
+        slug
+        for slug, rec in state.entry_failures.items()
+        if rec.count >= state.max_failures_before_demote
+    }
+
+
+def _record_failure_block(entry: RoadmapEntry, failure_rec: ds.FailureRecord) -> None:
+    """Append a synthetic history row when the exit gate blocks a slug."""
+    logger.warning(
+        "blocked %s after %d consecutive %s failures; roadmap left unchanged",
+        entry.slug,
+        failure_rec.count,
+        failure_rec.last_outcome,
+    )
+    with ds.mutate(actor="daemon") as st:
+        st.history.append(
+            ds.TickHistoryEntry(
+                slug=entry.slug,
+                started_at=datetime.now(timezone.utc),
+                ended_at=datetime.now(timezone.utc),
+                outcome="blocked",
+                phase_reached="done",
+                duration_sec=0.0,
+                summary=(
+                    f"blocked after {failure_rec.count} "
+                    f"{failure_rec.last_outcome} failures; reset failures to retry"
+                ),
+            )
+        )
 
 
 def _idle_log(reason: str, sleep_sec: int) -> None:
@@ -1611,18 +1659,24 @@ def _idle_wait(seconds: float) -> bool:
 def loop(cfg: OrchestratorConfig | None = None) -> None:
     """Main daemon loop. Consults :mod:`daemon_state` every tick.
 
-    The loop never directly mutates the markdown roadmap (that's the
-    skills' job via deterministic ``lab roadmap …`` helpers). The
-    one exception is the auto-demote gate: when an entry has failed
-    too many times in a row, the loop calls
-    :func:`lab_docs.demote_to_suggested` directly so the daemon can
-    keep moving without waiting on a codex spawn.
+    The loop never directly mutates the markdown roadmap (that is the
+    replan/finalize PR path's job). When an entry has failed too many
+    times in a row, the loop records it as blocked in daemon state and
+    skips it until an operator resets the failure counter.
     """
     cfg = cfg or OrchestratorConfig()
     while True:
         state = ds.load()
         entries = parse_up_next()
-        ready = [e for e in entries if is_dependency_satisfied(e)]
+        blocked = _blocked_failure_slugs(state)
+        blocked_ready = [
+            e for e in entries
+            if e.slug in blocked and is_dependency_satisfied(e)
+        ]
+        ready = [
+            e for e in entries
+            if e.slug not in blocked and is_dependency_satisfied(e)
+        ]
         entry = _select_next_entry(ready, state)
         if entry is None:
             if cfg.once:
@@ -1638,6 +1692,13 @@ def loop(cfg: OrchestratorConfig | None = None) -> None:
             elif state.mode == "manual":
                 _idle_log(
                     "daemon mode=manual; no approved+ready entry to run",
+                    cfg.idle_sleep_sec,
+                )
+            elif blocked_ready:
+                _idle_log(
+                    f"{len(blocked_ready)} ready roadmap entr"
+                    f"{'y is' if len(blocked_ready) == 1 else 'ies are'} "
+                    "blocked by failure counters",
                     cfg.idle_sleep_sec,
                 )
             else:
@@ -1678,45 +1739,12 @@ def loop(cfg: OrchestratorConfig | None = None) -> None:
             actor="daemon",
         )
 
-        # Exit gate: applies in BOTH modes. In manual mode the
-        # operator already paid attention by approving; we still
-        # don't want a busted entry to keep eating approvals if it
-        # keeps failing.
+        # Exit gate: applies in BOTH modes. It no longer mutates
+        # roadmap markdown directly on main; blocked entries are
+        # skipped by the selection step until the operator resets the
+        # failure counter.
         if failure_rec is not None and failure_rec.count >= state.max_failures_before_demote:
-            try:
-                lab_docs.demote_to_suggested(slug=entry.slug)
-                logger.warning(
-                    "auto-demoted %s to Suggested after %d consecutive %s failures: %s",
-                    entry.slug, failure_rec.count, failure_rec.last_outcome,
-                    failure_rec.last_error,
-                )
-                # Reset the counter so the next operator promotion
-                # of the same slug starts fresh.
-                ds.reset_failures(entry.slug, actor="daemon")
-                # And record the demotion as a synthetic history row
-                # so the UI shows what happened, not just "refuse"
-                # twice in a row.
-                with ds.mutate(actor="daemon") as st:
-                    st.history.append(
-                        ds.TickHistoryEntry(
-                            slug=entry.slug,
-                            started_at=datetime.now(timezone.utc),
-                            ended_at=datetime.now(timezone.utc),
-                            outcome="auto-demoted",
-                            phase_reached="done",
-                            duration_sec=0.0,
-                            summary=(
-                                f"auto-demoted to Suggested after "
-                                f"{failure_rec.count} {failure_rec.last_outcome} failures"
-                            ),
-                        )
-                    )
-            except Exception:
-                logger.exception(
-                    "auto-demote failed for %s; entry stays in Up next "
-                    "(operator should investigate)",
-                    entry.slug,
-                )
+            _record_failure_block(entry, failure_rec)
 
         if cfg.once:
             return

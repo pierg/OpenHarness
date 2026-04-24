@@ -1269,7 +1269,26 @@ class LabReader:
             except Exception:  # noqa: BLE001
                 ready_slugs = []
 
+        blocked = {
+            slug
+            for slug, rec in state.entry_failures.items()
+            if rec.count >= state.max_failures_before_demote
+        }
+        blocked_ready = [slug for slug in ready_slugs if slug in blocked]
+        ready_slugs = [slug for slug in ready_slugs if slug not in blocked]
+
         if not ready_slugs:
+            if blocked_ready:
+                return DaemonIdleReason(
+                    code="blocked",
+                    detail=(
+                        f"{len(blocked_ready)} ready roadmap entr"
+                        f"{'y is' if len(blocked_ready) == 1 else 'ies are'} "
+                        "blocked by failure counters. Reset failures to retry, "
+                        "or edit the roadmap through the normal PR flow."
+                    ),
+                    slug=blocked_ready[0],
+                )
             return DaemonIdleReason(
                 code="no_queue",
                 detail="Roadmap has no entries with satisfied dependencies.",
