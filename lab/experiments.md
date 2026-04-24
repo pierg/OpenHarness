@@ -6,7 +6,7 @@
 -   **Trunk at run-time:** [`trunk`](../src/openharness/agents/configs/trunk.yaml)
 -   **Hypothesis:** forcing `planner_executor` to repair invalid or empty planner JSON before executor handoff cuts planner-side `ValidationError` / `structured-output-failure` enough to recover trustworthy signal on the planner-positive slice.
 -   **Run:** [`runs/experiments/planner-schema-guard-paired-20260424-154436`](../runs/experiments/planner-schema-guard-paired-20260424-154436)
--   **Branch:** `lab/planner-schema-guard-paired`
+-   **Branch:** [`lab/planner-schema-guard-paired`](https://github.com/pierg/OpenHarness/pull/33) — metadata-only merge (no_op: schema guard matched control at 8/22 passes and only lowered cost, so the branch stays unpromoted.; discarded=`74d125b`)
 
 ### Aggregate
 | Leg | Agent | Trials | Passed | Failed | Pass rate | Cost (USD) |
@@ -41,6 +41,7 @@ Overall pass rate moved 0.0 percentage points: `planner_executor_control` stayed
 -   **roadmap** `timeout-aware-retry-on-needs-network`: promoted to the top of `## Up next` because repeated command loops and unrecovered timeouts remain the strongest cross-experiment blocker after schema repair only reduced cost.
 -   **roadmap** `planner-executor-cluster-confirmation`: demoted to `### Suggested` because `planner-schema-guard-paired` was a score wash, so the higher-cost planner confirmation is no longer front-of-queue.
 -   **idea** `planner-empty-glob-breaker`: remains the narrower planner-specific follow-up if the trunk-facing timeout-recovery run still leaves planner path-grounding failures unresolved.
+
 ## 2026-04-24 — loop-guard-on-basic-near-miss
 
 -   **Type:** paired-ablation
