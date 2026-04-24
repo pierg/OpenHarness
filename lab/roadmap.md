@@ -10,16 +10,17 @@
 > phase always runs the full slice. There are no separate `-smoke`
 > / `-full-sweep` roadmap entries.
 
-### timeout-aware-retry-on-needs-network
+### timeout-aware-retry-needs-network-confirmation
 
--   **Idea:** [`executor-bash-timeout-aware-retry`](ideas.md#executor-bash-timeout-aware-retry)
--   **Hypothesis:** timeout-aware retry / background polling recovers a meaningful share of the `needs_network` + `high_env_complexity` failures that currently collapse into repeated command loops or unrecovered bash timeouts.
--   **Slice:** derived `needs_network + high_env_complexity` slice from the current bench, restricted to tasks whose recent failed trials skewed toward `repeated_failed_command` or `timeout_no_recovery`. The implement phase MUST resolve the predicate from recorded artefacts and encode the final task list in `task_filter.include_tasks:`; floor §6 requires at least 5 tasks.
--   **Legs:** 2-leg paired ablation. Leg A: trunk `basic`. Leg B: `basic` + executor timeout-aware retry / background polling. One axis only: timeout recovery path on/off.
--   **Repetitions:** `paired-double` (n_attempts=2) — the recovery path is runtime-sensitive, and the derived slice is composed of unstable long-running tasks where single-shot noise would be hard to interpret.
+-   **Idea:** [`timeout-aware-retry-needs-network-confirmation`](ideas.md#timeout-aware-retry-needs-network-confirmation)
+-   **Hypothesis:** The timeout-aware retry branch needs a verdict-bearing rerun on the intended network-dependent, high-env-complexity slice; the smoke run tied control at 2/4 passes per leg and is below the evidence floor, so the needs_network timeout hypothesis remains open.
+-   **Slice:** verdict-bearing full slice from `timeout-aware-retry-on-needs-network`: network-dependent / `extra.needs_network = true` tasks with `high_env_complexity` and recent `repeated_failed_command` or `timeout_no_recovery` failures. Prefer the existing 18-task materialized list from the spec; floor §6 requires at least 10 trials per leg.
+-   **Legs:** 2-leg paired ablation. Leg A: trunk `basic`. Leg B: `basic_timeout_aware_retry`. One axis only: executor timeout-aware retry / background polling on or off.
+-   **Repetitions:** `paired-double` (n_attempts=2) because the smoke run was under-powered and the recovery path depends on runtime timing.
 -   **Control:** `fresh`.
--   **Why first:** four completed experiments still concentrate failures in repeated command loops and unrecovered timeouts, while `planner-schema-guard-paired` only reduced spend on the planner slice without recovering score. This is now the strongest trunk-facing mechanism question with cross-experiment support.
--   **Cost:** ~$5-8
+-   **Why first:** the smoke run only proved wiring and tied at 2/4 passes per leg; the cross-experiment critic reports the component has only 4 active trials and the needs_network hypothesis remains unanswered.
+-   **Depends on:** `timeout-aware-retry-on-needs-network`
+-   **Cost:** ~$4-7
 
 ### Suggested
 
@@ -59,6 +60,20 @@
 -   **Cost:** ~$5-8 (3 legs × 22 trials × ~$0.07-0.10/trial).
 
 ## Done
+
+### timeout-aware-retry-on-needs-network
+
+-   **Idea:** [`executor-bash-timeout-aware-retry`](ideas.md#executor-bash-timeout-aware-retry)
+-   **Hypothesis:** timeout-aware retry / background polling recovers a meaningful share of the `needs_network` + `high_env_complexity` failures that currently collapse into repeated command loops or unrecovered bash timeouts.
+-   **Slice:** derived `needs_network + high_env_complexity` slice from the current bench, restricted to tasks whose recent failed trials skewed toward `repeated_failed_command` or `timeout_no_recovery`. The implement phase MUST resolve the predicate from recorded artefacts and encode the final task list in `task_filter.include_tasks:`; floor §6 requires at least 5 tasks.
+-   **Legs:** 2-leg paired ablation. Leg A: trunk `basic`. Leg B: `basic` + executor timeout-aware retry / background polling. One axis only: timeout recovery path on/off.
+-   **Repetitions:** `paired-double` (n_attempts=2) — the recovery path is runtime-sensitive, and the derived slice is composed of unstable long-running tasks where single-shot noise would be hard to interpret.
+-   **Control:** `fresh`.
+-   **Why first:** four completed experiments still concentrate failures in repeated command loops and unrecovered timeouts, while `planner-schema-guard-paired` only reduced spend on the planner slice without recovering score. This is now the strongest trunk-facing mechanism question with cross-experiment support.
+-   **Cost:** ~$5-8
+
+-   **Ran:** [runs/experiments/timeout-aware-retry-on-needs-network-smoke-20260424-193153](../runs/experiments/timeout-aware-retry-on-needs-network-smoke-20260424-193153)
+-   **Outcome:** no_op: smoke run tied at 2/4 passes per leg and fell below the evidence floor; run the full network-heavy slice before drawing a verdict.
 
 ### planner-schema-guard-paired
 

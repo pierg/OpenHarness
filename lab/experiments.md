@@ -1,5 +1,39 @@
 # Experiments
 
+## 2026-04-24 — timeout-aware-retry-on-needs-network
+
+-   **Type:** paired-ablation
+-   **Trunk at run-time:** [`trunk`](../src/openharness/agents/configs/trunk.yaml)
+-   **Hypothesis:** timeout-aware retry / background polling recovers a meaningful share of the `needs_network` + `high_env_complexity` failures that currently collapse into repeated command loops or unrecovered bash timeouts.
+-   **Run:** [`runs/experiments/timeout-aware-retry-on-needs-network-smoke-20260424-193153`](../runs/experiments/timeout-aware-retry-on-needs-network-smoke-20260424-193153)
+-   **Branch:** [`lab/timeout-aware-retry-on-needs-network`](https://github.com/pierg/OpenHarness/pull/38) — metadata-only merge (no_op: smoke tied control at 2/4 passes per leg and was under the evidence floor.; discarded=`a4ca455`)
+
+### Aggregate
+| Leg | Agent | Trials | Passed | Failed | Pass rate | Cost (USD) |
+|-----|-------|-------:|-------:|-------:|----------:|-----------:|
+| `basic` | `basic` | 4 | 2 | 2 | 50.0% | $0.46 |
+| `basic_timeout_aware_retry` | `basic_timeout_aware_retry` | 4 | 2 | 2 | 50.0% | $0.09 |
+### Mutation impact
+-   **Best leg:** `basic` (50.0%, $0.46)
+-   **Worst leg:** `basic_timeout_aware_retry` (50.0%, $0.09)
+-   **Spread:** +0.0 pp
+-   _(experiment-critic JSON missing a `mutation_impact` field; this is a DB-only fallback.)_
+### Failure modes
+
+_(pending)_
+
+### Tree effect
+-   **Verdict:** **No-op** — recorded for trend analysis
+-   **Target:** `basic_timeout_aware_retry`
+-   **Pair:** trunk leg `basic` vs mutation `basic_timeout_aware_retry`
+-   **Δ pass-rate:** +0.00 pp
+-   **Δ $/pass:** -79.4%
+-   **Confidence:** 0.00
+-   **Rationale:** insufficient_data: smallest leg has n=4 trials (< floor of 5); under-sampled legs: {'basic': 4, 'basic_timeout_aware_retry': 4}. Re-run on a wider slice (the design's `## Slice > Full` section) before drawing a verdict.
+### Linked follow-ups
+
+-   **roadmap** `timeout-aware-retry-needs-network-confirmation`: queued at the top of `## Up next` because this smoke run tied control at 2/4 passes per leg and fell below the evidence floor, leaving the full needs_network timeout-recovery hypothesis unresolved.
+
 ## 2026-04-24 — planner-schema-guard-paired
 
 -   **Type:** paired-ablation
