@@ -1,5 +1,50 @@
 # Experiments
 
+## 2026-04-24 — loop-guard-on-basic-near-miss
+
+-   **Type:** paired-ablation
+-   **Trunk at run-time:** [`trunk`](../src/openharness/agents/configs/trunk.yaml)
+-   **Hypothesis:** enabling `LoopGuardConfig.enabled` on trunk `basic` recovers a meaningful share of the loop-heavy near-miss failures from `extended-budget-paired-on-trunk` by breaking repeated command / timeout spirals without the cost blow-up of longer budgets.
+-   **Run:** [`runs/experiments/loop-guard-on-basic-near-miss-20260424-021810`](../runs/experiments/loop-guard-on-basic-near-miss-20260424-021810)
+-   **Branch:** [`lab/loop-guard-on-basic-near-miss`](https://github.com/pierg/OpenHarness/pull/32) — metadata-only merge (reject: loop-guard on basic scored 1/46 vs trunk 2/46 on the near-miss slice and did not recover loop-heavy failures.; discarded=`9b96272`)
+
+### Aggregate
+| Leg | Agent | Trials | Passed | Failed | Pass rate | Cost (USD) |
+|-----|-------|-------:|-------:|-------:|----------:|-----------:|
+| `basic` | `basic` | 46 | 2 | 44 | 4.3% | $4.01 |
+| `basic_loop_guard` | `basic_loop_guard` | 46 | 1 | 45 | 2.2% | $3.98 |
+### Mutation impact
+-   **Best leg:** `basic` (4.3%, $4.01)
+-   **Worst leg:** `basic_loop_guard` (2.2%, $3.98)
+-   **Spread:** +2.2 pp
+-   _(experiment-critic JSON missing a `mutation_impact` field; this is a DB-only fallback.)_
+### Failure modes
+
+_(pending)_
+
+### Tree effect
+-   **Verdict:** **Reject** — experiment outcome supports rejection
+-   **Target:** `basic_loop_guard`
+-   **Pair:** trunk leg `basic` vs mutation `basic_loop_guard`
+-   **Δ pass-rate:** -2.17 pp
+-   **Δ $/pass:** +98.9%
+-   **Confidence:** 0.43
+-   **Rationale:** Δ pass-rate = -2.2pp; Δ $/pass = +99%; cost spike ≥ 50%; no positive cluster.
+
+| Cluster | trunk pass | mut pass | Δ pp |
+|---------|-----------:|---------:|-----:|
+| `c_build` | 1/6 | 0/6 | -16.7 |
+| `binary_emulation` | 0/2 | 0/2 | +0.0 |
+| `c_graphics` | 0/2 | 0/2 | +0.0 |
+| `c_ml_inference` | 0/2 | 0/2 | +0.0 |
+| `c_runtime_debugging` | 0/2 | 0/2 | +0.0 |
+| `compression_reverse_engineering` | 0/2 | 0/2 | +0.0 |
+| `coq_theorem_proving` | 0/2 | 0/2 | +0.0 |
+| `corewars_redcode` | 0/2 | 0/2 | +0.0 |
+### Linked follow-ups
+
+_(pending)_
+
 ## 2026-04-23 — extended-budget-paired-on-trunk
 
 -   **Type:** paired-ablation

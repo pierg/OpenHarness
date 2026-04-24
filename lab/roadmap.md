@@ -10,17 +10,6 @@
 > phase always runs the full slice. There are no separate `-smoke`
 > / `-full-sweep` roadmap entries.
 
-### loop-guard-on-basic-near-miss
-
--   **Idea:** [`loop-guard`](ideas.md#loop-guard)
--   **Hypothesis:** enabling `LoopGuardConfig.enabled` on trunk `basic` recovers a meaningful share of the loop-heavy near-miss failures from `extended-budget-paired-on-trunk` by breaking repeated command / timeout spirals without the cost blow-up of longer budgets.
--   **Slice:** `near-miss` — tasks from `extended-budget-paired-on-trunk` where all three budget legs failed and at least one trial logged `repeated_failed_command` or `timeout_no_recovery`. Current evidence suggests `n_tasks ≈ 20-24`; with `n_attempts=2`, expect `n_trials/leg ≈ 40-48`.
--   **Legs:** 2-leg paired ablation. Leg A: trunk `basic`. Leg B: `basic` + loop-guard enabled. One axis only: loop-guard on/off.
--   **Repetitions:** `paired-double` (n_attempts=2) — the mechanism is stochastic, and the slice is a derived near-miss population where single-shot noise would be hard to read.
--   **Control:** `fresh`.
--   **Why first:** both completed experiments say "more budget" is not the answer, while no-progress loops are the dominant shared failure shape. This is the cheapest trunk-facing test of the strongest current hypothesis.
--   **Depends on:** `extended-budget-paired-on-trunk`
--   **Cost:** ~$3-5.
 
 ### planner-schema-guard-paired
 
@@ -77,19 +66,22 @@
 -   **Cost:** ~$10-20
 -   **When to run:** after loop / retry / verification guardrails if the same slice still washes out; model spend is lower-priority than mechanism fixes right now.
 
-#### loop-guard-paired-ablation
+## Done
+
+### loop-guard-on-basic-near-miss
 
 -   **Idea:** [`loop-guard`](ideas.md#loop-guard)
--   **Hypothesis:** enabling `LoopGuardConfig.enabled` on `planner_executor` reduces wasted turns on the near-miss slice — tasks where the original `planner_executor` leg hit the turn budget without progress — by ≥5pp.
--   **Slice:** `near-miss` — tasks where `planner_executor` hit `n_turns=30` in `tb2-baseline-20260417-234913` (TBD: extract exact list during design phase; expect ~15-25 tasks). `n_tasks/leg ≈ 20`, `n_trials/leg ≈ 40` (with `n_attempts=2`).
--   **Legs:** 2-leg paired ablation. Leg A: `planner_executor` (loop-guard off — byte-identical to current YAML). Leg B: `planner_executor` (loop-guard on). **Trunk-anchor caveat:** the design phase MUST verify that `tree_ops.evaluate` accepts a non-trunk anchor without complaining; if it doesn't, add `basic` (trunk) as Leg C purely so the comparator has a trunk reference.
--   **Repetitions:** `paired-double` (n_attempts=2) — loop-guard's nudges fire stochastically on observed empty turns / repeated calls; cell variance is its core characteristic.
--   **Control:** `fresh` — required by selection bias on the near-miss slice.
--   **Why later:** this stacks a second fix on top of a planner branch we still have not cleanly re-validated. Run it only after the schema-guard and branch-confirmation work say `planner_executor` is still worth specializing.
--   **Depends on:** `planner-executor-cluster-confirmation`, `extended-budget-paired-on-trunk`
--   **Cost:** ~$5-10 (2 legs × ~40 trials × ~$0.07/trial; planner_executor cost band).
+-   **Hypothesis:** enabling `LoopGuardConfig.enabled` on trunk `basic` recovers a meaningful share of the loop-heavy near-miss failures from `extended-budget-paired-on-trunk` by breaking repeated command / timeout spirals without the cost blow-up of longer budgets.
+-   **Slice:** `near-miss` — tasks from `extended-budget-paired-on-trunk` where all three budget legs failed and at least one trial logged `repeated_failed_command` or `timeout_no_recovery`. Current evidence suggests `n_tasks ≈ 20-24`; with `n_attempts=2`, expect `n_trials/leg ≈ 40-48`.
+-   **Legs:** 2-leg paired ablation. Leg A: trunk `basic`. Leg B: `basic` + loop-guard enabled. One axis only: loop-guard on/off.
+-   **Repetitions:** `paired-double` (n_attempts=2) — the mechanism is stochastic, and the slice is a derived near-miss population where single-shot noise would be hard to read.
+-   **Control:** `fresh`.
+-   **Why first:** both completed experiments say "more budget" is not the answer, while no-progress loops are the dominant shared failure shape. This is the cheapest trunk-facing test of the strongest current hypothesis.
+-   **Depends on:** `extended-budget-paired-on-trunk`
+-   **Cost:** ~$3-5.
 
-## Done
+-   **Ran:** [runs/experiments/loop-guard-on-basic-near-miss-20260424-021810](../runs/experiments/loop-guard-on-basic-near-miss-20260424-021810)
+-   **Outcome:** reject: loop-guard on basic scored 1/46 vs trunk 2/46 on the near-miss slice and did not recover loop-heavy failures.
 
 ### extended-budget-paired-on-trunk
 

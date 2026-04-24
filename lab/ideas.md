@@ -38,6 +38,18 @@
 -   **Sketch:** Add a verifier-completion gate that blocks success claims until the required output paths or end-to-end checks have been revalidated, then replay the extended-budget slice with the gate enabled on the long-budget leg. The comparison should answer whether the remaining long-budget spend is rescuing real work or just prolonging premature success states.
 -   **Auto-proposed by:** cross-experiment-critic@2026-04-23
 
+#### loop-guard-recovery-playbook
+
+-   **Motivation:** Across 28 creates_new_file loop-guard trials and 42 high/medium-env trials, loop-guard cut spend roughly 49-61% and reduced hallucinated_success, but it produced zero decisive wins because failures shifted toward gave_up_too_early, wrong_tool_family, and unverified outputs.
+-   **Sketch:** Extend loop-guard so a trigger runs a verifier-aware recovery playbook instead of a generic nudge: inspect README/tests, create or update the required artifact, run the narrow verifier command, then resume search. Test basic vs loop-guard vs loop-guard-plus-recovery-playbook on the current near-miss slice biased toward creates_new_file and single_output_file tasks.
+-   **Auto-proposed by:** cross-experiment-critic@2026-04-24
+
+#### toolchain-fallback-playbooks-on-c-build
+
+-   **Motivation:** Across 49 c_build trials the pass rate is only 8.2%, with repeated_failed_command on 40 trials and timeout_no_recovery on 24; loop-guard lowers cost but does not change scores, so the unresolved blocker is still toolchain/bootstrap strategy rather than control-flow alone.
+-   **Sketch:** Add build-task fallbacks that inspect repo build docs first, switch to repo-local or package-manager alternatives when clang/gcc/opam/pip paths fail, and treat long bootstrap steps as background-poll work instead of repeated probing. Run a paired ablation on a c_build plus network_dependency slice, optionally alongside the existing timeout-aware-retry branch.
+-   **Auto-proposed by:** cross-experiment-critic@2026-04-24
+
 ## Proposed
 
 ### Architecture
