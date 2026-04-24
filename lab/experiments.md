@@ -1,5 +1,33 @@
 # Experiments
 
+## 2026-04-24 — tb2-gemini3-model-baseline
+
+-   **Type:** paired-ablation
+-   **Trunk at run-time:** [`trunk`](../src/openharness/agents/configs/trunk.yaml)
+-   **Hypothesis:** The current trunk score is partly model-bound: replacing `gemini-3.1-flash-lite-preview` with the stronger Gemini 3 Flash / 3.1 Pro coding models on the same `basic` harness will raise full-suite pass rate enough to change which runtime and prompt mechanisms are worth pursuing next.
+-   **Run:** _(filled after the run completes)_
+-   **Branch:** `lab/tb2-gemini3-model-baseline`
+
+### Aggregate
+
+_(pending)_
+
+### Mutation impact
+
+_(pending)_
+
+### Failure modes
+
+_(pending)_
+
+### Tree effect
+
+_(pending)_
+
+### Linked follow-ups
+
+_(pending)_
+
 ## 2026-04-24 — timeout-aware-retry-on-needs-network
 
 -   **Type:** paired-ablation
