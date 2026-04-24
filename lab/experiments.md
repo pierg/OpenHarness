@@ -9,21 +9,34 @@
 -   **Branch:** `lab/planner-schema-guard-paired`
 
 ### Aggregate
-
-_(pending)_
-
+| Leg | Agent | Trials | Passed | Failed | Pass rate | Cost (USD) |
+|-----|-------|-------:|-------:|-------:|----------:|-----------:|
+| `planner_executor_control` | `planner_executor` | 22 | 8 | 14 | 36.4% | $1.52 |
+| `planner_executor_schema_guard` | `planner_executor_schema_guard` | 22 | 8 | 14 | 36.4% | $1.17 |
 ### Mutation impact
-
-_(pending)_
-
+Overall pass rate moved 0.0 percentage points: `planner_executor_control` stayed at 36.4% and `planner_executor_schema_guard` stayed at 36.4%. The biggest positive shift was the system-administration task `git-multibranch`, where schema_guard kept recovery aligned with the required `/git/project` path and improved the paired mean score by +0.5. The biggest regression was the security-certificates task `openssl-selfsigned-cert`, where control recovered by replacing `cryptography` with an `openssl x509` checker while schema_guard kept the environment-mutation path. Elsewhere the mutation mostly changed cost and time on tied outcomes, so its practical effect looks like plan-shape repair and faster failure rather than better task reasoning.
 ### Failure modes
-
-_(pending)_
-
+-   **repeated_failed_command** (×22): Repeated empty `glob` probes, repeated solver rewrites, or other low-yield retries consumed budget without changing the approach.
+-   **no_pre_edit_inspection** (×14): The agent committed to an implementation before reading the verifier, task files, or live config it needed to ground the work.
+-   **gave_up_too_early** (×13): The run ended after an unrecovered bad plan or last-turn speculation instead of closing the loop with a verifier-aligned recovery.
+-   **hallucinated_success** (×9): The agent declared success from local checks that did not match the verifier contract or ignored failing evidence already in the run.
+-   **verification_gap** (×8): Validation stayed partial or sample-only, missing global constraints, clean-environment execution, or exact numeric targets.
+-   **environment_mutation** (×5): The agent used environment changes such as `pip install` as a fix instead of delivering portable task artifacts.
 ### Tree effect
+-   **Verdict:** **No-op** — recorded for trend analysis
+-   **Target:** `planner_executor_schema_guard`
+-   **Pair:** trunk leg `planner_executor_control` vs mutation `planner_executor_schema_guard`
+-   **Δ pass-rate:** +0.00 pp
+-   **Δ $/pass:** -22.7%
+-   **Confidence:** 0.00
+-   **Rationale:** Inconclusive: Δ pass-rate = +0.0pp (trunk 36.4% vs mutation 36.4%); 1 positive cluster(s) (threshold 2); Δ $/pass = -23%.
+-   **Evidence:** [`experiment-critic.json`](../runs/experiments/planner-schema-guard-paired-20260424-154436/critic/experiment-critic.json), [`comparisons`](../runs/experiments/planner-schema-guard-paired-20260424-154436/critic/comparisons), [`critic_summary.md`](../runs/experiments/planner-schema-guard-paired-20260424-154436/results/critic_summary.md)
 
-_(pending)_
-
+| Cluster | trunk pass | mut pass | Δ pp |
+|---------|-----------:|---------:|-----:|
+| `security_certificates` | 1/2 | 0/2 | -50.0 |
+| `system_administration` | 3/6 | 4/6 | +16.7 |
+| `python_data` | 4/14 | 4/14 | +0.0 |
 ### Linked follow-ups
 
 _(pending)_
