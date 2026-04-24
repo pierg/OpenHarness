@@ -62,7 +62,7 @@ def _write_plugin_with_skill_dir(root: Path, name: str, skill_dir_name: str) -> 
     )
 
 
-def test_ohmo_loaders_merge_shared_and_private_skills_and_plugins(tmp_path, monkeypatch):
+def test_ohmo_loaders_merge_shared_and_workspace_skills_and_plugins(tmp_path, monkeypatch):
     config_dir = tmp_path / ".openharness"
     monkeypatch.setenv("OPENHARNESS_CONFIG_DIR", str(config_dir))
     workspace = tmp_path / ".ohmo-home"
@@ -75,16 +75,16 @@ def test_ohmo_loaders_merge_shared_and_private_skills_and_plugins(tmp_path, monk
     (shared_skill_dir / "SKILL.md").write_text(
         "# shared skill\n\nFrom shared config.\n", encoding="utf-8"
     )
-    private_skill_dir = get_skills_dir(workspace) / "private_skill"
-    private_skill_dir.mkdir(parents=True)
-    (private_skill_dir / "SKILL.md").write_text(
-        "# private skill\n\nFrom ohmo workspace.\n", encoding="utf-8"
+    workspace_skill_dir = get_skills_dir(workspace) / "workspace_skill"
+    workspace_skill_dir.mkdir(parents=True)
+    (workspace_skill_dir / "SKILL.md").write_text(
+        "# workspace skill\n\nFrom ohmo workspace.\n", encoding="utf-8"
     )
 
     shared_plugins = config_dir / "plugins"
     shared_plugins.mkdir(parents=True)
     _write_plugin(shared_plugins, "shared_plugin", "shared_plugin_skill")
-    _write_plugin(get_plugins_dir(workspace), "private_plugin", "private_plugin_skill")
+    _write_plugin(get_plugins_dir(workspace), "workspace_plugin", "workspace_plugin_skill")
 
     settings = load_settings()
     registry = load_skill_registry(
@@ -95,17 +95,17 @@ def test_ohmo_loaders_merge_shared_and_private_skills_and_plugins(tmp_path, monk
     )
     names = {skill.name for skill in registry.list_skills()}
     assert "shared skill" in names
-    assert "private skill" in names
+    assert "workspace skill" in names
     assert "shared_plugin_skill" in names
-    assert "private_plugin_skill" in names
+    assert "workspace_plugin_skill" in names
 
     plugins = load_plugins(settings, tmp_path, extra_roots=[get_plugins_dir(workspace)])
     plugin_names = {plugin.manifest.name for plugin in plugins}
     assert "shared_plugin" in plugin_names
-    assert "private_plugin" in plugin_names
+    assert "workspace_plugin" in plugin_names
 
 
-def test_ohmo_private_skill_directory_with_skill_md_is_loaded(tmp_path, monkeypatch):
+def test_ohmo_workspace_skill_directory_with_skill_md_is_loaded(tmp_path, monkeypatch):
     config_dir = tmp_path / ".openharness"
     monkeypatch.setenv("OPENHARNESS_CONFIG_DIR", str(config_dir))
     workspace = tmp_path / ".ohmo-home"
@@ -131,7 +131,7 @@ def test_ohmo_private_skill_directory_with_skill_md_is_loaded(tmp_path, monkeypa
     assert "PikaStream Video Meeting" in skill.content
 
 
-def test_run_ohmo_backend_passes_private_skill_and_plugin_roots(tmp_path, monkeypatch):
+def test_run_ohmo_backend_passes_workspace_skill_and_plugin_roots(tmp_path, monkeypatch):
     workspace = tmp_path / ".ohmo-home"
     initialize_workspace(workspace)
     captured: dict[str, object] = {}

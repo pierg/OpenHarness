@@ -161,6 +161,81 @@ def test_gemini_trial_critic_parses_and_persists_payload(
     assert written["provenance"]["critic_model"] == gemini.DEFAULT_TRIAL_MODEL
 
 
+def test_gemini_trial_critic_loads_repo_dotenv_for_worktree_cwd(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo = tmp_path / "repo"
+    worktree = tmp_path / "worktree"
+    (repo / ".agents" / "skills" / "trial-critic").mkdir(parents=True)
+    (repo / ".agents" / "skills" / "trial-critic" / "SKILL.md").write_text(
+        "---\nname: trial-critic\n---\n"
+    )
+    (repo / "runs" / "lab").mkdir(parents=True)
+    (repo / ".env").write_text("GOOGLE_API_KEY=from-google\n", encoding="utf-8")
+    worktree.mkdir()
+    (worktree / ".agents" / "skills" / "trial-critic").mkdir(parents=True)
+    (worktree / ".agents" / "skills" / "trial-critic" / "SKILL.md").write_text(
+        "---\nname: trial-critic\n---\n"
+    )
+    monkeypatch.setenv("OPENHARNESS_REPO_ROOT", str(repo))
+    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+    monkeypatch.delenv("GOOGLE_API_KEY", raising=False)
+
+    import openharness.lab.paths as paths
+    importlib.reload(paths)
+    import openharness.lab.codex as codex
+    importlib.reload(codex)
+    import openharness.lab.critic_io as critic_io
+    importlib.reload(critic_io)
+    import openharness.lab.trial_evidence as trial_evidence
+    importlib.reload(trial_evidence)
+    import openharness.lab.gemini as gemini
+    importlib.reload(gemini)
+
+    trial = _trial_dir(tmp_path)
+    binary = tmp_path / "gemini"
+    binary.write_text("#!/bin/sh\n")
+    binary.chmod(0o755)
+    captured_env: dict[str, str] = {}
+
+    payload = {
+        "schema_version": 1,
+        "task_summary": "Fix a bug.",
+        "agent_strategy": "Used the digest.",
+        "key_actions": ["turn 1: inspected evidence"],
+        "outcome": "passed",
+        "root_cause": None,
+        "success_factor": "The agent completed the task.",
+        "anti_patterns": [],
+        "components_active": [],
+        "task_features": ["python-tests"],
+        "surprising_observations": [],
+        "confidence": 0.9,
+    }
+
+    def fake_run(cmd: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        captured_env.update(kwargs["env"])  # type: ignore[arg-type]
+        return subprocess.CompletedProcess(
+            cmd,
+            0,
+            stdout=json.dumps({"response": json.dumps(payload)}),
+            stderr="",
+        )
+
+    monkeypatch.setattr(gemini.shutil, "which", lambda _name: str(binary))
+    monkeypatch.setattr(gemini.subprocess, "run", fake_run)
+
+    result = gemini.run_trial_critic(
+        trial,
+        cfg=gemini.GeminiConfig(binary=str(binary), cwd=worktree),
+        persist=False,
+    )
+
+    assert result.ok is True
+    assert captured_env["GOOGLE_API_KEY"] == "from-google"
+    assert captured_env["GEMINI_API_KEY"] == "from-google"
+
+
 def test_gemini_invalid_payload_fails_without_persisting(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
