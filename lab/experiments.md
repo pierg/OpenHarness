@@ -1,5 +1,33 @@
 # Experiments
 
+## 2026-04-24 — loop-guard-on-basic-near-miss
+
+-   **Type:** paired-ablation
+-   **Trunk at run-time:** [`trunk`](../src/openharness/agents/configs/trunk.yaml)
+-   **Hypothesis:** enabling `LoopGuardConfig.enabled` on trunk `basic` recovers a meaningful share of the loop-heavy near-miss failures from `extended-budget-paired-on-trunk` by breaking repeated command / timeout spirals without the cost blow-up of longer budgets.
+-   **Run:** _(filled after the run completes)_
+-   **Branch:** `lab/loop-guard-on-basic-near-miss`
+
+### Aggregate
+
+_(pending)_
+
+### Mutation impact
+
+_(pending)_
+
+### Failure modes
+
+_(pending)_
+
+### Tree effect
+
+_(pending)_
+
+### Linked follow-ups
+
+_(pending)_
+
 ## 2026-04-23 — extended-budget-paired-on-trunk
 
 -   **Type:** paired-ablation
