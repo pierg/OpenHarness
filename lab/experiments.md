@@ -1,5 +1,32 @@
 # Experiments
 
+## 2026-04-24 — planner-schema-guard-paired
+
+-   **Type:** paired-ablation
+-   **Trunk at run-time:** [`trunk`](../src/openharness/agents/configs/trunk.yaml)
+-   **Hypothesis:** forcing `planner_executor` to repair invalid or empty planner JSON before executor handoff cuts planner-side `ValidationError` / `structured-output-failure` enough to recover trustworthy signal on the planner-positive slice.
+-   **Run:** [`runs/experiments/planner-schema-guard-paired-20260424-154436`](../runs/experiments/planner-schema-guard-paired-20260424-154436)
+-   **Branch:** `lab/planner-schema-guard-paired`
+
+### Aggregate
+
+_(pending)_
+
+### Mutation impact
+
+_(pending)_
+
+### Failure modes
+
+_(pending)_
+
+### Tree effect
+
+_(pending)_
+
+### Linked follow-ups
+
+_(pending)_
 ## 2026-04-24 — loop-guard-on-basic-near-miss
 
 -   **Type:** paired-ablation
