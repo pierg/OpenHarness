@@ -35,6 +35,7 @@ independently of the daemon thanks to ``start_new_session=True``.
 
 from __future__ import annotations
 
+import json
 import logging
 import os
 import subprocess
@@ -293,6 +294,31 @@ def wait_for_summary(
     return summary.is_file()
 
 
+def _validate_complete_run(run_dir: Path) -> None:
+    """Fail the run phase if any declared leg produced no trial aggregate."""
+    experiment_path = run_dir / "experiment.json"
+    if not experiment_path.is_file():
+        raise PhaseRunError(f"{experiment_path} is missing after summary landed")
+    try:
+        experiment = json.loads(experiment_path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        raise PhaseRunError(f"{experiment_path} is invalid JSON: {exc}") from exc
+
+    bad_legs: list[str] = []
+    for leg in experiment.get("legs") or []:
+        leg_id = str(leg.get("leg_id") or "(unknown)")
+        trials = leg.get("trials") or []
+        if leg.get("status") != "succeeded" or not trials or leg.get("aggregate") is None:
+            bad_legs.append(
+                f"{leg_id}: status={leg.get('status')!r} "
+                f"result_status={leg.get('result_status')!r} trials={len(trials)}"
+            )
+    if bad_legs:
+        raise PhaseRunError(
+            f"run {run_dir.name} has incomplete legs: " + "; ".join(bad_legs)
+        )
+
+
 # ---------------------------------------------------------------------------
 # Public entry point — runner.py calls this once per tick that needs phase 3
 # ---------------------------------------------------------------------------
@@ -347,6 +373,7 @@ def run_experiment(
             f"{timeout_sec}s. Check {log_path} and the run's "
             "events.jsonl for what happened."
         )
+    _validate_complete_run(run_dir)
 
     logger.info("run %s complete; summary at %s", instance_id, _summary_path(run_dir))
     return RunOutcome(
