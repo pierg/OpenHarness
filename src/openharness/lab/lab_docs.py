@@ -1331,6 +1331,8 @@ def demote_to_suggested(*, slug: str, lab_root: Path = LAB_ROOT) -> str:
 def _demote_to_suggested_inplace(up_next_body: str, slug: str) -> tuple[str, bool]:
     # Locate the top-level entry (### <slug>) inside Up next, but not the
     # Suggested subsection itself or any of its #### children.
+    if slug == "Suggested":
+        return up_next_body, False
     pattern = re.compile(
         r"^### " + re.escape(slug) + r"\b(?P<entry>.*?)(?=\n### |\Z)",
         re.DOTALL | re.MULTILINE,

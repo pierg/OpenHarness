@@ -217,3 +217,24 @@ def test_add_suggested_replaces_existing_slug(lab_root: Path) -> None:
     assert text.count("#### x") == 1
     assert "second" in text
     assert "first" not in text
+
+
+def test_demote_suggested_heading_is_not_allowed(lab_root: Path) -> None:
+    (lab_root / "roadmap.md").write_text(
+        "# Roadmap\n\n"
+        "## Up next\n\n"
+        "### runnable\n\n"
+        "-   **Hypothesis:** run me\n\n"
+        "### Suggested\n\n"
+        "#### later\n\n"
+        "-   **Hypothesis:** later\n\n"
+        "## Done\n\n"
+        "_(none)_\n"
+    )
+
+    with pytest.raises(lab_docs.LabDocError):
+        lab_docs.demote_to_suggested(slug="Suggested", lab_root=lab_root)
+
+    text = (lab_root / "roadmap.md").read_text()
+    assert text.count("### Suggested") == 1
+    assert "#### Suggested" not in text

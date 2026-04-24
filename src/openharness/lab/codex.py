@@ -404,8 +404,7 @@ SKILL_PROFILES: dict[str, SkillProfile] = {
         model="gpt-5.4",
         reasoning_effort="medium",
         reasoning_summary="detailed",
-        sandbox="workspace-write",
-        full_auto=True,
+        sandbox="danger-full-access",
         timeout_sec=60 * 60 * 2,
         notes=(
             "Phase 6 of the lab pipeline. Reconciles the experiment "

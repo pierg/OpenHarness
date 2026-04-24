@@ -153,10 +153,17 @@ def parse_up_next(roadmap_path: Path = LAB_ROOT / "roadmap.md") -> list[RoadmapE
             break
     if not up_next_block or up_next_block.startswith("_(none)_"):
         return []
+    suggested = re.search(r"(?m)^### Suggested\s*$", up_next_block)
+    if suggested:
+        up_next_block = up_next_block[: suggested.start()].strip()
+    if not up_next_block or up_next_block.startswith("_(none)_"):
+        return []
     entries: list[RoadmapEntry] = []
     matches = list(_ROADMAP_ENTRY_RE.finditer(up_next_block))
     for i, m in enumerate(matches):
         slug = m.group(1)
+        if slug == "Suggested":
+            continue
         start = m.end()
         end = matches[i + 1].start() if i + 1 < len(matches) else len(up_next_block)
         body = up_next_block[start:end].strip()
@@ -610,6 +617,59 @@ def _commit_worktree_changes(
         slug, phase, sha[:8],
     )
     return sha
+
+
+def _worktree_changed_paths(worktree: Path) -> list[str]:
+    """Return non-ignored dirty paths from `git status --porcelain`.
+
+    The path is normalized for rename rows (`old -> new`) because callers
+    only need to decide whether the resulting path is inside an allowed
+    write zone.
+    """
+    proc = subprocess.run(
+        ["git", "status", "--porcelain"],
+        cwd=str(worktree), env=_git_env(), text=True, capture_output=True,
+        check=True,
+    )
+    out: list[str] = []
+    for raw in proc.stdout.splitlines():
+        if not raw:
+            continue
+        path = raw[3:].strip()
+        if " -> " in path:
+            path = path.rsplit(" -> ", 1)[-1]
+        if path:
+            out.append(path)
+    return out
+
+
+def _unexpected_worktree_paths(
+    worktree: Path,
+    *,
+    allowed_prefixes: tuple[str, ...],
+) -> list[str]:
+    normalized = tuple(p.rstrip("/") + "/" for p in allowed_prefixes)
+    unexpected: list[str] = []
+    for path in _worktree_changed_paths(worktree):
+        if any(path.startswith(prefix) for prefix in normalized):
+            continue
+        unexpected.append(path)
+    return unexpected
+
+
+def _discard_uncommitted_paths(worktree: Path, paths: list[str]) -> None:
+    """Drop out-of-contract uncommitted changes left by a phase skill."""
+    if not paths:
+        return
+    env = _git_env()
+    subprocess.run(
+        ["git", "restore", "--", *paths],
+        cwd=str(worktree), env=env, check=False, capture_output=True,
+    )
+    subprocess.run(
+        ["git", "clean", "-f", "--", *paths],
+        cwd=str(worktree), env=env, check=False, capture_output=True,
+    )
 
 
 def _append_commit(payload: dict[str, object], sha: str | None) -> None:
@@ -1230,6 +1290,17 @@ def _phase_replan(
                 replan_payload.update(raw)
         except json.JSONDecodeError:
             logger.warning("replan.json for %s is malformed; ignoring payload", entry.slug)
+
+    unexpected = _unexpected_worktree_paths(worktree, allowed_prefixes=("lab/",))
+    if unexpected:
+        _discard_uncommitted_paths(worktree, unexpected)
+        msg = (
+            "replan touched files outside lab/: "
+            + ", ".join(unexpected[:8])
+            + (" ..." if len(unexpected) > 8 else "")
+        )
+        phase_state.mark_failed(entry.slug, "replan", error=msg)
+        return TickResult(ok=False, outcome="error", summary=_summary_truncate(msg))
 
     _append_commit(
         replan_payload,

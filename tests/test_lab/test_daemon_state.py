@@ -391,6 +391,30 @@ def test_select_next_entry_manual_no_approvals_picks_nothing(
     assert _select_next_entry(ready, state) is None
 
 
+def test_parse_up_next_ignores_suggested_subsection(tmp_path: Path) -> None:
+    from openharness.lab.runner import parse_up_next
+
+    roadmap = tmp_path / "roadmap.md"
+    roadmap.write_text(
+        "# Roadmap\n\n"
+        "## Up next\n\n"
+        "### first\n\n"
+        "-   **Hypothesis:** first hypothesis\n\n"
+        "### second\n\n"
+        "-   **Depends on:** `first`\n\n"
+        "### Suggested\n\n"
+        "#### later\n\n"
+        "-   **Hypothesis:** not runnable yet\n\n"
+        "## Done\n\n"
+        "_(none)_\n"
+    )
+
+    entries = parse_up_next(roadmap)
+
+    assert [entry.slug for entry in entries] == ["first", "second"]
+    assert entries[1].depends_on == ["first"]
+
+
 # ---------------------------------------------------------------------------
 # Tier 3: web cockpit
 # ---------------------------------------------------------------------------
