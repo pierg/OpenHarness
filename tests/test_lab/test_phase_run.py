@@ -28,15 +28,28 @@ def test_exec_env_drops_parent_virtualenv(monkeypatch, tmp_path: Path) -> None:
             "/usr/bin",
         ]),
     )
+    monkeypatch.setenv(
+        "PYTHONPATH",
+        os.pathsep.join([
+            str(parent / "src"),
+            "/opt/other",
+            str(worktree / "src"),
+        ]),
+    )
+    (worktree / "src").mkdir()
 
     env = phase_run._exec_env(worktree)
 
     path_entries = env["PATH"].split(os.pathsep)
+    pythonpath_entries = env["PYTHONPATH"].split(os.pathsep)
     assert "VIRTUAL_ENV" not in env
     assert "VIRTUAL_ENV_PROMPT" not in env
     assert path_entries[0] == str(worktree_venv_bin.resolve())
     assert str(parent_venv_bin) not in path_entries
     assert path_entries.count(str(worktree_venv_bin)) == 1
+    assert pythonpath_entries[0] == str((worktree / "src").resolve())
+    assert str((parent / "src").resolve()) not in pythonpath_entries
+    assert pythonpath_entries.count(str((worktree / "src").resolve())) == 1
 
 
 def test_validate_complete_run_rejects_no_trial_leg(tmp_path: Path) -> None:

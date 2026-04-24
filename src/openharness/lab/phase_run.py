@@ -266,6 +266,27 @@ def _exec_env(worktree: Path) -> dict[str, str]:
     if worktree_venv_bin.is_dir():
         filtered.insert(0, str(worktree_venv_bin))
     env["PATH"] = os.pathsep.join(filtered)
+
+    parent_src = (REPO_ROOT / "src").resolve()
+    worktree_src = (worktree / "src").resolve()
+    pythonpath: list[str] = []
+    for raw_entry in env.get("PYTHONPATH", "").split(os.pathsep):
+        if not raw_entry:
+            continue
+        try:
+            entry = Path(raw_entry).resolve()
+        except OSError:
+            pythonpath.append(raw_entry)
+            continue
+        if entry in {parent_src, worktree_src}:
+            continue
+        pythonpath.append(raw_entry)
+    if worktree_src.is_dir():
+        pythonpath.insert(0, str(worktree_src))
+    if pythonpath:
+        env["PYTHONPATH"] = os.pathsep.join(pythonpath)
+    else:
+        env.pop("PYTHONPATH", None)
     return env
 
 
