@@ -9,21 +9,38 @@
 -   **Branch:** `lab/loop-guard-on-basic-near-miss`
 
 ### Aggregate
-
-_(pending)_
-
+| Leg | Agent | Trials | Passed | Failed | Pass rate | Cost (USD) |
+|-----|-------|-------:|-------:|-------:|----------:|-----------:|
+| `basic` | `basic` | 46 | 2 | 44 | 4.3% | $4.01 |
+| `basic_loop_guard` | `basic_loop_guard` | 46 | 1 | 45 | 2.2% | $3.98 |
 ### Mutation impact
-
-_(pending)_
-
+-   **Best leg:** `basic` (4.3%, $4.01)
+-   **Worst leg:** `basic_loop_guard` (2.2%, $3.98)
+-   **Spread:** +2.2 pp
+-   _(experiment-critic JSON missing a `mutation_impact` field; this is a DB-only fallback.)_
 ### Failure modes
 
 _(pending)_
 
 ### Tree effect
+-   **Verdict:** **Reject** — experiment outcome supports rejection
+-   **Target:** `basic_loop_guard`
+-   **Pair:** trunk leg `basic` vs mutation `basic_loop_guard`
+-   **Δ pass-rate:** -2.17 pp
+-   **Δ $/pass:** +98.9%
+-   **Confidence:** 0.43
+-   **Rationale:** Δ pass-rate = -2.2pp; Δ $/pass = +99%; cost spike ≥ 50%; no positive cluster.
 
-_(pending)_
-
+| Cluster | trunk pass | mut pass | Δ pp |
+|---------|-----------:|---------:|-----:|
+| `c_build` | 1/6 | 0/6 | -16.7 |
+| `binary_emulation` | 0/2 | 0/2 | +0.0 |
+| `c_graphics` | 0/2 | 0/2 | +0.0 |
+| `c_ml_inference` | 0/2 | 0/2 | +0.0 |
+| `c_runtime_debugging` | 0/2 | 0/2 | +0.0 |
+| `compression_reverse_engineering` | 0/2 | 0/2 | +0.0 |
+| `coq_theorem_proving` | 0/2 | 0/2 | +0.0 |
+| `corewars_redcode` | 0/2 | 0/2 | +0.0 |
 ### Linked follow-ups
 
 _(pending)_
