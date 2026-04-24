@@ -31,6 +31,9 @@ frontend/terminal/node_modules/
 .openharness/
 react_tui_smoke.txt
 
+# Local/private agent skills and machine-specific agent configuration.
+/.agents/
+
 # Harbor job outputs
 **/harbor_jobs/
 **/harbor_runs/
