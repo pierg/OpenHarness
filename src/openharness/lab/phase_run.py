@@ -46,7 +46,7 @@ from pathlib import Path
 from typing import Callable
 
 from openharness.lab import lab_docs
-from openharness.lab.env import apply_repo_dotenv
+from openharness.lab.env import apply_gemini_run_key, apply_repo_dotenv
 from openharness.lab.paths import EXPERIMENTS_RUNS_ROOT, LAB_LOGS_DIR, REPO_ROOT
 
 logger = logging.getLogger(__name__)
@@ -235,6 +235,7 @@ def _exec_env(worktree: Path) -> dict[str, str]:
     # bare Python invocation rather than scripts/exp/start.sh).
     env = {**os.environ, "PYTHONUNBUFFERED": "1"}
     apply_repo_dotenv(env, REPO_ROOT / ".env")
+    apply_gemini_run_key(env, REPO_ROOT / ".env")
 
     env.pop("VIRTUAL_ENV", None)
     env.pop("VIRTUAL_ENV_PROMPT", None)

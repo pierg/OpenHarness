@@ -185,7 +185,7 @@ def test_gemini_trial_critic_parses_and_persists_payload(
     assert written["provenance"]["critic_model"] == gemini.DEFAULT_TRIAL_MODEL
 
 
-def test_gemini_trial_critic_loads_repo_dotenv_for_worktree_cwd(
+def test_gemini_trial_critic_prefers_repo_cli_key_for_worktree_cwd(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -197,7 +197,7 @@ def test_gemini_trial_critic_loads_repo_dotenv_for_worktree_cwd(
     )
     (repo / "runs" / "lab").mkdir(parents=True)
     (repo / ".env").write_text(
-        "GOOGLE_API_KEY=from-google\nGEMINI_API_KEY=from-gemini\n",
+        "GOOGLE_API_KEY=from-google\nGEMINI_API_KEY=from-gemini\nGEMINI_API_KEY_CLI=from-cli\n",
         encoding="utf-8",
     )
     worktree.mkdir()
@@ -265,8 +265,9 @@ def test_gemini_trial_critic_loads_repo_dotenv_for_worktree_cwd(
     )
 
     assert result.ok is True
-    assert captured_env["GOOGLE_API_KEY"] == "from-google"
-    assert captured_env["GEMINI_API_KEY"] == "from-google"
+    assert captured_env["GOOGLE_API_KEY"] == "from-cli"
+    assert captured_env["GEMINI_API_KEY"] == "from-cli"
+    assert captured_env["GEMINI_API_KEY_CLI"] == "from-cli"
 
 
 def test_gemini_invalid_payload_fails_without_persisting(

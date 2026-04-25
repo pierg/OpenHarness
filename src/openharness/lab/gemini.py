@@ -26,7 +26,7 @@ from typing import Any, Sequence
 
 from openharness.lab import codex as skill_runtime
 from openharness.lab import critic_io, trial_evidence
-from openharness.lab.env import apply_repo_dotenv
+from openharness.lab.env import apply_gemini_cli_key, apply_repo_dotenv
 from openharness.lab.paths import LAB_LOGS_DIR, REPO_ROOT, ensure_lab_runs_dir
 from openharness.lab.usage import augment_spawn_record
 
@@ -301,10 +301,7 @@ def _build_argv(
 def _build_env() -> dict[str, str]:
     env = os.environ.copy()
     env = apply_repo_dotenv(env, REPO_ROOT / ".env")
-    google_api_key = env.get("GOOGLE_API_KEY")
-    if google_api_key:
-        env["GEMINI_API_KEY"] = google_api_key
-    return env
+    return apply_gemini_cli_key(env, REPO_ROOT / ".env")
 
 
 def _render_trial_prompt(

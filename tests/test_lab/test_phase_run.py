@@ -52,7 +52,7 @@ def test_exec_env_drops_parent_virtualenv(monkeypatch, tmp_path: Path) -> None:
     assert pythonpath_entries.count(str((worktree / "src").resolve())) == 1
 
 
-def test_exec_env_prefers_repo_google_api_key(monkeypatch, tmp_path: Path) -> None:
+def test_exec_env_prefers_repo_gemini_run_key(monkeypatch, tmp_path: Path) -> None:
     from openharness.lab import phase_run
 
     parent = tmp_path / "parent"
@@ -64,6 +64,7 @@ def test_exec_env_prefers_repo_google_api_key(monkeypatch, tmp_path: Path) -> No
             [
                 "GOOGLE_API_KEY=from-dotenv-google",
                 "GEMINI_API_KEY=from-dotenv-gemini",
+                "GEMINI_API_KEY_RUN=from-dotenv-run",
                 "OPENHARNESS_EXAMPLE=from-dotenv",
             ]
         ),
@@ -76,8 +77,9 @@ def test_exec_env_prefers_repo_google_api_key(monkeypatch, tmp_path: Path) -> No
 
     env = phase_run._exec_env(worktree)
 
-    assert env["GOOGLE_API_KEY"] == "from-dotenv-google"
-    assert "GEMINI_API_KEY" not in env
+    assert env["GOOGLE_API_KEY"] == "from-dotenv-run"
+    assert env["GEMINI_API_KEY"] == "from-dotenv-run"
+    assert env["GEMINI_API_KEY_RUN"] == "from-dotenv-run"
     assert env["OPENHARNESS_EXAMPLE"] == "from-shell"
 
 
