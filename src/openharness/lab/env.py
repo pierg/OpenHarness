@@ -44,10 +44,52 @@ def apply_repo_dotenv(env: dict[str, str], dotenv_path: Path) -> dict[str, str]:
     return env
 
 
+def apply_gemini_run_key(env: dict[str, str], dotenv_path: Path) -> dict[str, str]:
+    """Select the Gemini API key used by experiment run subprocesses."""
+    return _apply_phase_gemini_key(
+        env,
+        dotenv_path,
+        key_name="GEMINI_API_KEY_RUN",
+    )
+
+
+def apply_gemini_cli_key(env: dict[str, str], dotenv_path: Path) -> dict[str, str]:
+    """Select the Gemini API key used by Gemini CLI subprocesses."""
+    return _apply_phase_gemini_key(
+        env,
+        dotenv_path,
+        key_name="GEMINI_API_KEY_CLI",
+    )
+
+
+def _apply_phase_gemini_key(
+    env: dict[str, str],
+    dotenv_path: Path,
+    *,
+    key_name: str,
+) -> dict[str, str]:
+    phase_key = _dotenv_value(dotenv_path, key_name) or env.get(key_name)
+    if phase_key:
+        env["GOOGLE_API_KEY"] = phase_key
+        env["GEMINI_API_KEY"] = phase_key
+    return env
+
+
+def _dotenv_value(path: Path, key: str) -> str | None:
+    if not path.is_file():
+        return None
+    return read_dotenv(path).get(key)
+
+
 def _clean_dotenv_value(value: str) -> str:
     if len(value) >= 2 and value[0] == value[-1] and value[0] in {"'", '"'}:
         return value[1:-1]
     return value
 
 
-__all__ = ["apply_repo_dotenv", "read_dotenv"]
+__all__ = [
+    "apply_gemini_cli_key",
+    "apply_gemini_run_key",
+    "apply_repo_dotenv",
+    "read_dotenv",
+]
