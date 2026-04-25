@@ -52,7 +52,7 @@ from openharness.lab.paths import EXPERIMENTS_RUNS_ROOT, LAB_LOGS_DIR, REPO_ROOT
 logger = logging.getLogger(__name__)
 
 
-DEFAULT_RUN_TIMEOUT_SEC: int = 4 * 60 * 60   # 4 h cap on a single run.
+DEFAULT_RUN_TIMEOUT_SEC: int = 16 * 60 * 60  # 16 h cap on a single run.
 DEFAULT_POLL_INTERVAL_SEC: int = 60
 
 

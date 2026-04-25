@@ -114,7 +114,7 @@ from openharness.lab.paths import (
 logger = logging.getLogger("openharness.lab.runner")
 
 DEFAULT_POLL_INTERVAL_SEC = 60
-DEFAULT_RUN_TIMEOUT_SEC = 4 * 60 * 60   # 4h cap on a single experiment run.
+DEFAULT_RUN_TIMEOUT_SEC = 16 * 60 * 60  # 16h cap on a single experiment run.
 DEFAULT_IDLE_SLEEP_SEC = 15              # idle poll cadence; SIGUSR1 wakes early.
 DEFAULT_XEXP_EVERY = 1                   # cross-experiment-critic every M runs.
 
@@ -572,6 +572,22 @@ def _repair_args(slug: str, phase: phase_state.PhaseName, state: phase_state.Slu
         f"--repair-context={path}",
         f"--repair-attempt={attempt_number}",
     ]
+
+
+def _timed_out_run_has_summary(rec: phase_state.PhaseRecord) -> bool:
+    """True when a detached run completed after the daemon's poll timeout.
+
+    Phase 3 launches Harbor in a detached process so stopping or timing
+    out the daemon does not kill an expensive experiment. If the summary
+    lands after the phase has already been marked failed, the next tick
+    should resume the run handler and validate the completed artifacts
+    instead of being stopped by the generic repair-budget gate.
+    """
+    raw_run_dir = rec.payload.get("run_dir")
+    if not raw_run_dir:
+        return False
+    run_dir = Path(str(raw_run_dir))
+    return (run_dir / "results" / "summary.md").is_file()
 
 
 def _git_env() -> dict[str, str]:
@@ -1569,7 +1585,14 @@ def _process_entry(entry: RoadmapEntry, cfg: OrchestratorConfig) -> TickResult:
     failed_rec = state.get(next_phase)
     if failed_rec.status == "failed":
         budget = phase_state.MAX_REPAIRS_PER_PHASE
-        if next_phase != "preflight" and failed_rec.failure_count > budget:
+        late_run_summary = (
+            next_phase == "run" and _timed_out_run_has_summary(failed_rec)
+        )
+        if (
+            next_phase != "preflight"
+            and failed_rec.failure_count > budget
+            and not late_run_summary
+        ):
             logger.warning(
                 "%s for %s exhausted repair budget (%d failures, max=%d); "
                 "leaving sticky-failed for the failure gate",
@@ -1584,7 +1607,13 @@ def _process_entry(entry: RoadmapEntry, cfg: OrchestratorConfig) -> TickResult:
                     f"{_summary_truncate(err, n=160)}"
                 ),
             )
-        if next_phase == "preflight":
+        if late_run_summary:
+            logger.info(
+                "retrying run for %s despite exhausted repair budget; "
+                "detached run summary now exists",
+                entry.slug,
+            )
+        elif next_phase == "preflight":
             logger.info(
                 "retrying preflight for %s despite %d prior failure(s); "
                 "preflight is host-state dependent and may recover after cleanup",
