@@ -9,21 +9,41 @@
 -   **Branch:** `lab/model-escalation-router-hard-clusters`
 
 ### Aggregate
-
-_(pending)_
-
+| Leg | Agent | Trials | Passed | Failed | Pass rate | Cost (USD) |
+|-----|-------|-------:|-------:|-------:|----------:|-----------:|
+| `basic_flash` | `basic` | 52 | 23 | 29 | 44.2% | $10.36 |
+| `basic_pro` | `basic` | 52 | 26 | 26 | 50.0% | $71.71 |
+| `basic_router` | `basic_model_router` | 52 | 21 | 31 | 40.4% | $58.37 |
 ### Mutation impact
-
-_(pending)_
-
+The router mutation hurt overall: basic_router finished -9.6 pp behind basic_pro and -3.8 pp behind basic_flash while costing $58.37, near the pro leg and far above flash. It helped on three score-decided tasks, extract-elf, mteb-retrieve, and regex-log, spanning binary_analysis, python_ml retrieval, and regex_programming, and it won several git/task ties by lower cost. The biggest negative shift is that it did not preserve flash/pro wins on git_service_deployment, git_workflow, python_ml CLI/scheduler, and SPARQL tasks, so the likely causal story is that hard-cluster escalation added variance and cost without routing reliably to the model that solved the task.
 ### Failure modes
-
-_(pending)_
-
+-   **timeout-no-recovery** (×50): The dominant failed-trial tag after normalizing underscore and hyphen variants; it appears across all legs and all-leg failures, especially c_build, regex_programming, and python_ml tasks.
+-   **repeated-failed-command** (×13): Repeated command or tool loops remained common on failed trials; basic_pro had 7 occurrences and basic_router had 6 versus 4 for basic_flash.
+-   **gave-up-too-early** (×10): Early abandon or no-solution behavior affected 10 failed trials, concentrated in basic_flash and visible in regex-chess all-leg failures.
+-   **turn-budget-exhausted** (×10): Turn or budget exhaustion variants account for 10 failed-trial tags, reinforcing that many hard-cluster failures need recovery or route decisions before the final turns.
+-   **all-leg-hard-task-wash** (×7): All legs failed on 7 tasks; categories were c_build (3), regex_programming (2), python_ml (2).
+-   **env-setup-error** (×2): The DB recorded env_setup errors in basic_pro and basic_router, adding two non-agent failures to the comparison surface.
 ### Tree effect
+-   **Verdict:** **Add branch** — experiment outcome supports a specialized branch
+-   **Target:** `basic`
+-   **Pair:** trunk leg `basic_flash` vs mutation `basic_pro`
+-   **Δ pass-rate:** +5.77 pp
+-   **Δ $/pass:** +512.1%
+-   **Confidence:** 1.00
+-   **Rationale:** Trunk wins overall (Δ = +5.8pp), but mutation wins ≥ +5pp on 4 cluster(s): sparql_query (+100pp, n=2), git_workflow (+12pp, n=8), c_build (+8pp, n=12), python_ml (+7pp, n=14). (also: basic_router → add_branch: Trunk wins overall (Δ = -3.8pp), but mutation wins ≥ +5pp on 3 cluster(s): binary_analysis (+50pp, n=4), regex_programming (+17pp, n=6), c_build (+8pp, n=12).)
+-   **Use-when:** `{"any_of": [{"task_features.category": "sparql_query"}, {"task_features.category": "git_workflow"}, {"task_features.category": "c_build"}, {"task_features.category": "python_ml"}], "derived_from": "tree_ops.evaluate cluster deltas"}`
+-   **Evidence:** [`experiment-critic.json`](../runs/experiments/model-escalation-router-hard-clusters-20260425-191501/critic/experiment-critic.json), [`comparisons`](../runs/experiments/model-escalation-router-hard-clusters-20260425-191501/critic/comparisons), [`critic_summary.md`](../runs/experiments/model-escalation-router-hard-clusters-20260425-191501/results/critic_summary.md)
 
-_(pending)_
-
+| Cluster | trunk pass | mut pass | Δ pp |
+|---------|-----------:|---------:|-----:|
+| `sparql_query` | 0/2 | 2/2 | +100.0 |
+| `git_service_deployment` | 2/2 | 1/2 | -50.0 |
+| `regex_programming` | 1/6 | 0/6 | -16.7 |
+| `git_workflow` | 6/8 | 7/8 | +12.5 |
+| `c_build` | 4/12 | 5/12 | +8.3 |
+| `python_ml` | 4/14 | 5/14 | +7.1 |
+| `binary_analysis` | 2/4 | 2/4 | +0.0 |
+| `c_runtime_debugging` | 2/2 | 2/2 | +0.0 |
 ### Linked follow-ups
 
 _(pending)_
