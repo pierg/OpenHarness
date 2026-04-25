@@ -94,21 +94,34 @@ The mutation produced a 0.0 percentage-point pass-rate delta: basic_flash passed
 -   **Branch:** `lab/targeted-router-score-win-confirmation`
 
 ### Aggregate
-
-_(pending)_
-
+| Leg | Agent | Trials | Passed | Failed | Pass rate | Cost (USD) |
+|-----|-------|-------:|-------:|-------:|----------:|-----------:|
+| `basic_flash` | `basic` | 24 | 6 | 18 | 25.0% | $4.48 |
+| `basic_targeted_router` | `basic_targeted_model_router` | 24 | 8 | 16 | 33.3% | $11.73 |
 ### Mutation impact
-
-_(pending)_
-
+The mutation helped aggregate pass rate by +8.3 percentage points (33.3% vs 25.0%), concentrated in the compiled/model CLI cluster on `pytorch-model-cli`; the successful router critique says "The agent successfully implemented the model's forward pass in C++ from scratch and showed excellent resilience by manually installing `g++` when it found the compiler was missing." The remaining tasks mostly washed: 7/12 had all leg mean scores at 0.0, while extract-elf, regex-log, pytorch-model-recovery, and vulnerable-secret tied on score and were decided by cost. Causal hypothesis: targeted routing can improve persistence on compiled deliverables, but did not address budget exhaustion, missing final-output checks, or brittle hidden-test generalization.
 ### Failure modes
-
-_(pending)_
-
+-   **unproductive-debugging** (×14): Anti-pattern mentions including `repeated_failed_command`, `excessive-iteration`, `trial-and-error-loop`, `yak-shaving`, and redundant verification. This dominated the failed regex, retrieval, RStan, and recovery traces.
+-   **budget-timeout-loop** (×13): Anti-pattern mentions including `timeout-no-recovery`, `timeout_no_recovery`, `turn-budget-exhausted`, and `budget-exhausted`; both legs repeatedly spent the turn budget before writing final deliverables.
+-   **missing-final-deliverable-or-instruction** (×11): Anti-pattern mentions including `missing-final-output`, `ignored-final-output-instruction`, `missing-deliverable`, and instruction misses. This is the clearest failure behind mteb-retrieve and the flash loss on pytorch-model-cli.
+-   **brittle-local-generalization** (×10): Anti-pattern mentions including `overfit_to_local_mock`, `overfitted_to_local_env`, `brittle-heuristic`, and `regex-html-parsing`; these explain the shared failures on model extraction and hidden security tests.
+-   **premature-stop-incomplete-implementation** (×8): Anti-pattern mentions including `gave_up_too_early`, `gave-up-too-early`, `empty-assistant-turn`, and incomplete implementation; targeted-router failures on filter-js-from-html were especially concentrated here.
+-   **api-cli-contract-mismatch** (×5): Anti-pattern mentions including `argparse-mismatch`, `api-hallucination`, `api-guessing-loop`, and `missing-dependency`; these drove shared failures on RStan conversion and SAM CLI contracts.
 ### Tree effect
+-   **Verdict:** **No-op** — recorded for trend analysis
+-   **Target:** `basic_targeted_model_router`
+-   **Pair:** trunk leg `basic_flash` vs mutation `basic_targeted_router`
+-   **Δ pass-rate:** +8.33 pp
+-   **Δ $/pass:** +96.4%
+-   **Confidence:** 1.00
+-   **Rationale:** Inconclusive: Δ pass-rate = +8.3pp (trunk 25.0% vs mutation 33.3%); 1 positive cluster(s) (threshold 2); Δ $/pass = +96%.
+-   **Evidence:** [`experiment-critic.json`](../runs/experiments/targeted-router-score-win-confirmation-20260425-224201/critic/experiment-critic.json), [`comparisons`](../runs/experiments/targeted-router-score-win-confirmation-20260425-224201/critic/comparisons), [`critic_summary.md`](../runs/experiments/targeted-router-score-win-confirmation-20260425-224201/results/critic_summary.md)
 
-_(pending)_
-
+| Cluster | trunk pass | mut pass | Δ pp |
+|---------|-----------:|---------:|-----:|
+| `python_ml` | 2/14 | 4/14 | +14.3 |
+| `binary_analysis` | 3/4 | 3/4 | +0.0 |
+| `regex_programming` | 1/6 | 1/6 | +0.0 |
 ### Linked follow-ups
 
 _(pending)_
