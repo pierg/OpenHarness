@@ -316,6 +316,56 @@ def test_process_entry_retries_failed_preflight_after_host_cleanup(
     assert ps.load("alpha").get("preflight").status == "ok"
 
 
+def test_process_entry_retries_timed_out_run_when_summary_lands_late(
+    isolated_lab: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A detached run can complete after the daemon's timeout window."""
+    import openharness.lab.phase_state as ps
+    import openharness.lab.runner as runner
+    importlib.reload(runner)
+
+    monkeypatch.setattr(ps, "MAX_REPAIRS_PER_PHASE", 0)
+    run_dir = isolated_lab / "runs" / "experiments" / "late-run"
+    (run_dir / "results").mkdir(parents=True)
+    (run_dir / "results" / "summary.md").write_text("ok\n")
+
+    ps.mark_ok("alpha", "preflight", payload={
+        "worktree": "/tmp/wt",
+        "branch": "lab/alpha",
+        "base_sha": "abc",
+        "base_branch": "main",
+    })
+    ps.mark_ok("alpha", "design")
+    ps.mark_ok("alpha", "implement", payload={"spec_name": "alpha"})
+    ps.mark_failed("alpha", "run", error="timeout", payload={
+        "instance_id": "late-run",
+        "run_dir": str(run_dir),
+    })
+    ps.mark_failed("alpha", "run", error="timeout again")
+
+    calls: list[str] = []
+
+    def _run(entry, state, _cfg):
+        calls.append(entry.slug)
+        ps.mark_ok(entry.slug, "run", payload=state.get("run").payload)
+        return None
+
+    monkeypatch.setattr(runner, "_PHASE_DISPATCH", (("run", _run),))
+
+    result = runner._process_entry(
+        runner.RoadmapEntry(
+            slug="alpha", body="", idea_id="some-idea", hypothesis="h",
+        ),
+        runner.OrchestratorConfig(once=True),
+    )
+
+    assert result.ok is True
+    assert calls == ["alpha"]
+    rec = ps.load("alpha").get("run")
+    assert rec.status == "ok"
+    assert rec.failure_count == 0
+
+
 def test_process_entry_pauses_after_requested_phase(
     isolated_lab: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
