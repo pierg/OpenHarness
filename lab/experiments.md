@@ -1,5 +1,33 @@
 # Experiments
 
+## 2026-04-25 — model-escalation-router-hard-clusters
+
+-   **Type:** paired-ablation
+-   **Trunk at run-time:** [`trunk`](../src/openharness/agents/configs/trunk.yaml)
+-   **Hypothesis:** A budget-aware router that starts on the cheap Gemini 3 basic leg, routes Lite-positive clusters to the lowest-cost model, and escalates to basic_pro only for verifier failures or Pro-positive hard clusters can capture most of the model-specific lift without paying the all-Pro cost per pass.
+-   **Run:** _(filled after the run completes)_
+-   **Branch:** `lab/model-escalation-router-hard-clusters`
+
+### Aggregate
+
+_(pending)_
+
+### Mutation impact
+
+_(pending)_
+
+### Failure modes
+
+_(pending)_
+
+### Tree effect
+
+_(pending)_
+
+### Linked follow-ups
+
+_(pending)_
+
 ## 2026-04-24 — tb2-gemini3-model-baseline
 
 -   **Type:** paired-ablation
