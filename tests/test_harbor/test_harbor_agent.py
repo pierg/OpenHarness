@@ -64,6 +64,70 @@ class FakeEnvironment:
         return path in self.files
 
 
+def _final_text_client(text: str = "Done.") -> FakeApiClient:
+    return FakeApiClient(
+        [
+            _FakeResponse(
+                message=ConversationMessage(role="assistant", content=[TextBlock(text=text)]),
+                usage=UsageSnapshot(input_tokens=5, output_tokens=3),
+            )
+        ]
+    )
+
+
+async def _run_router_trial(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    trial_id: str,
+) -> tuple[AgentContext, Path]:
+    trial_dir = tmp_path / trial_id
+    trial_dir.mkdir()
+    logs_dir = trial_dir / "agent"
+    logs_dir.mkdir()
+
+    environment = FakeEnvironment()
+    context = AgentContext()
+    monkeypatch.setenv("OPENHARNESS_LANGFUSE_ENABLED", "0")
+    agent = OpenHarnessHarborAgent(
+        logs_dir=logs_dir,
+        agent_name="harbor_router_test_agent",
+        model_name="gemini-3.1-pro-preview",
+        api_client=_final_text_client(),
+        agent_config_yaml="""\
+name: harbor_router_test_agent
+architecture: simple
+model: gemini-3.1-pro-preview
+max_turns: 4
+max_tokens: 1024
+extras:
+  model_router:
+    default_model: gemini-3-flash-preview
+    task_models:
+      fix-ocaml-gc: gemini-3.1-pro-preview
+tools: []
+prompts:
+  system: |
+    {{ openharness_system_context }}
+  user: |
+    {{ instruction }}
+""",
+        run_id="job-route123456",
+        run_root=str(tmp_path),
+    )
+
+    await agent.run("Return a short completion.", environment, context)
+
+    return context, trial_dir
+
+
+def _logged_model_request(trial_dir: Path) -> dict[str, object]:
+    events = [json.loads(line) for line in (trial_dir / "events.jsonl").read_text().splitlines()]
+    model_requests = [row for row in events if row["type"] == "model_request"]
+    assert len(model_requests) == 1
+    return model_requests[0]
+
+
 @pytest.mark.asyncio
 async def test_openharness_harbor_agent_solves_hello_world(
     tmp_path: Path,
@@ -161,3 +225,41 @@ prompts:
     assert len(trajectory["steps"]) >= 2
     assert trajectory["steps"][0]["source"] == "user"
     assert any(s["source"] == "agent" for s in trajectory["steps"])
+
+
+@pytest.mark.asyncio
+async def test_openharness_harbor_agent_routes_mapped_task_model(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    context, trial_dir = await _run_router_trial(
+        tmp_path,
+        monkeypatch,
+        trial_id="fix-ocaml-gc__abc123",
+    )
+
+    assert _logged_model_request(trial_dir)["model"] == "gemini-3.1-pro-preview"
+    assert context.metadata is not None
+    assert context.metadata["model"] == "gemini-3.1-pro-preview"
+
+    trajectory = json.loads((trial_dir / "agent" / "trajectory.json").read_text())
+    assert trajectory["agent"]["model_name"] == "gemini-3.1-pro-preview"
+
+
+@pytest.mark.asyncio
+async def test_openharness_harbor_agent_routes_unmapped_task_to_default_model(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    context, trial_dir = await _run_router_trial(
+        tmp_path,
+        monkeypatch,
+        trial_id="log-summary-date-ranges__abc123",
+    )
+
+    assert _logged_model_request(trial_dir)["model"] == "gemini-3-flash-preview"
+    assert context.metadata is not None
+    assert context.metadata["model"] == "gemini-3-flash-preview"
+
+    trajectory = json.loads((trial_dir / "agent" / "trajectory.json").read_text())
+    assert trajectory["agent"]["model_name"] == "gemini-3-flash-preview"

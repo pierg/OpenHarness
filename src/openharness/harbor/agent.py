@@ -11,7 +11,7 @@ from uuid import uuid4
 
 import logging
 
-from openharness.agents.contracts import TaskDefinition
+from openharness.agents.contracts import Agent, TaskDefinition
 from openharness.agents.config import AgentConfig
 from openharness.agents.factory import AgentFactory
 from harbor.agents.base import BaseAgent
@@ -102,6 +102,7 @@ class OpenHarnessHarborAgent(BaseAgent):
             config = config.model_copy(update=overrides)
             factory.register(config)
 
+        self._agent_config = config
         self._agent = factory.create(agent_name)
 
         self._api_client = api_client
@@ -123,6 +124,15 @@ class OpenHarnessHarborAgent(BaseAgent):
     def version(self) -> str | None:
         return OPENHARNESS_HARBOR_VERSION
 
+    def _agent_for_model(self, model: str) -> tuple[Agent, AgentConfig]:
+        if model == self._agent_config.model:
+            return self._agent, self._agent_config
+
+        config = self._agent_config.model_copy(update={"model": model})
+        factory = AgentFactory()
+        factory.register(config)
+        return factory.create(config.name), config
+
     async def setup(self, environment: BaseEnvironment) -> None:
         del environment
 
@@ -134,15 +144,7 @@ class OpenHarnessHarborAgent(BaseAgent):
     ) -> None:
         with _temporary_environ(self._extra_env):
             settings = load_settings()
-            resolved_settings = settings.merge_cli_overrides(model=self.model_name)
             experiment_context = _experiment_context_from_env()
-            # Harbor trials run unattended in an isolated container with no
-            # human in the loop. Force the autonomous system prompt and
-            # drop the host-developer personalization sections (CLAUDE.md,
-            # local rules, memory) so they don't leak from the host into
-            # the trial's prompt.
-            resolved_settings = resolved_settings.model_copy(update={"session_mode": "autonomous"})
-            resolved_model = self.model_name or resolved_settings.model
             trial_dir = self.logs_dir.parent
             job_run_id = self._run_id or os.environ.get("OPENHARNESS_RUN_ID")
             # The Harbor job directory is the parent of the trial directory:
@@ -155,6 +157,21 @@ class OpenHarnessHarborAgent(BaseAgent):
             # The agent is running in self.logs_dir which is usually trial_dir/agent
             # We want OpenHarness artifacts to live alongside Harbor's trial artifacts
             trial_run_id = trial_dir.name
+
+            task_name = _task_name_from_run_id(trial_run_id)
+            resolved_model = _routed_model_for_task(
+                self._agent_config,
+                task_name,
+                fallback=self.model_name or self._agent_config.model,
+            )
+            resolved_settings = settings.merge_cli_overrides(model=resolved_model)
+            # Harbor trials run unattended in an isolated container with no
+            # human in the loop. Force the autonomous system prompt and
+            # drop the host-developer personalization sections (CLAUDE.md,
+            # local rules, memory) so they don't leak from the host into
+            # the trial's prompt.
+            resolved_settings = resolved_settings.model_copy(update={"session_mode": "autonomous"})
+            agent, agent_config = self._agent_for_model(resolved_model)
 
             run_context = RunContext.from_run_root(
                 run_root=trial_dir,
@@ -170,7 +187,6 @@ class OpenHarnessHarborAgent(BaseAgent):
             messages_path = run_context.artifacts.messages_path
             events_path = run_context.artifacts.events_path
 
-            task_name = _task_name_from_run_id(run_context.run_id)
             trace_name = _build_trace_name(experiment_context, task_name, run_context.run_id)
             trace_tags = _build_trace_tags(
                 experiment_context, task_name, resolved_model, run_context.run_id
@@ -232,7 +248,7 @@ class OpenHarnessHarborAgent(BaseAgent):
             )
 
             try:
-                result = await self._agent.run(
+                result = await agent.run(
                     task=TaskDefinition(instruction=instruction),
                     runtime=runtime,
                 )
@@ -334,7 +350,7 @@ class OpenHarnessHarborAgent(BaseAgent):
                         messages_path,
                         trajectory_path,
                         session_id=run_context.run_id,
-                        agent_name=self._agent_name,
+                        agent_name=agent_config.name,
                         agent_version=self.version() or OPENHARNESS_HARBOR_VERSION,
                         model_name=resolved_model,
                         input_tokens=summary.input_tokens,
@@ -380,6 +396,41 @@ def _task_name_from_run_id(run_id: str) -> str:
     if "__" in run_id:
         return run_id.rsplit("__", 1)[0]
     return run_id
+
+
+def _routed_model_for_task(
+    config: AgentConfig,
+    task_name: str,
+    fallback: str | None,
+) -> str:
+    """Return the configured per-task model, router default, or fallback model."""
+    router = config.extras.get("model_router")
+    if router is None:
+        return _validate_model_id(fallback, "fallback")
+    if not isinstance(router, dict):
+        raise ValueError(f"Agent config '{config.name}' extras.model_router must be a mapping.")
+
+    task_models = router.get("task_models", {})
+    if task_models is None:
+        task_models = {}
+    if not isinstance(task_models, dict):
+        raise ValueError(
+            f"Agent config '{config.name}' extras.model_router.task_models must be a mapping."
+        )
+
+    if task_name in task_models:
+        return _validate_model_id(task_models[task_name], f"task_models.{task_name}")
+
+    default_model = router.get("default_model")
+    if default_model is not None:
+        return _validate_model_id(default_model, "default_model")
+    return _validate_model_id(fallback, "fallback")
+
+
+def _validate_model_id(value: object, field_name: str) -> str:
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError(f"model_router.{field_name} must be a non-empty string model id.")
+    return value.strip()
 
 
 def _build_trace_name(
