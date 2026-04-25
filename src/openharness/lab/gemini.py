@@ -300,7 +300,11 @@ def _build_argv(
 
 def _build_env() -> dict[str, str]:
     env = os.environ.copy()
-    return apply_repo_dotenv(env, REPO_ROOT / ".env")
+    env = apply_repo_dotenv(env, REPO_ROOT / ".env")
+    google_api_key = env.get("GOOGLE_API_KEY")
+    if google_api_key:
+        env["GEMINI_API_KEY"] = google_api_key
+    return env
 
 
 def _render_trial_prompt(

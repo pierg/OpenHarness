@@ -266,7 +266,7 @@ def test_gemini_trial_critic_loads_repo_dotenv_for_worktree_cwd(
 
     assert result.ok is True
     assert captured_env["GOOGLE_API_KEY"] == "from-google"
-    assert "GEMINI_API_KEY" not in captured_env
+    assert captured_env["GEMINI_API_KEY"] == "from-google"
 
 
 def test_gemini_invalid_payload_fails_without_persisting(
