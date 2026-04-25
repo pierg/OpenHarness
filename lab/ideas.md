@@ -80,6 +80,24 @@
 -   **Sketch:** Run a small paired confirmation on the selected Gemini 3 trunk model with current basic/planner controls versus loop-guard and planner-schema-guard on their strongest historical slices. Treat this as a model-floor interaction test, not a new component graduation attempt.
 -   **Auto-proposed by:** cross-experiment-critic@2026-04-25
 
+#### targeted-router-score-win-confirmation
+
+-   **Motivation:** [low confidence: 3 score-decided router wins] The hard-cluster router lost the aggregate but uniquely won extract-elf, mteb-retrieve, and regex-log, suggesting a narrow route surface may exist.
+-   **Sketch:** Run a conservative router confirmation that escalates only binary_analysis, retrieval, and regex-log-like tasks while leaving flash as the default elsewhere. Require at least 10 trials per side or tag the result as exploratory if the slice cannot clear that floor.
+-   **Auto-proposed by:** cross-experiment-critic@2026-04-25
+
+#### router-cheap-baseline-preservation-gate
+
+-   **Motivation:** The current router cost nearly as much as pro while failing to preserve several cheap flash/pro wins, so routing needs an explicit cheap-baseline preservation check.
+-   **Sketch:** Add a route validation gate that prefers the cheap model unless the route rule is high-confidence or a verifier failure justifies escalation. Compare against flash, pro, and the current hard-cluster router on cost per pass and lost cheap-model wins.
+-   **Auto-proposed by:** cross-experiment-critic@2026-04-25
+
+#### timeout-recovery-hard-cluster-slice
+
+-   **Motivation:** The model-router hard-cluster run still had timeout_no_recovery as the dominant failure mode, including seven all-leg failed tasks concentrated in c_build, regex_programming, and python_ml.
+-   **Sketch:** Run timeout-aware recovery on a hard-cluster slice rather than only needs_network tasks, with c_build, regex_programming, and python_ml represented separately. Measure decisive wins plus reductions in timeout_no_recovery and repeated_failed_command.
+-   **Auto-proposed by:** cross-experiment-critic@2026-04-25
+
 ## Proposed
 
 ### Architecture

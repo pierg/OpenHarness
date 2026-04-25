@@ -1,0 +1,77 @@
+name: basic_model_router
+description: Basic single-loop OpenHarness Terminal-Bench agent with task-aware Gemini model routing.
+
+model: gemini-3-flash-preview
+max_turns: 30
+max_tokens: 8192
+extras:
+  model_router:
+    default_model: gemini-3-flash-preview
+    task_models:
+      fix-ocaml-gc: gemini-3.1-flash-lite-preview
+      configure-git-webserver: gemini-3.1-flash-lite-preview
+      fix-code-vulnerability: gemini-3.1-flash-lite-preview
+      sparql-university: gemini-3.1-flash-lite-preview
+      fix-git: gemini-3.1-flash-lite-preview
+      git-leak-recovery: gemini-3.1-flash-lite-preview
+      merge-diff-arc-agi-task: gemini-3.1-flash-lite-preview
+      sanitize-git-repo: gemini-3.1-flash-lite-preview
+      build-pmars: gemini-3.1-pro-preview
+      build-pov-ray: gemini-3.1-pro-preview
+      compile-compcert: gemini-3.1-pro-preview
+      make-doom-for-mips: gemini-3.1-pro-preview
+      portfolio-optimization: gemini-3.1-pro-preview
+      sqlite-with-gcov: gemini-3.1-pro-preview
+      llm-inference-batching-scheduler: gemini-3.1-pro-preview
+      model-extraction-relu-logits: gemini-3.1-pro-preview
+      mteb-retrieve: gemini-3.1-pro-preview
+      pytorch-model-cli: gemini-3.1-pro-preview
+      pytorch-model-recovery: gemini-3.1-pro-preview
+      rstan-to-pystan: gemini-3.1-pro-preview
+      sam-cell-seg: gemini-3.1-pro-preview
+      filter-js-from-html: gemini-3.1-pro-preview
+      regex-chess: gemini-3.1-pro-preview
+      regex-log: gemini-3.1-pro-preview
+      extract-elf: gemini-3.1-pro-preview
+      vulnerable-secret: gemini-3.1-pro-preview
+definition:
+  subagent_type: yaml-basic
+  description: Baseline YAML coding agent for Harbor and Terminal-Bench style tasks with task-aware Gemini model routing.
+  runner: yaml_workflow
+  color: cyan
+
+tools:
+  - bash
+  - read_file
+  - write_file
+  - edit_file
+  - glob
+  - grep
+  - think
+
+prompts:
+  system: |
+    {{ openharness_system_context }}
+
+    You are a coding agent running inside a task environment. You have shell,
+    file, and search tools available.
+
+    - Read the task instruction carefully and inspect the filesystem before
+      editing anything.
+    - Make the smallest correct changes; verify your work with available
+      tests or task-specific checks before declaring success.
+    - Use non-interactive shell commands. Do not ask for human input.
+    - Do not modify the underlying system environment to fix application
+      bugs; fix the application code instead.
+    - When running commands like `wget`, avoid recursive flags that hang
+      (like `wget -r`).
+    - For planning, drafting a regex, interpreting a noisy tool result, or
+      any other "think out loud" step, call the `think` tool. Do NOT use
+      `bash` with a command that is only shell comments -- that wastes a
+      turn against the budget without making progress.
+
+    Stop only after the task is verified or after you have found a concrete
+    blocker that prevents further progress.
+
+  user: |
+    {{ instruction }}
