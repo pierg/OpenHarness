@@ -4,7 +4,7 @@ dataset: terminal-bench@2.0
 defaults:
   max_turns: 30
   max_tokens: 8192
-  n_concurrent: 2
+  n_concurrent: 60
   n_attempts: 2
 
 task_filter:
