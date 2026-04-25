@@ -122,6 +122,12 @@
 -   **Sketch:** Add a deterministic post-critic consistency check that compares critique outcome against trials.score and passed, retries or patches the critic payload when they conflict, and stores any irreconcilable discrepancy in extra metadata rather than the main outcome field.
 -   **Auto-proposed by:** cross-experiment-critic@2026-04-26
 
+#### targeted-router-cost-calibration
+
+-   **Motivation:** The targeted-router confirmation improved the hard slice from 6/24 to 8/24 passes, but mean cost rose about 162% and the lift concentrated in python_ml while binary_analysis and regex_programming mostly preserved scores at higher cost.
+-   **Sketch:** Add route calibration that escalates only when historical cluster lift clears a cost-per-extra-pass threshold, and keep the cheap model for tied or already-strong clusters. Rerun flash vs current targeted router vs cost-calibrated router on the same hard slice plus an easy-slice guardrail to measure cost per pass and lost cheap-model wins.
+-   **Auto-proposed by:** cross-experiment-critic@2026-04-25
+
 ## Proposed
 
 ### Architecture
