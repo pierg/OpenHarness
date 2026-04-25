@@ -90,7 +90,7 @@ The mutation produced a 0.0 percentage-point pass-rate delta: basic_flash passed
 -   **Type:** paired-ablation
 -   **Trunk at run-time:** [`trunk`](../src/openharness/agents/configs/trunk.yaml)
 -   **Hypothesis:** A conservative router that escalates only the task families where the hard-cluster run had score-decided router wins can preserve flash's cheap baseline while testing whether the binary/retrieval/regex route signal is real rather than aggregate noise.
--   **Run:** _(filled after the run completes)_
+-   **Run:** [`runs/experiments/targeted-router-score-win-confirmation-20260425-224201`](../runs/experiments/targeted-router-score-win-confirmation-20260425-224201)
 -   **Branch:** `lab/targeted-router-score-win-confirmation`
 
 ### Aggregate
