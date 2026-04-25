@@ -12,6 +12,7 @@
 |----|-------------------|--------------------|---------------|
 | `planner_executor` | adds explicit planner subagent on top of trunk | `task_features.category ∈ {security_certificates, system_administration, python_data}` | tb2-baseline-full-sweep |
 | `react` | scratchpad-driven re-plan loop on top of trunk | (tentative; one positive cluster on tb2-baseline; needs targeted re-test) | tb2-baseline-full-sweep |
+| `basic` | Trunk wins overall (Δ = -11.2pp), but mutation wins ≥ +5pp on 5 cluster(s): c_runtime_debugging (+100pp, n=1), git_servi | task_features.category=c_runtime_debugging OR task_features.category=git_service_deployment OR task_features.category=security_python_web OR task_features.category=sparql_query OR task_features.category=git_workflow | 2026-04-25 |
 
 ## Rejected
 

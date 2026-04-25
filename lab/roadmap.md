@@ -2,25 +2,13 @@
 
 ## Up next
 
-> **Methodology contract.** Every entry below declares its
-> **Slice** (METHODOLOGY §2), **Legs** (§3), **Repetitions** (§4),
-> and **Control** (§5) explicitly so the design phase can be
-> audited before code is written. The implement phase always runs
-> a small `--profile smoke` exec for wiring validation; the run
-> phase always runs the full slice. There are no separate `-smoke`
-> / `-full-sweep` roadmap entries.
+### model-escalation-router-hard-clusters
 
-### tb2-gemini3-model-baseline
-
--   **Idea:** refresh the trunk model baseline before spending more daemon budget on component ablations.
--   **Hypothesis:** The current trunk score is partly model-bound: replacing `gemini-3.1-flash-lite-preview` with the stronger Gemini 3 Flash / 3.1 Pro coding models on the same `basic` harness will raise full-suite pass rate enough to change which runtime and prompt mechanisms are worth pursuing next.
--   **Slice:** full `terminal-bench@2.0` task set used by `tb2-baseline-full-sweep` (currently 89 tasks). Keep the same task filter, verifier behavior, timeout budget, and concurrency policy unless the design phase discovers a hard provider quota blocker and records the exact blocker before refusing.
--   **Legs:** 3-leg model-only baseline. Leg A: trunk `basic` with `gemini-3.1-flash-lite-preview`. Leg B: cloned `basic` with `gemini-3-flash-preview` (official Flash preview text model). Leg C: cloned `basic` with `gemini-3.1-pro-preview`. One axis only: model ID.
--   **Repetitions:** `single-shot` because the slice is broad and the mechanism is a pure provider/model swap.
--   **Control:** `fresh`.
--   **Why first:** every completed component experiment is being interpreted against the Lite baseline. If Flash or Pro materially lifts the baseline, the daemon should reprioritize follow-ups around residual failures from the stronger trunk instead of overfitting guardrails to Lite-specific behavior.
--   **Depends on:** none
--   **Cost:** smoke-gated; reserve ~$40-120, with Pro expected to dominate spend.
+-   **Idea:** [`model-escalation-router-hard-clusters`](ideas.md#model-escalation-router-hard-clusters)
+-   **Hypothesis:** A budget-aware router that starts on the cheap Gemini 3 basic leg, routes Lite-positive clusters to the lowest-cost model, and escalates to basic_pro only for verifier failures or Pro-positive hard clusters can capture most of the model-specific lift without paying the all-Pro cost per pass.
+-   **Plan:** Slice: model-sensitive clusters from tb2-gemini3-model-baseline: Lite-positive branch claims (`c_runtime_debugging`, `git_service_deployment`, `security_python_web`, `sparql_query`, `git_workflow`) plus Pro-positive hard clusters (`c_build`, `python_ml`, `regex_programming`, `binary_analysis`) and a same-size sibling/control sample where Pro or Lite tied/lost; floor section 6 requires at least 10 trials per leg. Legs: 3-leg model-policy ablation, A `basic_flash` default, B selective router using Lite for Lite-positive clusters and Pro for hard-cluster or verifier-failure escalation, C all-Pro basic as an upper-bound comparator. Repetitions: paired-double because the slice is narrow and model-routing outcomes are stochastic. Control: fresh. Why first: this directly validates the new AddBranch model specialization before runtime guardrails are interpreted against the refreshed model floor.
+-   **Depends on:** `tb2-gemini3-model-baseline`
+-   **Cost:** smoke-gated; reserve ~$35-70
 
 ### artifact-first-output-policy
 
@@ -75,6 +63,21 @@
 _(none)_
 
 ## Done
+
+### tb2-gemini3-model-baseline
+
+-   **Idea:** refresh the trunk model baseline before spending more daemon budget on component ablations.
+-   **Hypothesis:** The current trunk score is partly model-bound: replacing `gemini-3.1-flash-lite-preview` with the stronger Gemini 3 Flash / 3.1 Pro coding models on the same `basic` harness will raise full-suite pass rate enough to change which runtime and prompt mechanisms are worth pursuing next.
+-   **Slice:** full `terminal-bench@2.0` task set used by `tb2-baseline-full-sweep` (currently 89 tasks). Keep the same task filter, verifier behavior, timeout budget, and concurrency policy unless the design phase discovers a hard provider quota blocker and records the exact blocker before refusing.
+-   **Legs:** 3-leg model-only baseline. Leg A: trunk `basic` with `gemini-3.1-flash-lite-preview`. Leg B: cloned `basic` with `gemini-3-flash-preview` (official Flash preview text model). Leg C: cloned `basic` with `gemini-3.1-pro-preview`. One axis only: model ID.
+-   **Repetitions:** `single-shot` because the slice is broad and the mechanism is a pure provider/model swap.
+-   **Control:** `fresh`.
+-   **Why first:** every completed component experiment is being interpreted against the Lite baseline. If Flash or Pro materially lifts the baseline, the daemon should reprioritize follow-ups around residual failures from the stronger trunk instead of overfitting guardrails to Lite-specific behavior.
+-   **Depends on:** none
+-   **Cost:** smoke-gated; reserve ~$40-120, with Pro expected to dominate spend.
+
+-   **Ran:** [runs/experiments/tb2-gemini3-model-baseline-20260424-225008](../runs/experiments/tb2-gemini3-model-baseline-20260424-225008)
+-   **Outcome:** add_branch: basic_pro raised pass rate to 44.9% versus 34.8% for flash and 23.6% for lite, but cost was 7.9x flash; treat Pro as a selective hard-cluster branch, not the default trunk.
 
 ### timeout-aware-retry-on-needs-network
 

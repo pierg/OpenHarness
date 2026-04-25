@@ -1,5 +1,52 @@
 # Experiments
 
+## 2026-04-24 — tb2-gemini3-model-baseline
+
+-   **Type:** paired-ablation
+-   **Trunk at run-time:** [`trunk`](../src/openharness/agents/configs/trunk.yaml)
+-   **Hypothesis:** The current trunk score is partly model-bound: replacing `gemini-3.1-flash-lite-preview` with the stronger Gemini 3 Flash / 3.1 Pro coding models on the same `basic` harness will raise full-suite pass rate enough to change which runtime and prompt mechanisms are worth pursuing next.
+-   **Run:** [`runs/experiments/tb2-gemini3-model-baseline-20260424-225008`](../runs/experiments/tb2-gemini3-model-baseline-20260424-225008)
+-   **Branch:** [`lab/tb2-gemini3-model-baseline`](https://github.com/pierg/OpenHarness/pull/45)
+
+### Aggregate
+| Leg | Agent | Trials | Passed | Failed | Pass rate | Cost (USD) |
+|-----|-------|-------:|-------:|-------:|----------:|-----------:|
+| `basic_flash` | `basic` | 89 | 31 | 58 | 34.8% | $14.02 |
+| `basic_lite` | `basic` | 89 | 21 | 68 | 23.6% | $5.10 |
+| `basic_pro` | `basic` | 89 | 40 | 49 | 44.9% | $111.35 |
+### Mutation impact
+The higher-capacity basic_pro leg helped overall: +10.1 percentage points over basic_flash and +21.3 pp over basic_lite, with decisive gains in python_ml, c_build, regex_programming, binary_analysis, and several one-off implementation tasks. The effect was not cost-efficient: cost per pass was about $2.78 for pro, $0.45 for flash, and $0.24 for lite, so flash/lite remain the cheaper frontier when exact correctness is not required. The causal hypothesis is that pro more often completed full implementations after setup, while cheaper legs more often hit "gave-up-too-early", repeated-command, or timeout failure modes.
+### Failure modes
+-   **timeout-no-recovery** (×100): Turn budget or wall-clock exhaustion dominated failures; critiques repeatedly used "timeout-no-recovery" / "timeout_no_recovery" and related budget-exhaustion labels.
+-   **repeated-failed-command** (×38): Agents retried broken commands or fixes instead of switching tactics; critiques used "repeated-failed-command" / "repeated_failed_command".
+-   **gave-up-too-early** (×28): Agents stopped after setup or partial progress; critiques used "gave-up-too-early", "gave_up_too_early", or "empty-assistant-turn".
+-   **hallucinated-success** (×7): Agents claimed completion despite failed or missing verification; critiques used "hallucinated-success" / "hallucinated_success".
+-   **analysis-paralysis** (×7): Agents spent turns planning or overcomplicating without converging on the deliverable; critiques used "analysis-paralysis" or "overcomplication".
+### Tree effect
+-   **Verdict:** **Add branch** — experiment outcome supports a specialized branch
+-   **Target:** `basic`
+-   **Pair:** trunk leg `basic_flash` vs mutation `basic_lite`
+-   **Δ pass-rate:** -11.24 pp
+-   **Δ $/pass:** -46.3%
+-   **Confidence:** 1.00
+-   **Rationale:** Trunk wins overall (Δ = -11.2pp), but mutation wins ≥ +5pp on 5 cluster(s): c_runtime_debugging (+100pp, n=1), git_service_deployment (+100pp, n=1), security_python_web (+100pp, n=1), sparql_query (+100pp, n=1), git_workflow (+25pp, n=4). (also: basic_pro → add_branch: Trunk wins overall (Δ = +10.1pp), but mutation wins ≥ +5pp on 15 cluster(s): c_runtime_debugging (+100pp, n=1), calendar_scheduling (+100pp, n=1), compression_reverse_engineering (+100pp, n=1), database_recovery (+100pp, n=1), image_ocr (+100pp, n=1), logic_circuit_synthesis (+100pp, n=1), python_async (+100pp, n=1), r_scientific_computing (+100pp, n=1), security_python_web (+100pp, n=1), sparql_query (+100pp, n=1), binary_analysis (+50pp, n=2), regex_programming (+33pp, n=3), python_ml (+29pp, n=7), git_workflow (+25pp, n=4), c_build (+17pp, n=6).)
+-   **Use-when:** `{"any_of": [{"task_features.category": "c_runtime_debugging"}, {"task_features.category": "git_service_deployment"}, {"task_features.category": "security_python_web"}, {"task_features.category": "sparql_query"}, {"task_features.category": "git_workflow"}], "derived_from": "tree_ops.evaluate cluster deltas"}`
+-   **Evidence:** [`experiment-critic.json`](../runs/experiments/tb2-gemini3-model-baseline-20260424-225008/critic/experiment-critic.json), [`comparisons`](../runs/experiments/tb2-gemini3-model-baseline-20260424-225008/critic/comparisons), [`critic_summary.md`](../runs/experiments/tb2-gemini3-model-baseline-20260424-225008/results/critic_summary.md)
+
+| Cluster | trunk pass | mut pass | Δ pp |
+|---------|-----------:|---------:|-----:|
+| `c_runtime_debugging` | 0/1 | 1/1 | +100.0 |
+| `coq_theorem_proving` | 1/1 | 0/1 | -100.0 |
+| `cpp_memory_debugging` | 1/1 | 0/1 | -100.0 |
+| `git_service_deployment` | 0/1 | 1/1 | +100.0 |
+| `latex_document_repair` | 1/1 | 0/1 | -100.0 |
+| `legacy_modernization` | 1/1 | 0/1 | -100.0 |
+| `python_grpc` | 1/1 | 0/1 | -100.0 |
+| `python_packaging_server` | 1/1 | 0/1 | -100.0 |
+### Linked follow-ups
+-   **roadmap** `model-escalation-router-hard-clusters`: queued at the top of `## Up next` because `basic_pro` delivered the best raw score (40/89, 44.9%) but all-Pro cost was 7.9x Flash, while Lite had narrow low-cost cluster wins; validate selective Lite/Pro routing on model-positive clusters plus control siblings before treating model selection as trunk policy.
+-   **idea** `model-escalation-router-hard-clusters`: promoted from `## Auto-proposed` into the concrete queue by `lab-replan-roadmap@2026-04-25`.
+
 ## 2026-04-24 — timeout-aware-retry-on-needs-network
 
 -   **Type:** paired-ablation

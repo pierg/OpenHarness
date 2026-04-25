@@ -1,0 +1,37 @@
+id: tb2-gemini3-model-baseline
+dataset: terminal-bench@2.0
+
+defaults:
+  max_turns: 30
+  max_tokens: 8192
+  n_concurrent: 2
+  n_attempts: 1
+
+task_filter:
+  include_tasks: []
+  exclude_tasks: []
+
+agents:
+  - id: basic
+    alias: basic_lite
+    overrides:
+      model: gemini-3.1-flash-lite-preview
+  - id: basic
+    alias: basic_flash
+    overrides:
+      model: gemini-3-flash-preview
+  - id: basic
+    alias: basic_pro
+    overrides:
+      model: gemini-3.1-pro-preview
+
+leg_concurrency: 1
+
+profiles:
+  smoke:
+    task_filter:
+      include_tasks:
+        - "regex-log"
+        - "log-summary-date-ranges"
+    defaults:
+      n_concurrent: 2

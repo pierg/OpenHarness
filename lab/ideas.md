@@ -68,6 +68,18 @@
 -   **Sketch:** Run a paired confirmation on at least 10 trials per side from network_dependent plus high_env_complexity tasks, including c_build/download-heavy cases, and compare timeout-aware retry against current basic on decisive wins and timeout_no_recovery tags.
 -   **Auto-proposed by:** cross-experiment-critic@2026-04-24
 
+#### model-escalation-router-hard-clusters
+
+-   **Motivation:** The Gemini 3 model baseline improved the full-suite control floor, but pro gained accuracy at a much higher cost while flash/lite stayed cheaper on many easy or tied tasks.
+-   **Sketch:** Test a selective escalation policy: run the chosen cheap trunk model first, then escalate only on verifier failure or clusters where pro showed reliable lift such as c_build, python_ml, regex_programming, and binary_analysis. Compare pass rate, cost per pass, and whether escalation reduces gave_up_too_early/repeated_failed_command failures without making pro the default.
+-   **Auto-proposed by:** cross-experiment-critic@2026-04-25
+
+#### runtime-guards-on-gemini3-floor
+
+-   **Motivation:** [medium confidence; structural gap, 0 component trials on flash/pro] The measured runtime and planner guard rows all come from flash-lite component ablations, while the Gemini 3 model baseline raised the no-component control floor, so the zero-win guard conclusion may be model-floor dependent.
+-   **Sketch:** Run a small paired confirmation on the selected Gemini 3 trunk model with current basic/planner controls versus loop-guard and planner-schema-guard on their strongest historical slices. Treat this as a model-floor interaction test, not a new component graduation attempt.
+-   **Auto-proposed by:** cross-experiment-critic@2026-04-25
+
 ## Proposed
 
 ### Architecture
