@@ -44,8 +44,8 @@ The higher-capacity basic_pro leg helped overall: +10.1 percentage points over b
 | `python_grpc` | 1/1 | 0/1 | -100.0 |
 | `python_packaging_server` | 1/1 | 0/1 | -100.0 |
 ### Linked follow-ups
-
-_(pending)_
+-   **roadmap** `model-escalation-router-hard-clusters`: queued at the top of `## Up next` because `basic_pro` delivered the best raw score (40/89, 44.9%) but all-Pro cost was 7.9x Flash, while Lite had narrow low-cost cluster wins; validate selective Lite/Pro routing on model-positive clusters plus control siblings before treating model selection as trunk policy.
+-   **idea** `model-escalation-router-hard-clusters`: promoted from `## Auto-proposed` into the concrete queue by `lab-replan-roadmap@2026-04-25`.
 
 ## 2026-04-24 — timeout-aware-retry-on-needs-network
 
