@@ -5,7 +5,7 @@
 -   **Type:** paired-ablation
 -   **Trunk at run-time:** [`trunk`](../src/openharness/agents/configs/trunk.yaml)
 -   **Hypothesis:** A preflight or ingest validation that requires runtime-flag ablation legs to declare their expected component id will prevent component_perf undercounting and make future runtime experiments verdict-bearing.
--   **Run:** _(filled after the run completes)_
+-   **Run:** [`runs/experiments/runtime-component-label-audit-20260426-022341`](../runs/experiments/runtime-component-label-audit-20260426-022341)
 -   **Branch:** `lab/runtime-component-label-audit`
 
 ### Aggregate
