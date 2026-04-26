@@ -110,6 +110,18 @@
 -   **Sketch:** Extend timeout-aware retry with a forced strategy-switch checkpoint after the first timeout or repeated failed command: choose a task-specific recovery playbook such as toolchain triage, parser edge-case tests, or CLI-shape discovery before spending more turns. Test it against the same c_build, regex_programming, and python_ml hard-cluster slice with at least 10 trials per side.
 -   **Auto-proposed by:** cross-experiment-critic@2026-04-26
 
+#### component-catalog-registration-gate
+
+-   **Motivation:** [medium confidence: 32 unknown_id misconfiguration rows] Components can be present in trials.components_active while still being flagged as unknown_id, with planner-schema-guard and executor-bash-timeout-aware-retry both affected.
+-   **Sketch:** Add a preflight or ingest gate that requires every active component id to resolve against the component catalog before the run becomes verdict-bearing. If a branch-local component is intentionally experimental, register it deterministically during tree apply or mark it with an explicit experimental catalog entry.
+-   **Auto-proposed by:** cross-experiment-critic@2026-04-26
+
+#### critic-score-outcome-consistency-check
+
+-   **Motivation:** [low confidence: 3 registry-pass disagreements in the latest 12-trial audit] Trial critiques can describe reward-1.0 registry passes as failed, which makes cross-experiment anti-pattern summaries noisier even when pass-rate math uses registry scores.
+-   **Sketch:** Add a deterministic post-critic consistency check that compares critique outcome against trials.score and passed, retries or patches the critic payload when they conflict, and stores any irreconcilable discrepancy in extra metadata rather than the main outcome field.
+-   **Auto-proposed by:** cross-experiment-critic@2026-04-26
+
 ## Proposed
 
 ### Architecture

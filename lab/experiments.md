@@ -37,7 +37,10 @@ Accuracy was a wash: basic_timeout_aware_retry and basic_flash both passed 3/6 t
 | `regex_programming` | 1/2 | 1/2 | +0.0 |
 ### Linked follow-ups
 
-_(pending)_
+-   **roadmap** `component-catalog-registration-gate`: queued at the top of `## Up next` because cross-experiment analysis found 32 `unknown_id` component misconfiguration rows after the runtime label repair.
+-   **roadmap** `toolchain-fallback-playbooks-on-c-build`: kept next among score-seeking experiments because bare timeout-aware retry tied control while c_build still failed on legacy build and turn-budget loops.
+-   **roadmap** `timeout-strategy-switch-checkpoint`: demoted to `### Suggested` until toolchain-specific playbooks or metadata gates justify another timeout-aware retry derivative.
+-   **roadmap** `critic-score-outcome-consistency-check`: added to `### Suggested` because three registry-passing trials were described as failed by trial-critic.
 
 ## 2026-04-26 — timeout-recovery-hard-cluster-slice
 
