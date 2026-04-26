@@ -19,6 +19,7 @@
 | ID | Reason | Evidence |
 |----|--------|----------|
 | `reflection` | context blow-up: ≥ 500k input tokens / trial on the smoke slice. Re-add only with [`reflection-context-compaction`](ideas.md#reflection-context-compaction). | [`reflection-context-compaction`](ideas.md#reflection-context-compaction) (idea — not yet on the roadmap; needs a meaningful slice, not a smoke run) |
+| `basic_model_router` | Invalid benchmark-oracle branch: routed by exact Terminal-Bench task names instead of runtime-observable task instruction/workspace signals. Removed from runnable agent configs; keep only as diagnostic evidence. | [model-escalation-router-hard-clusters](experiments.md#2026-04-25--model-escalation-router-hard-clusters) |
 | `basic` | Δ pass-rate = -3.6pp; Δ $/pass = -85%; no positive cluster. (also: basic_60_16384 → no_op: Inconclusive: Δ pass-rate = +0.0pp (trunk 14.3% vs mutation 14.3%); 0 positive cluster(s) (threshold 2); Δ $/ | /home/pier_ridgesecurity_ai/OpenHarness/runs/experiments/extended-budget-paired-on-trunk-20260423-184410/critic/experiment-critic.json, /home/pier_ridgesecurity_ai/OpenHarness/runs/experiments/extended-budget-paired-on-trunk-20260423-184410/critic/comparisons |
 | `basic_loop_guard` | Δ pass-rate = -2.2pp; Δ $/pass = +99%; cost spike ≥ 50%; no positive cluster. | (see journal) |
 

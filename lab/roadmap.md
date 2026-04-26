@@ -50,7 +50,7 @@
 
 #### router-cheap-baseline-preservation-gate
 
--   **Hypothesis:** If router work continues, it needs an explicit cheap-baseline preservation gate because the broad router cost nearly as much as pro while losing several flash/pro wins; stage this behind the narrow confirmation rather than making it the immediate next run.
+-   **Hypothesis:** If router work continues, it must use a runtime classifier derived from the task instruction/workspace plus an explicit cheap-baseline preservation gate; the prior task-name router is diagnostic-only because it used benchmark identity, and the broad router cost nearly as much as pro while losing several flash/pro wins.
 -   **Source:** lab-replan-roadmap@2026-04-25
 -   **Cost:** ~$8-15
 
@@ -82,7 +82,7 @@
 
 #### targeted-router-cost-calibration
 
--   **Hypothesis:** Targeted routing may be worth revisiting only with a route-cost threshold: the confirmation improved 8/24 vs 6/24 but most clusters tied while router cost rose sharply, so any next router run should calibrate escalation against cost per extra pass and include an easy-slice guardrail.
+-   **Hypothesis:** Targeted routing may be worth revisiting only as a leakage-free runtime classifier with a route-cost threshold: the confirmation improved 8/24 vs 6/24 but most clusters tied while router cost rose sharply, so any next router run should derive escalation signals from instruction/workspace observations and include an easy-slice guardrail.
 -   **Source:** lab-replan-roadmap@2026-04-25
 -   **Cost:** ~$8-15
 
@@ -130,7 +130,7 @@
 -   **Cost:** smoke-gated; reserve ~$35-70
 
 -   **Ran:** [runs/experiments/model-escalation-router-hard-clusters-20260425-191501](../runs/experiments/model-escalation-router-hard-clusters-20260425-191501)
--   **Outcome:** add_branch: basic_pro beat flash by +5.8 pp on the hard-cluster slice, but the router lost aggregate accuracy and cost near pro; keep model routing narrow and validate before expanding.
+-   **Outcome:** diagnostic_only/add_branch-mixed: all-Pro basic beat flash by +5.8 pp on the hard-cluster slice, but the task-name router was invalid for promotion because it used benchmark identity and also lost aggregate accuracy while costing near pro.
 
 ### tb2-gemini3-model-baseline
 

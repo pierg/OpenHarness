@@ -403,23 +403,24 @@ def _routed_model_for_task(
     task_name: str,
     fallback: str | None,
 ) -> str:
-    """Return the configured per-task model, router default, or fallback model."""
+    """Return the configured router default or fallback model.
+
+    Exact task-name routing is intentionally rejected by ``AgentConfig``:
+    benchmark identities are available in Harbor metadata, but they are not
+    valid runtime inputs for a general agent policy.
+    """
+    del task_name
     router = config.extras.get("model_router")
     if router is None:
         return _validate_model_id(fallback, "fallback")
     if not isinstance(router, dict):
         raise ValueError(f"Agent config '{config.name}' extras.model_router must be a mapping.")
 
-    task_models = router.get("task_models", {})
-    if task_models is None:
-        task_models = {}
-    if not isinstance(task_models, dict):
+    if router.get("task_models"):
         raise ValueError(
-            f"Agent config '{config.name}' extras.model_router.task_models must be a mapping."
+            f"Agent config '{config.name}' extras.model_router.task_models is forbidden: "
+            "it routes by exact benchmark task identity."
         )
-
-    if task_name in task_models:
-        return _validate_model_id(task_models[task_name], f"task_models.{task_name}")
 
     default_model = router.get("default_model")
     if default_model is not None:

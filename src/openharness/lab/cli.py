@@ -713,7 +713,10 @@ def cmd_idea_move(
 def cmd_idea_append(
     idea_id: str,
     theme: str = typer.Option(..., "--theme",
-                              help="Architecture | Runtime | Tools | Memory"),
+                              help=(
+                                  "Prompting | Architecture | Memory | Tools | Runtime | "
+                                  "Exploration | Test-Time Inference | Model Policy | Evaluation"
+                              )),
     motivation: str = typer.Option(..., "--motivation"),
     sketch: str = typer.Option(..., "--sketch"),
 ) -> None:

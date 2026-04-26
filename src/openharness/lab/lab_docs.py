@@ -28,7 +28,17 @@ from openharness.lab.paths import LAB_ROOT
 
 VALID_IDEAS_SECTIONS: tuple[str, ...] = ("Proposed", "Trying", "Graduated", "Rejected")
 VALID_ROADMAP_SECTIONS: tuple[str, ...] = ("Up next", "Done")
-VALID_THEMES: tuple[str, ...] = ("Architecture", "Runtime", "Tools", "Memory")
+VALID_THEMES: tuple[str, ...] = (
+    "Prompting",
+    "Architecture",
+    "Memory",
+    "Tools",
+    "Runtime",
+    "Exploration",
+    "Test-Time Inference",
+    "Model Policy",
+    "Evaluation",
+)
 
 # Sections of a tree-shaped journal entry (the new shape; see plan).
 JOURNAL_SECTIONS: tuple[str, ...] = (

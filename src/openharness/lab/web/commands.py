@@ -75,7 +75,10 @@ _SAFE_LONG_TEXT = re.compile(
 # Constrained vocabularies enforced by the CLI itself; we duplicate them
 # here so the form gets a fast 400 instead of waiting for ``uv run`` to
 # spin up and Typer to reject.
-_IDEA_THEME = re.compile(r"^(?:Architecture|Runtime|Tools|Memory)$")
+_IDEA_THEME = re.compile(
+    r"^(?:Prompting|Architecture|Memory|Tools|Runtime|Exploration|"
+    r"Test-Time Inference|Model Policy|Evaluation)$"
+)
 _COMPONENT_KIND = re.compile(r"^(?:Architecture|Runtime|Tools|Prompt|Model)$")
 _COMPONENT_STATUS = re.compile(
     r"^(?:proposed|experimental|branch|validated|rejected|superseded)$"
@@ -461,7 +464,10 @@ COMMANDS: dict[str, CommandSpec] = {
                 name="theme",
                 pattern=_IDEA_THEME,
                 label="Theme",
-                placeholder="Architecture | Runtime | Tools | Memory",
+                placeholder=(
+                    "Prompting | Architecture | Memory | Tools | Runtime | "
+                    "Exploration | Test-Time Inference | Model Policy | Evaluation"
+                ),
             ),
             ParamSpec(
                 name="motivation",

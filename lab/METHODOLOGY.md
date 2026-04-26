@@ -2,6 +2,42 @@
 
 The scientific contract for lab experiments.
 
+## 0. Mission and generalization contract
+
+The lab exists to discover, implement, test, and preserve
+generalizable improvements to the OpenHarness agent system. Good ideas
+may come from agent literature or from new hypotheses: prompting,
+ReAct-style loops, supervisor/specialist architectures, memory,
+tool-output management, exploration/search, test-time inference,
+model-selection policies, validation gates, runtime recovery, tools,
+or evaluation infrastructure.
+
+The benchmark is a measurement instrument, not information the agent
+may memorize. The core boundary is:
+
+- offline analysis may use task names, clusters, prior failures,
+  task features, and per-task results to decide what to test next
+- experiment slices may target known difficult tasks to cheaply test a
+  hypothesis
+- runtime agent policy may use only information available on an
+  unseen task: the instruction, workspace, tools, environment
+  observations, and reasoning derived during the run
+
+Promotable implementation code must not branch on exact benchmark
+identity (`task_name`, `task_id`, `task_checksum`, trial directory
+name, known benchmark task lists, or prior per-task outcomes). Offline
+`task_features` are analysis metadata; runtime routing may use only
+features re-derived from the task instruction/workspace at runtime.
+
+Every experiment should be classifiable as:
+
+- `promotable` — runtime mechanism is deployable on unseen tasks
+- `diagnostic_only` — uses benchmark knowledge to estimate an upper
+  bound or understand a failure surface, but cannot produce
+  `add_branch` or `graduate`
+- `invalid` — leaks benchmark identity into runtime behavior or
+  otherwise cannot answer a useful harness question
+
 ## 1. Unit of evidence
 
 One experiment produces one verdict over one declared slice and one
@@ -38,6 +74,9 @@ Hard rules:
 - the slice size must be explicit
 - a `graduate` claim must come from `full-bench` or a broad enough
   combined slice, not a tiny cherry-picked subset
+- `regression`, `near-miss`, and known-cluster slices are allowed for
+  evaluation, but the mutation itself must remain runtime-admissible
+  if it is eligible for `add_branch` or `graduate`
 
 ## 3. Legs
 
@@ -92,8 +131,8 @@ These thresholds are enforced in `src/openharness/lab/tree_ops.py`.
 
 | Verdict | Conditions |
 |---------|------------|
-| `graduate` | overall pass-rate lift at or above the graduate threshold, no serious per-cluster regression, acceptable cost delta |
-| `add_branch` | clear win on coherent sub-clusters, but not enough to replace trunk overall |
+| `graduate` | runtime-admissible mechanism, overall pass-rate lift at or above the graduate threshold, no serious per-cluster regression, acceptable cost delta |
+| `add_branch` | runtime-admissible mechanism with a clear win on coherent sub-clusters, but not enough to replace trunk overall |
 | `reject` | clear regression or unacceptable cost blow-up without offsetting upside |
 | `no_op` | everything else, including insufficiently strong evidence |
 
@@ -137,4 +176,6 @@ an optional side task.
 - using different task lists across legs
 - confounded 2-leg comparisons
 - selection-biased tiny slices as evidence for trunk promotion
+- promoting diagnostic-only experiments as `add_branch` or `graduate`
+- runtime routing or prompting keyed by exact benchmark identity
 - letting finalize succeed without a merge back to `main`

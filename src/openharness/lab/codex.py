@@ -300,8 +300,9 @@ SKILL_PROFILES: dict[str, SkillProfile] = {
         timeout_sec=60 * 60 * 2,
         notes=(
             "One-shot semantic feature extraction per task_checksum. "
-            "Output feeds clustering and routing decisions, so feature "
-            "quality is leverage."
+            "Output feeds offline clustering and experiment-slice decisions; "
+            "it must not be treated as runtime routing input unless a deployed "
+            "agent re-derives equivalent features from the instruction/workspace."
         ),
     ),
     # --- per-experiment aggregation ---

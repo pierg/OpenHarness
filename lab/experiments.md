@@ -133,6 +133,7 @@ _(pending)_
 -   **Hypothesis:** A budget-aware router that starts on the cheap Gemini 3 basic leg, routes Lite-positive clusters to the lowest-cost model, and escalates to basic_pro only for verifier failures or Pro-positive hard clusters can capture most of the model-specific lift without paying the all-Pro cost per pass.
 -   **Run:** [`runs/experiments/model-escalation-router-hard-clusters-20260425-191501`](../runs/experiments/model-escalation-router-hard-clusters-20260425-191501)
 -   **Branch:** [`lab/model-escalation-router-hard-clusters`](https://github.com/pierg/OpenHarness/pull/46)
+-   **Validity note:** the `basic_model_router` implementation is now classified as diagnostic-only/invalid for promotion because it routed by exact benchmark task names. The run remains useful as evidence about model cost/performance, but the task-name router has been removed from runnable agent configs.
 
 ### Aggregate
 | Leg | Agent | Trials | Passed | Failed | Pass rate | Cost (USD) |

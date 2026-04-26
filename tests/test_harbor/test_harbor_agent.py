@@ -103,8 +103,6 @@ max_tokens: 1024
 extras:
   model_router:
     default_model: gemini-3-flash-preview
-    task_models:
-      fix-ocaml-gc: gemini-3.1-pro-preview
 tools: []
 prompts:
   system: |
@@ -228,26 +226,7 @@ prompts:
 
 
 @pytest.mark.asyncio
-async def test_openharness_harbor_agent_routes_mapped_task_model(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    context, trial_dir = await _run_router_trial(
-        tmp_path,
-        monkeypatch,
-        trial_id="fix-ocaml-gc__abc123",
-    )
-
-    assert _logged_model_request(trial_dir)["model"] == "gemini-3.1-pro-preview"
-    assert context.metadata is not None
-    assert context.metadata["model"] == "gemini-3.1-pro-preview"
-
-    trajectory = json.loads((trial_dir / "agent" / "trajectory.json").read_text())
-    assert trajectory["agent"]["model_name"] == "gemini-3.1-pro-preview"
-
-
-@pytest.mark.asyncio
-async def test_openharness_harbor_agent_routes_unmapped_task_to_default_model(
+async def test_openharness_harbor_agent_uses_router_default_model(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -263,3 +242,42 @@ async def test_openharness_harbor_agent_routes_unmapped_task_to_default_model(
 
     trajectory = json.loads((trial_dir / "agent" / "trajectory.json").read_text())
     assert trajectory["agent"]["model_name"] == "gemini-3-flash-preview"
+
+
+def test_openharness_harbor_agent_rejects_task_identity_model_router(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    trial_dir = tmp_path / "fix-ocaml-gc__abc123"
+    trial_dir.mkdir()
+    logs_dir = trial_dir / "agent"
+    logs_dir.mkdir()
+    monkeypatch.setenv("OPENHARNESS_LANGFUSE_ENABLED", "0")
+
+    with pytest.raises(ValueError, match="exact benchmark task identity"):
+        OpenHarnessHarborAgent(
+            logs_dir=logs_dir,
+            agent_name="harbor_oracle_router_test_agent",
+            model_name="gemini-3.1-pro-preview",
+            api_client=_final_text_client(),
+            agent_config_yaml="""\
+name: harbor_oracle_router_test_agent
+architecture: simple
+model: gemini-3.1-pro-preview
+max_turns: 4
+max_tokens: 1024
+extras:
+  model_router:
+    default_model: gemini-3-flash-preview
+    task_models:
+      fix-ocaml-gc: gemini-3.1-pro-preview
+tools: []
+prompts:
+  system: |
+    {{ openharness_system_context }}
+  user: |
+    {{ instruction }}
+""",
+            run_id="job-route123456",
+            run_root=str(tmp_path),
+        )

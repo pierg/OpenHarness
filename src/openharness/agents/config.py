@@ -3,11 +3,11 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, Literal, Self
 
 import yaml
 from jinja2 import BaseLoader, Environment, StrictUndefined
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 from openharness.tools import DEFAULT_TOOL_NAMES
 
@@ -80,6 +80,12 @@ class AgentConfig(BaseModel):
 
     subagents: dict[str, "AgentConfig"] = Field(default_factory=dict)
 
+    @model_validator(mode="after")
+    def _reject_benchmark_oracle_extras(self) -> Self:
+        """Reject runtime policy that depends on benchmark task identity."""
+        _validate_no_benchmark_oracle_extras(self.extras, config_name=self.name)
+        return self
+
     @classmethod
     def from_yaml(cls, path: str | Path) -> AgentConfig:
         """Load an agent configuration from a YAML file."""
@@ -121,6 +127,26 @@ class AgentConfig(BaseModel):
         if template is None:
             raise KeyError(f"Prompt '{prompt_name}' not found in agent config '{self.name}'")
         return _JINJA_ENV.from_string(template).render(**kwargs)
+
+
+def _validate_no_benchmark_oracle_extras(
+    extras: dict[str, Any], *, config_name: str
+) -> None:
+    router = extras.get("model_router")
+    if router is None:
+        return
+    if not isinstance(router, dict):
+        return
+
+    task_models = router.get("task_models")
+    if task_models:
+        raise ValueError(
+            f"Agent config '{config_name}' uses extras.model_router.task_models, "
+            "which routes by exact benchmark task identity. Runtime agent policy "
+            "must only use information available on unseen tasks: the instruction, "
+            "workspace, tools, and observations. Use an instruction/workspace-derived "
+            "classifier or mark the experiment diagnostic-only instead."
+        )
 
 
 AgentConfig.model_rebuild()

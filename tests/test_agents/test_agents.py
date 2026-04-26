@@ -26,6 +26,51 @@ from openharness.engine.query import _trace_model_input, _trace_model_output
 from openharness.tools.bash_tool import format_command_output
 
 
+def test_agent_config_rejects_exact_task_identity_router() -> None:
+    with pytest.raises(ValueError, match="exact benchmark task identity"):
+        AgentConfig.from_yaml_text(
+            """\
+name: oracle-router
+architecture: simple
+model: gemini-3-flash-preview
+extras:
+  model_router:
+    default_model: gemini-3-flash-preview
+    task_models:
+      compile-compcert: gemini-3.1-pro-preview
+tools: []
+prompts:
+  system: |
+    {{ openharness_system_context }}
+  user: |
+    {{ instruction }}
+""",
+            source_name="oracle-router",
+        )
+
+
+def test_agent_config_allows_router_default_without_task_identity() -> None:
+    config = AgentConfig.from_yaml_text(
+        """\
+name: default-router
+architecture: simple
+model: gemini-3.1-pro-preview
+extras:
+  model_router:
+    default_model: gemini-3-flash-preview
+tools: []
+prompts:
+  system: |
+    {{ openharness_system_context }}
+  user: |
+    {{ instruction }}
+""",
+        source_name="default-router",
+    )
+
+    assert config.extras["model_router"]["default_model"] == "gemini-3-flash-preview"
+
+
 # ---------------------------------------------------------------------------
 # Fakes
 # ---------------------------------------------------------------------------

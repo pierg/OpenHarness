@@ -156,7 +156,17 @@ def test_safe_text_rejects_control_characters() -> None:
 
 
 def test_idea_theme_vocabulary_locked() -> None:
-    for ok in ["Architecture", "Runtime", "Tools", "Memory"]:
+    for ok in [
+        "Prompting",
+        "Architecture",
+        "Memory",
+        "Tools",
+        "Runtime",
+        "Exploration",
+        "Test-Time Inference",
+        "Model Policy",
+        "Evaluation",
+    ]:
         assert labcmd._IDEA_THEME.fullmatch(ok)
     for bad in ["architecture", "Other", "tools ", "", "Memory\n"]:
         assert not labcmd._IDEA_THEME.fullmatch(bad)

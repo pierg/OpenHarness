@@ -71,7 +71,7 @@
 #### model-escalation-router-hard-clusters
 
 -   **Motivation:** The Gemini 3 model baseline improved the full-suite control floor, but pro gained accuracy at a much higher cost while flash/lite stayed cheaper on many easy or tied tasks.
--   **Sketch:** Test a selective escalation policy: run the chosen cheap trunk model first, then escalate only on verifier failure or clusters where pro showed reliable lift such as c_build, python_ml, regex_programming, and binary_analysis. Compare pass rate, cost per pass, and whether escalation reduces gave_up_too_early/repeated_failed_command failures without making pro the default.
+-   **Sketch:** Diagnostic-only as originally written if it uses known benchmark clusters. A promotable version must classify task type from the instruction/workspace at runtime, start on the cheap trunk model, and escalate only on verifier failure or runtime-observed task signals such as build-system complexity, model-artifact requirements, or parser/toolchain failures.
 -   **Auto-proposed by:** cross-experiment-critic@2026-04-25
 
 #### runtime-guards-on-gemini3-floor
@@ -83,13 +83,13 @@
 #### targeted-router-score-win-confirmation
 
 -   **Motivation:** [low confidence: 3 score-decided router wins] The hard-cluster router lost the aggregate but uniquely won extract-elf, mteb-retrieve, and regex-log, suggesting a narrow route surface may exist.
--   **Sketch:** Run a conservative router confirmation that escalates only binary_analysis, retrieval, and regex-log-like tasks while leaving flash as the default elsewhere. Require at least 10 trials per side or tag the result as exploratory if the slice cannot clear that floor.
+-   **Sketch:** Diagnostic-only if keyed by known task ids or offline labels. A promotable router must infer binary/retrieval/regex-like work from the instruction/workspace at runtime and then escalate conservatively while leaving flash as the default elsewhere.
 -   **Auto-proposed by:** cross-experiment-critic@2026-04-25
 
 #### router-cheap-baseline-preservation-gate
 
 -   **Motivation:** The current router cost nearly as much as pro while failing to preserve several cheap flash/pro wins, so routing needs an explicit cheap-baseline preservation check.
--   **Sketch:** Add a route validation gate that prefers the cheap model unless the route rule is high-confidence or a verifier failure justifies escalation. Compare against flash, pro, and the current hard-cluster router on cost per pass and lost cheap-model wins.
+-   **Sketch:** Add a route validation gate that prefers the cheap model unless a runtime-derived route rule is high-confidence or a verifier failure justifies escalation. Compare against flash and pro; do not compare against or extend exact task-name routers except as diagnostic upper bounds.
 -   **Auto-proposed by:** cross-experiment-critic@2026-04-25
 
 #### timeout-recovery-hard-cluster-slice
@@ -125,7 +125,7 @@
 #### targeted-router-cost-calibration
 
 -   **Motivation:** The targeted-router confirmation improved the hard slice from 6/24 to 8/24 passes, but mean cost rose about 162% and the lift concentrated in python_ml while binary_analysis and regex_programming mostly preserved scores at higher cost.
--   **Sketch:** Add route calibration that escalates only when historical cluster lift clears a cost-per-extra-pass threshold, and keep the cheap model for tied or already-strong clusters. Rerun flash vs current targeted router vs cost-calibrated router on the same hard slice plus an easy-slice guardrail to measure cost per pass and lost cheap-model wins.
+-   **Sketch:** Add route calibration that escalates only when runtime-observable task signals plus verifier feedback justify the expected cost per extra pass, and keep the cheap model for tied or already-strong cases. Rerun flash vs cost-calibrated runtime classifier on the same hard slice plus an easy-slice guardrail.
 -   **Auto-proposed by:** cross-experiment-critic@2026-04-25
 
 ## Proposed
