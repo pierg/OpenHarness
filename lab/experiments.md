@@ -1,5 +1,47 @@
 # Experiments
 
+## 2026-04-26 — runtime-component-label-audit
+
+-   **Type:** paired-ablation
+-   **Trunk at run-time:** [`trunk`](../src/openharness/agents/configs/trunk.yaml)
+-   **Hypothesis:** A preflight or ingest validation that requires runtime-flag ablation legs to declare their expected component id will prevent component_perf undercounting and make future runtime experiments verdict-bearing.
+-   **Run:** [`runs/experiments/runtime-component-label-audit-20260426-022341`](../runs/experiments/runtime-component-label-audit-20260426-022341)
+-   **Branch:** [`lab/runtime-component-label-audit`](https://github.com/pierg/OpenHarness/pull/48) — metadata-only merge (no_op: metadata-only no-op outcome; implementation branch discarded; discarded=`11c01bd`)
+
+### Aggregate
+| Leg | Agent | Trials | Passed | Failed | Pass rate | Cost (USD) |
+|-----|-------|-------:|-------:|-------:|----------:|-----------:|
+| `basic_flash` | `basic` | 6 | 3 | 3 | 50.0% | $0.78 |
+| `basic_timeout_aware_retry` | `basic_timeout_aware_retry` | 6 | 3 | 3 | 50.0% | $0.63 |
+### Mutation impact
+Accuracy was a wash: basic_timeout_aware_retry and basic_flash both passed 3/6 trials, so the headline delta is 0.0 percentage points. The retry leg reduced total cost from $0.777 to $0.629 and median trial time from 99.125s to 81.983s, with the largest tie-break gain on low-complexity log-summary-date-ranges where both legs scored 1.0 but retry averaged $0.022901 versus $0.068390. It did not address high-complexity c_build work or zero-output starts: build-pov-ray stayed 0/4 across legs, and regex-log still had one empty first completion in each leg.
+### Failure modes
+-   **legacy-build-turn-budget-exhaustion** (×4): All four build-pov-ray trials failed after archive discovery, UNIX build staging, and uppercase filename versus Makefile mismatch work consumed the 30-turn budget; critiques cite anti-patterns including budget-exhaustion, turn_budget_exhausted, budget-exhausted, and legacy-build-struggle.
+-   **empty-first-completion** (×2): Both legs had one regex-log trial where the model produced an empty first response with no tool calls, recorded as empty-model-response/empty-response and gave-up-too-early.
+-   **sequential-regex-edge-testing** (×1): basic_flash had one regex-log critique marked inefficient_testing and timeout_no_recovery after it tested edge cases one Perl command at a time instead of batching them after python3 was unavailable.
+-   **critic-registry-outcome-disagreement** (×3): Three reward-1.0 registry passes were described as failed by trial-critic: both timeout log-summary-date-ranges trials and one basic_flash regex-log trial, so downstream analysis should prefer registry score for pass-rate math and preserve the discrepancy as evidence metadata.
+### Tree effect
+-   **Verdict:** **No-op** — recorded for trend analysis
+-   **Target:** `basic_timeout_aware_retry`
+-   **Pair:** trunk leg `basic_flash` vs mutation `basic_timeout_aware_retry`
+-   **Δ pass-rate:** +0.00 pp
+-   **Δ $/pass:** -19.1%
+-   **Confidence:** 0.00
+-   **Rationale:** Inconclusive: Δ pass-rate = +0.0pp (trunk 50.0% vs mutation 50.0%); 0 positive cluster(s) (threshold 2); Δ $/pass = -19%.
+-   **Evidence:** [`experiment-critic.json`](../runs/experiments/runtime-component-label-audit-20260426-022341/critic/experiment-critic.json), [`comparisons`](../runs/experiments/runtime-component-label-audit-20260426-022341/critic/comparisons), [`critic_summary.md`](../runs/experiments/runtime-component-label-audit-20260426-022341/results/critic_summary.md)
+
+| Cluster | trunk pass | mut pass | Δ pp |
+|---------|-----------:|---------:|-----:|
+| `bash_pipeline` | 2/2 | 2/2 | +0.0 |
+| `c_build` | 0/2 | 0/2 | +0.0 |
+| `regex_programming` | 1/2 | 1/2 | +0.0 |
+### Linked follow-ups
+
+-   **roadmap** `component-catalog-registration-gate`: queued at the top of `## Up next` because cross-experiment analysis found 32 `unknown_id` component misconfiguration rows after the runtime label repair.
+-   **roadmap** `toolchain-fallback-playbooks-on-c-build`: kept next among score-seeking experiments because bare timeout-aware retry tied control while c_build still failed on legacy build and turn-budget loops.
+-   **roadmap** `timeout-strategy-switch-checkpoint`: demoted to `### Suggested` until toolchain-specific playbooks or metadata gates justify another timeout-aware retry derivative.
+-   **roadmap** `critic-score-outcome-consistency-check`: added to `### Suggested` because three registry-passing trials were described as failed by trial-critic.
+
 ## 2026-04-26 — timeout-recovery-hard-cluster-slice
 
 -   **Type:** paired-ablation

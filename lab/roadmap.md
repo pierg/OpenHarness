@@ -2,12 +2,12 @@
 
 ## Up next
 
-### runtime-component-label-audit
+### component-catalog-registration-gate
 
--   **Idea:** [`runtime-component-label-audit`](ideas.md#runtime-component-label-audit)
--   **Hypothesis:** A preflight or ingest validation that requires runtime-flag ablation legs to declare their expected component id will prevent component_perf undercounting and make future runtime experiments verdict-bearing.
--   **Plan:** Implement metadata validation for runtime component labels, covering the basic_timeout_aware_retry path that left 14 mutation trials unlabeled in timeout-recovery-hard-cluster-slice. Re-ingest or repair the affected timeout-run metadata so cross-experiment attribution can count executor-bash-timeout-aware-retry before spending on more runtime ablations.
--   **Depends on:** `timeout-recovery-hard-cluster-slice`
+-   **Idea:** [`component-catalog-registration-gate`](ideas.md#component-catalog-registration-gate)
+-   **Hypothesis:** A preflight or ingest gate that requires every active component id to resolve against the component catalog will prevent unknown_id component_perf rows and keep future component experiments verdict-bearing.
+-   **Plan:** Implement catalog validation for trials.components_active, including branch-local experimental components. Repair or explicitly quarantine the current unknown_id rows for planner-schema-guard and executor-bash-timeout-aware-retry before spending on more component ablations.
+-   **Depends on:** `runtime-component-label-audit`
 -   **Cost:** ~$0-2
 
 ### toolchain-fallback-playbooks-on-c-build
@@ -20,14 +20,6 @@
 -   **Control:** `fresh`.
 -   **Why second:** `c_build` is one of the clearest low-pass, repeated-failure clusters across completed runs, and the timeout-recovery hard-cluster run showed bare retry still leaves toolchain loops unresolved.
 -   **Depends on:** `tb2-gemini3-model-baseline`
--   **Cost:** ~$5-10
-
-### timeout-strategy-switch-checkpoint
-
--   **Idea:** [`timeout-strategy-switch-checkpoint`](ideas.md#timeout-strategy-switch-checkpoint)
--   **Hypothesis:** Timeout-aware retry needs a concrete recovery policy, not only background polling; forcing a cluster-specific strategy switch after the first timeout or repeated failed command should recover hard-cluster tasks where bare retry only shortened failures.
--   **Plan:** Slice: the same c_build, regex_programming, and python_ml hard-cluster failure surface from timeout-recovery-hard-cluster-slice, refreshed if needed to clear at least 10 trials per leg. Legs: 2-leg paired ablation, A current basic_flash trunk, B timeout-aware retry plus a strategy-switch checkpoint that routes to toolchain triage, parser or CLI-shape discovery, or ML sampling-loop recovery before max turns. Repetitions: paired-double. Run after runtime-component-label-audit so component attribution is valid.
--   **Depends on:** `timeout-recovery-hard-cluster-slice, runtime-component-label-audit`
 -   **Cost:** ~$5-10
 
 ### targeted-router-score-win-confirmation
@@ -82,7 +74,32 @@
 -   **Depends on:** `tb2-gemini3-model-baseline`, `timeout-aware-retry-on-needs-network`
 -   **Cost:** ~$4-7
 
+#### timeout-strategy-switch-checkpoint
+
+-   **Idea:** [`timeout-strategy-switch-checkpoint`](ideas.md#timeout-strategy-switch-checkpoint)
+-   **Hypothesis:** Timeout-aware retry needs a concrete recovery policy, not only background polling; forcing a cluster-specific strategy switch after the first timeout or repeated failed command should recover hard-cluster tasks where bare retry only shortened failures.
+-   **Plan:** Slice: the same c_build, regex_programming, and python_ml hard-cluster failure surface from timeout-recovery-hard-cluster-slice, refreshed if needed to clear at least 10 trials per leg. Legs: 2-leg paired ablation, A current basic_flash trunk, B timeout-aware retry plus a strategy-switch checkpoint that routes to toolchain triage, parser or CLI-shape discovery, or ML sampling-loop recovery before max turns. Repetitions: paired-double. Run after runtime-component-label-audit so component attribution is valid.
+-   **Depends on:** `timeout-recovery-hard-cluster-slice, runtime-component-label-audit`
+-   **Cost:** ~$5-10
+
+#### critic-score-outcome-consistency-check
+
+-   **Hypothesis:** Trial critiques that describe registry-passing reward-1.0 trials as failed make failure-mode summaries noisy; a deterministic score/outcome consistency check should keep pass-rate math and critic labels aligned before more postmortem automation depends on them.
+-   **Source:** lab-replan-roadmap@2026-04-26
+-   **Cost:** ~$0-2
+
 ## Done
+
+### runtime-component-label-audit
+
+-   **Idea:** [`runtime-component-label-audit`](ideas.md#runtime-component-label-audit)
+-   **Hypothesis:** A preflight or ingest validation that requires runtime-flag ablation legs to declare their expected component id will prevent component_perf undercounting and make future runtime experiments verdict-bearing.
+-   **Plan:** Implement metadata validation for runtime component labels, covering the basic_timeout_aware_retry path that left 14 mutation trials unlabeled in timeout-recovery-hard-cluster-slice. Re-ingest or repair the affected timeout-run metadata so cross-experiment attribution can count executor-bash-timeout-aware-retry before spending on more runtime ablations.
+-   **Depends on:** `timeout-recovery-hard-cluster-slice`
+-   **Cost:** ~$0-2
+
+-   **Ran:** [runs/experiments/runtime-component-label-audit-20260426-022341](../runs/experiments/runtime-component-label-audit-20260426-022341)
+-   **Outcome:** no_op: retry tied control at 3/6 passes; label repair made 14 timeout-aware trials measurable but showed zero decisive component wins.
 
 ### timeout-recovery-hard-cluster-slice
 
