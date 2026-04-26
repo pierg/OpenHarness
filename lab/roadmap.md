@@ -22,14 +22,6 @@
 -   **Depends on:** `tb2-gemini3-model-baseline`
 -   **Cost:** ~$5-10
 
-### targeted-router-score-win-confirmation
-
--   **Idea:** [`targeted-router-score-win-confirmation`](ideas.md#targeted-router-score-win-confirmation)
--   **Hypothesis:** A conservative router that escalates only the task families where the hard-cluster run had score-decided router wins can preserve flash's cheap baseline while testing whether the binary/retrieval/regex route signal is real rather than aggregate noise.
--   **Plan:** Slice: binary_analysis tasks, retrieval-heavy python_ml tasks, and regex-log-like regex_programming tasks from the router run plus sibling hard-cluster controls where router lost or tied; floor section 6 requires at least 10 trials per leg. Legs: 2-leg paired ablation, A basic_flash default, B conservative router with escalation limited to the score-win route surface. Repetitions: paired-double because only 3 score-decided router wins seeded the hypothesis. Control: fresh. Why first: add_branch evidence supports specialization, but the broad router lost aggregate score and cost discipline; validate the narrow route surface before spending on broader routing policy.
--   **Depends on:** `model-escalation-router-hard-clusters`
--   **Cost:** ~$8-15
-
 ### artifact-first-output-policy
 
 -   **Idea:** [`artifact-first-output-policy`](ideas.md#artifact-first-output-policy)
@@ -88,6 +80,12 @@
 -   **Source:** lab-replan-roadmap@2026-04-26
 -   **Cost:** ~$0-2
 
+#### targeted-router-cost-calibration
+
+-   **Hypothesis:** Targeted routing may be worth revisiting only with a route-cost threshold: the confirmation improved 8/24 vs 6/24 but most clusters tied while router cost rose sharply, so any next router run should calibrate escalation against cost per extra pass and include an easy-slice guardrail.
+-   **Source:** lab-replan-roadmap@2026-04-25
+-   **Cost:** ~$8-15
+
 ## Done
 
 ### runtime-component-label-audit
@@ -111,6 +109,17 @@
 
 -   **Ran:** [runs/experiments/timeout-recovery-hard-cluster-slice-20260426-003209](../runs/experiments/timeout-recovery-hard-cluster-slice-20260426-003209)
 -   **Outcome:** no_op: 0/14 passes in both legs; retry reduced cost/runtime but did not recover hard-cluster failures.
+
+### targeted-router-score-win-confirmation
+
+-   **Idea:** [`targeted-router-score-win-confirmation`](ideas.md#targeted-router-score-win-confirmation)
+-   **Hypothesis:** A conservative router that escalates only the task families where the hard-cluster run had score-decided router wins can preserve flash's cheap baseline while testing whether the binary/retrieval/regex route signal is real rather than aggregate noise.
+-   **Plan:** Slice: binary_analysis tasks, retrieval-heavy python_ml tasks, and regex-log-like regex_programming tasks from the router run plus sibling hard-cluster controls where router lost or tied; floor section 6 requires at least 10 trials per leg. Legs: 2-leg paired ablation, A basic_flash default, B conservative router with escalation limited to the score-win route surface. Repetitions: paired-double because only 3 score-decided router wins seeded the hypothesis. Control: fresh. Why first: add_branch evidence supports specialization, but the broad router lost aggregate score and cost discipline; validate the narrow route surface before spending on broader routing policy.
+-   **Depends on:** `model-escalation-router-hard-clusters`
+-   **Cost:** ~$8-15
+
+-   **Ran:** [runs/experiments/targeted-router-score-win-confirmation-20260425-224201](../runs/experiments/targeted-router-score-win-confirmation-20260425-224201)
+-   **Outcome:** no_op: targeted router improved pass rate 8/24 vs 6/24, but only one score-positive task and +96% $/pass; keep router calibration lower-confidence.
 
 ### model-escalation-router-hard-clusters
 
