@@ -1,5 +1,33 @@
 # Experiments
 
+## 2026-04-26 — runtime-component-label-audit
+
+-   **Type:** paired-ablation
+-   **Trunk at run-time:** [`trunk`](../src/openharness/agents/configs/trunk.yaml)
+-   **Hypothesis:** A preflight or ingest validation that requires runtime-flag ablation legs to declare their expected component id will prevent component_perf undercounting and make future runtime experiments verdict-bearing.
+-   **Run:** _(filled after the run completes)_
+-   **Branch:** `lab/runtime-component-label-audit`
+
+### Aggregate
+
+_(pending)_
+
+### Mutation impact
+
+_(pending)_
+
+### Failure modes
+
+_(pending)_
+
+### Tree effect
+
+_(pending)_
+
+### Linked follow-ups
+
+_(pending)_
+
 ## 2026-04-26 — timeout-recovery-hard-cluster-slice
 
 -   **Type:** paired-ablation
