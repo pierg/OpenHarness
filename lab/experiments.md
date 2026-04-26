@@ -91,7 +91,7 @@ The mutation produced a 0.0 percentage-point pass-rate delta: basic_flash passed
 -   **Trunk at run-time:** [`trunk`](../src/openharness/agents/configs/trunk.yaml)
 -   **Hypothesis:** A conservative router that escalates only the task families where the hard-cluster run had score-decided router wins can preserve flash's cheap baseline while testing whether the binary/retrieval/regex route signal is real rather than aggregate noise.
 -   **Run:** [`runs/experiments/targeted-router-score-win-confirmation-20260425-224201`](../runs/experiments/targeted-router-score-win-confirmation-20260425-224201)
--   **Branch:** `lab/targeted-router-score-win-confirmation`
+-   **Branch:** [`lab/targeted-router-score-win-confirmation`](https://github.com/pierg/OpenHarness/pull/50) — metadata-only merge (no_op: targeted-router score win confirmation produced no promotion-worthy improvement, so only metadata is merged.; discarded=`69cf1cf`)
 
 ### Aggregate
 | Leg | Agent | Trials | Passed | Failed | Pass rate | Cost (USD) |
