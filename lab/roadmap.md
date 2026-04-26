@@ -2,6 +2,34 @@
 
 ## Up next
 
+### runtime-component-label-audit
+
+-   **Idea:** [`runtime-component-label-audit`](ideas.md#runtime-component-label-audit)
+-   **Hypothesis:** A preflight or ingest validation that requires runtime-flag ablation legs to declare their expected component id will prevent component_perf undercounting and make future runtime experiments verdict-bearing.
+-   **Plan:** Implement metadata validation for runtime component labels, covering the basic_timeout_aware_retry path that left 14 mutation trials unlabeled in timeout-recovery-hard-cluster-slice. Re-ingest or repair the affected timeout-run metadata so cross-experiment attribution can count executor-bash-timeout-aware-retry before spending on more runtime ablations.
+-   **Depends on:** `timeout-recovery-hard-cluster-slice`
+-   **Cost:** ~$0-2
+
+### toolchain-fallback-playbooks-on-c-build
+
+-   **Idea:** [`toolchain-fallback-playbooks-on-c-build`](ideas.md#toolchain-fallback-playbooks-on-c-build)
+-   **Hypothesis:** C/build and bootstrap failures are not solved by more turns or generic loop guards; explicit toolchain fallback playbooks should reduce repeated failed commands on build-system and dependency-resolution tasks.
+-   **Slice:** `c_build` plus closely related network/toolchain/bootstrap failures where critiques logged `repeated_failed_command`, `wrong_tool_family`, or `timeout_no_recovery`. Use the prior `c_build` failures first and expand with task-feature matches until floor §6 clears at at least 10 trials per leg.
+-   **Legs:** 2-leg paired ablation. Leg A: chosen trunk `basic` after `tb2-gemini3-model-baseline`. Leg B: same trunk plus toolchain fallback playbooks. One axis only: build/toolchain playbook guidance on or off.
+-   **Repetitions:** `paired-double`.
+-   **Control:** `fresh`.
+-   **Why second:** `c_build` is one of the clearest low-pass, repeated-failure clusters across completed runs, and the timeout-recovery hard-cluster run showed bare retry still leaves toolchain loops unresolved.
+-   **Depends on:** `tb2-gemini3-model-baseline`
+-   **Cost:** ~$5-10
+
+### timeout-strategy-switch-checkpoint
+
+-   **Idea:** [`timeout-strategy-switch-checkpoint`](ideas.md#timeout-strategy-switch-checkpoint)
+-   **Hypothesis:** Timeout-aware retry needs a concrete recovery policy, not only background polling; forcing a cluster-specific strategy switch after the first timeout or repeated failed command should recover hard-cluster tasks where bare retry only shortened failures.
+-   **Plan:** Slice: the same c_build, regex_programming, and python_ml hard-cluster failure surface from timeout-recovery-hard-cluster-slice, refreshed if needed to clear at least 10 trials per leg. Legs: 2-leg paired ablation, A current basic_flash trunk, B timeout-aware retry plus a strategy-switch checkpoint that routes to toolchain triage, parser or CLI-shape discovery, or ML sampling-loop recovery before max turns. Repetitions: paired-double. Run after runtime-component-label-audit so component attribution is valid.
+-   **Depends on:** `timeout-recovery-hard-cluster-slice, runtime-component-label-audit`
+-   **Cost:** ~$5-10
+
 ### targeted-router-score-win-confirmation
 
 -   **Idea:** [`targeted-router-score-win-confirmation`](ideas.md#targeted-router-score-win-confirmation)
@@ -9,14 +37,6 @@
 -   **Plan:** Slice: binary_analysis tasks, retrieval-heavy python_ml tasks, and regex-log-like regex_programming tasks from the router run plus sibling hard-cluster controls where router lost or tied; floor section 6 requires at least 10 trials per leg. Legs: 2-leg paired ablation, A basic_flash default, B conservative router with escalation limited to the score-win route surface. Repetitions: paired-double because only 3 score-decided router wins seeded the hypothesis. Control: fresh. Why first: add_branch evidence supports specialization, but the broad router lost aggregate score and cost discipline; validate the narrow route surface before spending on broader routing policy.
 -   **Depends on:** `model-escalation-router-hard-clusters`
 -   **Cost:** ~$8-15
-
-### timeout-recovery-hard-cluster-slice
-
--   **Idea:** [`timeout-recovery-hard-cluster-slice`](ideas.md#timeout-recovery-hard-cluster-slice)
--   **Hypothesis:** Timeout-aware recovery may be more valuable on the hard clusters exposed by the model-router run than on the original network-only smoke slice, because timeout_no_recovery dominated all-leg failures in c_build, regex_programming, and python_ml.
--   **Plan:** Slice: hard-cluster tasks from model-escalation-router-hard-clusters where all legs failed or timeout_no_recovery / repeated_failed_command dominated, with c_build, regex_programming, and python_ml represented separately; floor section 6 requires at least 10 trials per leg. Legs: 2-leg paired ablation, A chosen basic_flash trunk, B same trunk plus executor timeout-aware retry / background polling. Repetitions: paired-double because timeout recovery is timing-sensitive. Control: fresh. Why second: the newest run found 50 timeout_no_recovery tags and 7 all-leg failures on hard clusters, so test the recovery mechanism on the failure surface that survived model escalation.
--   **Depends on:** `model-escalation-router-hard-clusters`
--   **Cost:** ~$5-10
 
 ### artifact-first-output-policy
 
@@ -42,7 +62,15 @@
 -   **Depends on:** `tb2-gemini3-model-baseline`
 -   **Cost:** ~$5-10
 
-### timeout-aware-retry-needs-network-confirmation
+### Suggested
+
+#### router-cheap-baseline-preservation-gate
+
+-   **Hypothesis:** If router work continues, it needs an explicit cheap-baseline preservation gate because the broad router cost nearly as much as pro while losing several flash/pro wins; stage this behind the narrow confirmation rather than making it the immediate next run.
+-   **Source:** lab-replan-roadmap@2026-04-25
+-   **Cost:** ~$8-15
+
+#### timeout-aware-retry-needs-network-confirmation
 
 -   **Idea:** [`timeout-aware-retry-needs-network-confirmation`](ideas.md#timeout-aware-retry-needs-network-confirmation)
 -   **Hypothesis:** The timeout-aware retry branch needs a verdict-bearing rerun on the intended network-dependent, high-env-complexity slice; the smoke run tied control at 2/4 passes per leg and is below the evidence floor, so the needs_network timeout hypothesis remains open.
@@ -54,27 +82,18 @@
 -   **Depends on:** `tb2-gemini3-model-baseline`, `timeout-aware-retry-on-needs-network`
 -   **Cost:** ~$4-7
 
-### toolchain-fallback-playbooks-on-c-build
+## Done
 
--   **Idea:** [`toolchain-fallback-playbooks-on-c-build`](ideas.md#toolchain-fallback-playbooks-on-c-build)
--   **Hypothesis:** C/build and bootstrap failures are not solved by more turns or generic loop guards; explicit toolchain fallback playbooks should reduce repeated failed commands on build-system and dependency-resolution tasks.
--   **Slice:** `c_build` plus closely related network/toolchain/bootstrap failures where critiques logged `repeated_failed_command`, `wrong_tool_family`, or `timeout_no_recovery`. Use the prior `c_build` failures first and expand with task-feature matches until floor §6 clears at at least 10 trials per leg.
--   **Legs:** 2-leg paired ablation. Leg A: chosen trunk `basic` after `tb2-gemini3-model-baseline`. Leg B: same trunk plus toolchain fallback playbooks. One axis only: build/toolchain playbook guidance on or off.
--   **Repetitions:** `paired-double`.
--   **Control:** `fresh`.
--   **Why fifth:** `c_build` is one of the clearest low-pass, repeated-failure clusters across completed runs, but the right trunk model should be chosen before building specialized playbooks around it.
--   **Depends on:** `tb2-gemini3-model-baseline`
+### timeout-recovery-hard-cluster-slice
+
+-   **Idea:** [`timeout-recovery-hard-cluster-slice`](ideas.md#timeout-recovery-hard-cluster-slice)
+-   **Hypothesis:** Timeout-aware recovery may be more valuable on the hard clusters exposed by the model-router run than on the original network-only smoke slice, because timeout_no_recovery dominated all-leg failures in c_build, regex_programming, and python_ml.
+-   **Plan:** Slice: hard-cluster tasks from model-escalation-router-hard-clusters where all legs failed or timeout_no_recovery / repeated_failed_command dominated, with c_build, regex_programming, and python_ml represented separately; floor section 6 requires at least 10 trials per leg. Legs: 2-leg paired ablation, A chosen basic_flash trunk, B same trunk plus executor timeout-aware retry / background polling. Repetitions: paired-double because timeout recovery is timing-sensitive. Control: fresh. Why second: the newest run found 50 timeout_no_recovery tags and 7 all-leg failures on hard clusters, so test the recovery mechanism on the failure surface that survived model escalation.
+-   **Depends on:** `model-escalation-router-hard-clusters`
 -   **Cost:** ~$5-10
 
-### Suggested
-
-#### router-cheap-baseline-preservation-gate
-
--   **Hypothesis:** If router work continues, it needs an explicit cheap-baseline preservation gate because the broad router cost nearly as much as pro while losing several flash/pro wins; stage this behind the narrow confirmation rather than making it the immediate next run.
--   **Source:** lab-replan-roadmap@2026-04-25
--   **Cost:** ~$8-15
-
-## Done
+-   **Ran:** [runs/experiments/timeout-recovery-hard-cluster-slice-20260426-003209](../runs/experiments/timeout-recovery-hard-cluster-slice-20260426-003209)
+-   **Outcome:** no_op: 0/14 passes in both legs; retry reduced cost/runtime but did not recover hard-cluster failures.
 
 ### model-escalation-router-hard-clusters
 

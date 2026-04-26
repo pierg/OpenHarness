@@ -1,5 +1,48 @@
 # Experiments
 
+## 2026-04-26 — timeout-recovery-hard-cluster-slice
+
+-   **Type:** paired-ablation
+-   **Trunk at run-time:** [`trunk`](../src/openharness/agents/configs/trunk.yaml)
+-   **Hypothesis:** Timeout-aware recovery may be more valuable on the hard clusters exposed by the model-router run than on the original network-only smoke slice, because timeout_no_recovery dominated all-leg failures in c_build, regex_programming, and python_ml.
+-   **Run:** [`runs/experiments/timeout-recovery-hard-cluster-slice-20260426-003209`](../runs/experiments/timeout-recovery-hard-cluster-slice-20260426-003209)
+-   **Branch:** [`lab/timeout-recovery-hard-cluster-slice`](https://github.com/pierg/OpenHarness/pull/47) — metadata-only merge (no_op: both legs passed 0/14; retry only reduced cost/runtime and did not recover hard-cluster failures.; discarded=`86482e0`)
+
+### Aggregate
+| Leg | Agent | Trials | Passed | Failed | Pass rate | Cost (USD) |
+|-----|-------|-------:|-------:|-------:|----------:|-----------:|
+| `basic_flash` | `basic` | 14 | 0 | 14 | 0.0% | $3.41 |
+| `basic_timeout_aware_retry` | `basic_timeout_aware_retry` | 14 | 0 | 14 | 0.0% | $2.50 |
+### Mutation impact
+The mutation produced a 0.0 percentage-point pass-rate delta: basic_flash passed 0/14 and basic_timeout_aware_retry also passed 0/14. It reduced cost by about $0.91 and median runtime by about 60.6s, with nominal tie-break wins on six of seven tasks, but every task still failed. The largest unchanged clusters were c_build tasks blocked by dependency/toolchain and turn-budget loops, regex_programming tasks blocked by brittle parsing or empty termination, and python_ml tasks blocked by slow iteration, PyStan argument loops, and CLI-shape mistakes. Causal hypothesis: timeout awareness shortened some failing trajectories but did not add a concrete recovery policy before max turns, so it saved spend without improving correctness.
+### Failure modes
+-   **turn-budget-or-timeout** (×32): Normalized anti-pattern tags repeatedly cite timeout_no_recovery, turn_budget_exhausted, exhausted-budget, max-turns-exceeded, or slow iteration. This dominated c_build, rstan-to-pystan, and sam-cell-seg failures.
+-   **brittle-parser-or-argument-assumption** (×5): filter-js-from-html used regex HTML parsing that missed XSS vectors, and sam-cell-seg used positional CLI arguments where hidden tests expected named flags.
+-   **premature-empty-termination** (×5): regex-chess had empty or immediate give-up responses in multiple trials, and one retry trial for rstan-to-pystan terminated with only a stray closing brace after gathering context.
+-   **dependency-toolchain-loop** (×3): Build and ML trials repeatedly stalled around missing compilers, Coq/CompCert setup, MIPS cross-compiler discovery, or PyStan environment details instead of reaching a verified deliverable.
+-   **insufficient-or-misdirected-testing** (×3): Agents relied on manual checks or local scratch tests and missed the verifier's real edge cases, especially filter-js-from-html and sam-cell-seg.
+-   **repeated-failed-command-loop** (×2): Several trials kept guessing URLs, package/tool invocations, or PyStan sampling arguments without switching to a more reliable strategy before the turn budget expired.
+### Tree effect
+-   **Verdict:** **No-op** — recorded for trend analysis
+-   **Target:** `basic_timeout_aware_retry`
+-   **Pair:** trunk leg `basic_flash` vs mutation `basic_timeout_aware_retry`
+-   **Δ pass-rate:** +0.00 pp
+-   **Confidence:** 0.00
+-   **Rationale:** Inconclusive: Δ pass-rate = +0.0pp (trunk 0.0% vs mutation 0.0%); 0 positive cluster(s) (threshold 2); no cost data.
+-   **Evidence:** [`experiment-critic.json`](../runs/experiments/timeout-recovery-hard-cluster-slice-20260426-003209/critic/experiment-critic.json), [`comparisons`](../runs/experiments/timeout-recovery-hard-cluster-slice-20260426-003209/critic/comparisons), [`critic_summary.md`](../runs/experiments/timeout-recovery-hard-cluster-slice-20260426-003209/results/critic_summary.md)
+
+| Cluster | trunk pass | mut pass | Δ pp |
+|---------|-----------:|---------:|-----:|
+| `c_build` | 0/6 | 0/6 | +0.0 |
+| `python_ml` | 0/4 | 0/4 | +0.0 |
+| `regex_programming` | 0/4 | 0/4 | +0.0 |
+### Linked follow-ups
+
+-   **roadmap** `runtime-component-label-audit`: queued at the top of `## Up next` because this run left 14 `basic_timeout_aware_retry` mutation trials without component attribution, blocking reliable `component_perf` evidence.
+-   **roadmap** `toolchain-fallback-playbooks-on-c-build`: promoted near the top because the hard-cluster slice still failed on dependency/toolchain loops and turn-budget exhaustion after bare timeout retry.
+-   **roadmap** `timeout-strategy-switch-checkpoint`: queued behind the label audit and c_build playbook work because timeout recovery needs an explicit strategy switch after timeouts or repeated failed commands, not only background polling.
+-   **roadmap** `timeout-aware-retry-needs-network-confirmation`: demoted to `### Suggested` because the bare retry branch now has only an under-powered network smoke and a 0/14 hard-cluster no-op.
+
 ## 2026-04-25 — model-escalation-router-hard-clusters
 
 -   **Type:** paired-ablation
