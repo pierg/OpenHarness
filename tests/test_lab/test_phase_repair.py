@@ -22,7 +22,9 @@ to fail-then-succeed and asserts the second invocation got
 from __future__ import annotations
 
 import importlib
+import json
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -364,6 +366,90 @@ def test_process_entry_retries_timed_out_run_when_summary_lands_late(
     rec = ps.load("alpha").get("run")
     assert rec.status == "ok"
     assert rec.failure_count == 0
+
+
+def test_phase_finalize_retries_unmerged_finalize_json(
+    isolated_lab: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A stale ``merged: false`` contract must not short-circuit repairs."""
+    import openharness.lab.phase_state as ps
+    import openharness.lab.runner as runner
+    importlib.reload(runner)
+
+    worktree = isolated_lab / "worktree"
+    worktree.mkdir()
+    ps.mark_ok("alpha", "preflight", payload={
+        "worktree": str(worktree),
+        "branch": "lab/alpha",
+        "base_sha": "abc",
+        "base_branch": "main",
+    })
+    ps.mark_ok("alpha", "run", payload={
+        "instance_id": "alpha-20260426-000000",
+        "lab_commits": ["1111111"],
+        "trunk_at_runtime": "trunk",
+    })
+    ps.mark_ok("alpha", "critique", payload={
+        "instance_id": "alpha-20260426-000000",
+        "verdict_kind": "no_op",
+        "verdict_target": "basic_retry",
+        "verdict_rationale": "no_op after inconclusive slice",
+    })
+    ps.mark_ok("alpha", "replan", payload={"lab_commits": ["2222222"]})
+    ps.mark_failed(
+        "alpha",
+        "finalize",
+        error="finalize did not merge the experiment outcome back to main",
+    )
+    finalize_path = ps.slug_dir("alpha") / "finalize.json"
+    finalize_path.write_text(json.dumps({
+        "merged": False,
+        "reason": "previous PR creation failed",
+    }))
+
+    spawned: list[list[str]] = []
+
+    def _fake_run(skill: str, args: list[str], **_kwargs: object) -> object:
+        spawned.append([skill, *args])
+        finalize_path.write_text(json.dumps({
+            "merged": True,
+            "cleanup_worktree": False,
+            "pr_url": "https://github.com/pierg/OpenHarness/pull/99",
+            "discarded_sha": "deadbeef",
+        }))
+        return SimpleNamespace(
+            ok=True,
+            exit_code=0,
+            last_message="OK; merged",
+            log_path=isolated_lab / "spawn.log",
+        )
+
+    merged: list[dict[str, object]] = []
+    monkeypatch.setattr(runner.codex_adapter, "run", _fake_run)
+    monkeypatch.setattr(runner, "_fast_forward_parent_main", lambda: None)
+    monkeypatch.setattr(runner.labtree, "mark_diff_merged", lambda **kw: merged.append(kw))
+    monkeypatch.setattr(runner.preflight_mod, "remove_worktree", lambda _slug: None)
+
+    result = runner._phase_finalize(
+        runner.RoadmapEntry(slug="alpha", body="", idea_id="idea", hypothesis="h"),
+        ps.load("alpha"),
+        runner.OrchestratorConfig(once=True),
+    )
+
+    assert result is None
+    assert len(spawned) == 1
+    assert spawned[0][0] == "lab-finalize-pr"
+    assert "--repair-attempt=2" in spawned[0]
+    assert any(
+        path.name.startswith("finalize.unmerged-")
+        for path in ps.slug_dir("alpha").iterdir()
+    )
+    rec = ps.load("alpha").get("finalize")
+    assert rec.status == "ok"
+    assert rec.payload["merged"] is True
+    assert rec.failure_count == 0
+    assert merged[0]["pr_url"] == "https://github.com/pierg/OpenHarness/pull/99"
 
 
 def test_process_entry_pauses_after_requested_phase(
