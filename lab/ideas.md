@@ -98,6 +98,18 @@
 -   **Sketch:** Run timeout-aware recovery on a hard-cluster slice rather than only needs_network tasks, with c_build, regex_programming, and python_ml represented separately. Measure decisive wins plus reductions in timeout_no_recovery and repeated_failed_command.
 -   **Auto-proposed by:** cross-experiment-critic@2026-04-25
 
+#### runtime-component-label-audit
+
+-   **Motivation:** The timeout-recovery-hard-cluster-slice mutation leg is named basic_timeout_aware_retry but its 14 trials have empty components_active, so cross-experiment component_perf cannot count those active hard-cluster attempts.
+-   **Sketch:** Add a preflight or ingest validation that runtime-flag ablation legs declare the expected component id, and fail or repair metadata before critique. Re-ingest the affected timeout run after the label path is fixed so future cross-experiment passes can measure the component rather than treating it as unlabeled control.
+-   **Auto-proposed by:** cross-experiment-critic@2026-04-26
+
+#### timeout-strategy-switch-checkpoint
+
+-   **Motivation:** The hard-cluster timeout-aware retry run went 0/14 while only lowering cost and median runtime, with failures still dominated by turn-budget, toolchain, parser, and premature-stop loops.
+-   **Sketch:** Extend timeout-aware retry with a forced strategy-switch checkpoint after the first timeout or repeated failed command: choose a task-specific recovery playbook such as toolchain triage, parser edge-case tests, or CLI-shape discovery before spending more turns. Test it against the same c_build, regex_programming, and python_ml hard-cluster slice with at least 10 trials per side.
+-   **Auto-proposed by:** cross-experiment-critic@2026-04-26
+
 ## Proposed
 
 ### Architecture

@@ -38,7 +38,10 @@ The mutation produced a 0.0 percentage-point pass-rate delta: basic_flash passed
 | `regex_programming` | 0/4 | 0/4 | +0.0 |
 ### Linked follow-ups
 
-_(pending)_
+-   **roadmap** `runtime-component-label-audit`: queued at the top of `## Up next` because this run left 14 `basic_timeout_aware_retry` mutation trials without component attribution, blocking reliable `component_perf` evidence.
+-   **roadmap** `toolchain-fallback-playbooks-on-c-build`: promoted near the top because the hard-cluster slice still failed on dependency/toolchain loops and turn-budget exhaustion after bare timeout retry.
+-   **roadmap** `timeout-strategy-switch-checkpoint`: queued behind the label audit and c_build playbook work because timeout recovery needs an explicit strategy switch after timeouts or repeated failed commands, not only background polling.
+-   **roadmap** `timeout-aware-retry-needs-network-confirmation`: demoted to `### Suggested` because the bare retry branch now has only an under-powered network smoke and a 0/14 hard-cluster no-op.
 
 ## 2026-04-25 — model-escalation-router-hard-clusters
 
