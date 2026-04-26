@@ -728,6 +728,43 @@ def _fast_forward_parent_main() -> None:
     )
 
 
+def _archive_unmerged_finalize_json(slug: str, finalize_path: Path) -> Path:
+    """Move a stale failed finalize contract aside before a retry.
+
+    ``finalize.json`` is reusable only when it records ``merged: true``.
+    A previous failed finalize may have written ``merged: false``; keeping
+    that file in place makes the next tick reuse the failure instead of
+    spending its repair attempt on the merge.
+    """
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    archive_path = finalize_path.with_name(f"finalize.unmerged-{stamp}.json")
+    suffix = 1
+    while archive_path.exists():
+        archive_path = finalize_path.with_name(
+            f"finalize.unmerged-{stamp}.{suffix}.json",
+        )
+        suffix += 1
+    finalize_path.replace(archive_path)
+    logger.warning(
+        "archived unmerged finalize.json for %s at %s before retry",
+        slug,
+        archive_path,
+    )
+    return archive_path
+
+
+def _load_reusable_finalize_json(slug: str, finalize_path: Path) -> dict[str, object] | None:
+    """Return existing finalize data only if it already completed the merge."""
+    if not finalize_path.is_file():
+        return None
+    finalize_data = json.loads(finalize_path.read_text())
+    if finalize_data.get("merged"):
+        logger.info("merged finalize.json already present for %s; reusing", slug)
+        return finalize_data
+    _archive_unmerged_finalize_json(slug, finalize_path)
+    return None
+
+
 # ----- phase 0: preflight ---------------------------------------------------
 
 
@@ -1394,12 +1431,11 @@ def _phase_finalize(
     phase_state.mark_running(entry.slug, "finalize")
 
     finalize_path = phase_state.slug_dir(entry.slug) / "finalize.json"
-    if finalize_path.is_file():
-        # Resume after a crash that already produced finalize.json:
-        # the operator should not get billed for another spawn.
-        finalize_data = json.loads(finalize_path.read_text())
-        logger.info("finalize.json already present for %s; reusing", entry.slug)
-    else:
+    # Resume after a crash that already produced a successful contract:
+    # the operator should not get billed for another spawn. A failed
+    # contract is archived and retried so the repair budget can work.
+    finalize_data = _load_reusable_finalize_json(entry.slug, finalize_path)
+    if finalize_data is None:
         repair_args = _repair_args(entry.slug, "finalize", state)
         res = codex_adapter.run(
             "lab-finalize-pr",
@@ -1433,7 +1469,7 @@ def _phase_finalize(
             # Best-effort recovery: synthesize a minimal record so we
             # don't loop forever.
             finalize_data = {
-                "cleanup_worktree": verdict_kind in ("reject", "noop"),
+                "cleanup_worktree": verdict_kind in ("reject", "no_op", "noop"),
                 "reason": "(finalize skill returned OK without writing finalize.json)",
             }
             finalize_path.write_text(json.dumps(finalize_data, indent=2))
