@@ -1,5 +1,33 @@
 # Experiments
 
+## 2026-04-26 — timeout-recovery-hard-cluster-slice
+
+-   **Type:** paired-ablation
+-   **Trunk at run-time:** [`trunk`](../src/openharness/agents/configs/trunk.yaml)
+-   **Hypothesis:** Timeout-aware recovery may be more valuable on the hard clusters exposed by the model-router run than on the original network-only smoke slice, because timeout_no_recovery dominated all-leg failures in c_build, regex_programming, and python_ml.
+-   **Run:** _(filled after the run completes)_
+-   **Branch:** `lab/timeout-recovery-hard-cluster-slice`
+
+### Aggregate
+
+_(pending)_
+
+### Mutation impact
+
+_(pending)_
+
+### Failure modes
+
+_(pending)_
+
+### Tree effect
+
+_(pending)_
+
+### Linked follow-ups
+
+_(pending)_
+
 ## 2026-04-25 — model-escalation-router-hard-clusters
 
 -   **Type:** paired-ablation
