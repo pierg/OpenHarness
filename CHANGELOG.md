@@ -75,6 +75,9 @@ ideas, experiments, and components.
 
 ### Upstream Integration
 
+- Integrated upstream `HKUDS/OpenHarness` `main` through `1325770` (`2026-04-27`), covering plugin security hardening, sandbox fail-closed behavior for unsupported Docker domain policies, OpenAI-compatible `<think>` stream filtering (including split tags), and safer shell subprocess stdin defaults.
+- Integration approach: Mixed (targeted cherry-pick + manual conflict resolution). Adapted `src/openharness/plugins/loader.py`, `src/openharness/commands/registry.py`, and `tests/test_utils/test_shell.py` so upstream hardening works with this fork's existing plugin trust-gating and platform-specific PTY behavior.
+- Deferred: plugin tool-import deferral commit `1325770` (upstream SHA) as-is because this fork does not yet carry the full plugin-tool loading path expected by that change; remaining upstream commits after `9caf700` are intentionally queued for a later broader sync to avoid pulling autopilot/dashboard and other large subsystems in the same patch.
 - Integrated upstream `HKUDS/OpenHarness` `main` through `9caf700` (`2026-04-15`), covering secure default channel allowlists, profile materialization for base_url resolution, and openai_compat format support.
 - Integration approach: Mixed (merge + manual port). Adapted `src/openharness/ui/runtime.py` and `src/openharness/api/factory.py` so upstream profile and format improvements work with the fork's centralized client factory.
 
