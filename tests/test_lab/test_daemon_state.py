@@ -525,8 +525,7 @@ def client(isolated_lab: Path):
     )
     (isolated_lab / "lab" / "experiments.md").write_text("# Experiments\n")
     (isolated_lab / "lab" / "components.md").write_text("# Components\n")
-    (isolated_lab / "lab" / "trunk.yaml").write_text("trunk: []\n")
-    (isolated_lab / "lab" / "configs.md").write_text("# Configs\n\n## Trunk\n\n## Branches\n")
+    (isolated_lab / "lab" / "configs.md").write_text("# Configs\n\n## Current best\n\n")
 
     app = create_app()
     return TestClient(app)
@@ -627,7 +626,7 @@ def test_log_endpoint_returns_tail(client, isolated_lab: Path) -> None:
     """
     logs_dir = isolated_lab / "runs" / "lab" / "logs"
     logs_dir.mkdir(parents=True, exist_ok=True)
-    log_name = "20260422T184348Z__lab-run-experiment__abcdef012345.log"
+    log_name = "20260422T184348Z__lab-implement-variant__abcdef012345.log"
     (logs_dir / log_name).write_text(
         "# spawn_id: abcdef012345\n"
         "# --- codex stderr --- #\n"
@@ -655,7 +654,7 @@ def test_log_endpoint_rejects_path_traversal(client) -> None:
 
 def test_log_endpoint_404s_on_missing_file(client) -> None:
     """A well-formed but non-existent log basename → 404, not 500."""
-    name = "20991231T235959Z__lab-run-experiment__deadbeef0000.log"
+    name = "20991231T235959Z__lab-implement-variant__deadbeef0000.log"
     resp = client.get(f"/_hx/daemon-log/{name}")
     assert resp.status_code == 404
 
@@ -967,8 +966,8 @@ def test_active_spawn_endpoint_falls_back_to_newest_log(
     """With no active tick, the panel renders the newest spawn log."""
     logs_dir = isolated_lab / "runs" / "lab" / "logs"
     logs_dir.mkdir(parents=True, exist_ok=True)
-    older = logs_dir / "20260101T000000Z__lab-run-experiment__aaaaaaaaaaaa.log"
-    newer = logs_dir / "20260202T000000Z__lab-run-experiment__bbbbbbbbbbbb.log"
+    older = logs_dir / "20260101T000000Z__lab-implement-variant__aaaaaaaaaaaa.log"
+    newer = logs_dir / "20260202T000000Z__lab-implement-variant__bbbbbbbbbbbb.log"
     older.write_text("OLD\n")
     newer.write_text("NEWEST_SPAWN_OUTPUT\n")
     # Ensure mtime ordering matches name ordering, regardless of host.
@@ -992,9 +991,9 @@ def test_active_spawn_endpoint_prefers_active_tick_log(
 
     logs_dir = isolated_lab / "runs" / "lab" / "logs"
     logs_dir.mkdir(parents=True, exist_ok=True)
-    bystander = logs_dir / "20260202T000000Z__lab-run-experiment__bbbbbbbbbbbb.log"
+    bystander = logs_dir / "20260202T000000Z__lab-implement-variant__bbbbbbbbbbbb.log"
     bystander.write_text("BYSTANDER\n")
-    active = logs_dir / "20260202T000005Z__lab-run-experiment__cccccccccccc.log"
+    active = logs_dir / "20260202T000005Z__lab-implement-variant__cccccccccccc.log"
     active.write_text("ACTIVE_SPAWN_OUTPUT\n")
 
     with ds.mutate(actor="t") as st:

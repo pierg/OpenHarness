@@ -1,8 +1,7 @@
 """Deterministic Phase 3 — launch the experiment and wait for results.
 
-Replaces the launch-and-poll responsibility that lived inside the old
-``lab-run-experiment`` codex skill. There is no LLM judgment in this
-phase: by the time the orchestrator gets here, every input has been
+There is no LLM judgment in this phase: by the time the orchestrator
+gets here, every input has been
 decided by earlier phases (preflight chose the worktree; implement
 wrote the experiment YAML and validated it).
 

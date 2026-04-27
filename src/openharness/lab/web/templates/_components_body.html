@@ -1,7 +1,7 @@
 {# Body of /components. Loaded standalone via /_hx/components-body when
    a command emits ``lab-components-changed``. #}
 {% set status_options = [
-  "proposed", "experimental", "branch", "validated", "rejected", "superseded"
+  "proposed", "experimental", "validated", "rejected", "superseded"
 ] %}
 {% for kind, entries in catalog.by_kind.items() %}
 <section class="bg-white border border-slate-200 rounded-lg p-5 mb-6">

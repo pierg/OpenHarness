@@ -93,7 +93,7 @@ def test_upsert_bumps_status_forward_only(lab_root: Path) -> None:
     cdoc.upsert(
         component_id="planner-executor",
         kind="Architecture",
-        status="branch",
+        status="validated",
         lab_root=lab_root,
     )
     cdoc.upsert(
@@ -103,7 +103,7 @@ def test_upsert_bumps_status_forward_only(lab_root: Path) -> None:
         lab_root=lab_root,
     )
     e = cdoc.read_catalog(lab_root=lab_root).find("planner-executor")
-    assert e is not None and e.status == "branch"
+    assert e is not None and e.status == "validated"
 
 
 def test_upsert_refuses_kind_change(lab_root: Path) -> None:

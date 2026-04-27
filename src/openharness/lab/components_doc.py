@@ -11,10 +11,10 @@ Each entry is one ingredient that can be combined into an agent config:
   from the architecture they live in.
 - ``Model``: the underlying LLM SKU.
 
-The status lattice is
-``proposed → experimental → branch → validated`` (forward-only via auto
-bumps from `tree.apply_diff`), with two terminal states ``rejected``
-and ``superseded`` reachable via explicit human / verdict gestures.
+The status lattice is ``proposed → experimental → validated``
+(forward-only via auto bumps from decision application), with two
+terminal states ``rejected`` and ``superseded`` reachable via explicit
+human / verdict gestures.
 
 Markdown is the source of truth. Helpers here are read-then-write
 idempotent: re-applying the same upsert produces the same bytes.
@@ -51,7 +51,6 @@ CATALOG_KINDS: tuple[str, ...] = (
 STATUS_ORDER: tuple[str, ...] = (
     "proposed",
     "experimental",
-    "branch",
     "validated",
 )
 TERMINAL_STATUSES: frozenset[str] = frozenset({"rejected", "superseded"})
@@ -165,7 +164,7 @@ def upsert(
     """Insert or update a component entry. Bumps status forward only.
 
     Status transitions:
-      - ``proposed`` → ``experimental`` → ``branch`` → ``validated`` (forward only).
+      - ``proposed`` → ``experimental`` → ``validated`` (forward only).
       - Terminal states (``rejected`` / ``superseded``) override anything,
         but a terminal entry will not be auto-bumped back to a non-terminal
         state — that requires a manual ``set-status``.

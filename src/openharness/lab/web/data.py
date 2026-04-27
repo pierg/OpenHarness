@@ -53,7 +53,7 @@ from openharness.lab.web.models import (
     TaskClusterRow,
     TaskFeatureView,
     TaskLeaderboardRow,
-    TreeDiffRow,
+    DecisionRow,
     TreeVizNode,
     TrialCritique,
     TrialDetail,
@@ -778,7 +778,7 @@ class LabReader:
         cells = {(t.task_name, t.leg_id): t for t in trials}
         return tasks, legs, cells
 
-    # ---- tree / components / trunk_changes ------------------------------
+    # ---- config state / components / current-best history ----------------
 
     def tree(self) -> TreeSnapshot:
         return tree_snapshot()
@@ -818,8 +818,8 @@ class LabReader:
         Mirrors the resolution order in
         :func:`openharness.lab.cli._lookup_instance_for_slug` so the
         web UI's "Preview verdict" button finds the same instance the
-        ``uv run lab tree apply <slug>`` CLI would. Read-only — the
-        whole call uses the LabReader's read-only DuckDB connection.
+        ``uv run lab decision apply <slug>`` CLI would. Read-only —
+        the whole call uses the LabReader's read-only DuckDB connection.
         """
 
         if not self._db_available:
@@ -866,11 +866,10 @@ class LabReader:
     def experiments_without_diff(self, limit: int = 20) -> list[ExperimentSummary]:
         """Recent experiments that have no row in ``tree_diffs``.
 
-        These are the typical "rescue" candidates for the
-        ``tree apply`` button: the daemon either failed at the verdict
-        step or the run was started by hand and never had a verdict
-        computed. Sorted newest-first so the most relevant ones bubble
-        up.
+        These are the typical "rescue" candidates for the decision
+        apply button: the daemon either failed at the verdict step or
+        the run was started by hand and never had a verdict computed.
+        Sorted newest-first so the most relevant ones bubble up.
         """
 
         # Reuses ``experiments()`` (which already joins in ``verdict``)
@@ -880,13 +879,13 @@ class LabReader:
         return [e for e in self.experiments(limit=None) if e.verdict is None][:limit]
 
     def preview_diff(self, slug: str) -> dict[str, object] | None:
-        """Recompute the TreeDiff for ``slug`` without applying it.
+        """Load the experiment decision for ``slug`` without applying it.
 
         Returns ``None`` when the slug doesn't resolve to any known
         instance, so the caller can render a clear "unknown experiment"
-        message rather than a confusing empty diff. The diff itself is
-        the dict form (``TreeDiff.to_dict()``) so templates don't need
-        to import the tree_ops dataclass.
+        message rather than a confusing empty decision. The decision
+        itself is returned as a dict so templates don't need to import
+        the tree_ops dataclass.
         """
 
         from openharness.lab import tree_ops as _tree_ops
@@ -894,7 +893,10 @@ class LabReader:
         instance_id = self.resolve_slug(slug)
         if instance_id is None:
             return None
-        diff = _tree_ops.evaluate(instance_id, db_conn=self._conn)
+        try:
+            diff = _tree_ops.load_decision(instance_id, db_conn=self._conn)
+        except (FileNotFoundError, ValueError):
+            return None
         out = diff.to_dict()
         # Echo the slug + resolved instance_id so the template doesn't
         # need to thread them in separately.
@@ -904,7 +906,7 @@ class LabReader:
 
     def tree_diffs(
         self, *, applied: bool | None = None, kind: str | None = None, limit: int = 100
-    ) -> list[TreeDiffRow]:
+    ) -> list[DecisionRow]:
         if not self._db_available:
             return []
         sql = "SELECT * FROM tree_diffs WHERE 1=1"
@@ -1293,7 +1295,7 @@ class LabReader:
     def pr_states(
         self,
         *,
-        kinds: tuple[str, ...] = ("add_branch", "graduate", "reject", "no_op"),
+        kinds: tuple[str, ...] = ("accept", "reject", "no_op"),
     ) -> list[PRStateRow]:
         """Snapshot of every experiment PR known to the lab.
 
@@ -1460,14 +1462,20 @@ class LabReader:
         Folds together ``runs/lab/web_commands.jsonl`` (web commands),
         ``daemon_state.history`` (tick outcomes), DuckDB ``spawns``
         (codex skill spawns), DuckDB ``tree_diffs`` (verdicts), and
-        DuckDB ``trunk_changes`` (trunk swaps).
+        DuckDB ``trunk_changes`` (current-best history).
 
         Sorted newest-first. ``kinds`` filters by row type.
         """
         from openharness.lab import daemon_state as _ds
         from openharness.lab.web import commands as _labcmd
 
-        wanted = set(kinds) if kinds else {"cmd", "tick", "spawn", "verdict", "trunk-swap"}
+        wanted = set(kinds) if kinds else {
+            "cmd",
+            "tick",
+            "spawn",
+            "verdict",
+            "current-best",
+        }
         out: list[ActivityLogEntry] = []
 
         if "cmd" in wanted:
@@ -1542,14 +1550,14 @@ class LabReader:
                     )
                 )
 
-        if "trunk-swap" in wanted:
+        if "current-best" in wanted:
             for tc in self.trunk_history(limit=limit):
                 out.append(
                     ActivityLogEntry(
                         at_ts=tc.at_ts,
-                        kind="trunk-swap",
+                        kind="current-best",
                         actor=tc.applied_by,
-                        title=f"trunk → {tc.to_id}",
+                        title=f"current best → {tc.to_id}",
                         detail=(f"from {tc.from_id}" if tc.from_id else "initial"),
                         instance_id=tc.instance_id,
                         href=(f"/runs/{tc.instance_id}" if tc.instance_id else None),
@@ -1617,8 +1625,9 @@ class LabReader:
 
         For each task-cluster, computes ``leg_a_pass_rate -
         leg_b_pass_rate`` for every ordered pair (legA, legB).
-        ``warning`` fires when the per-cluster sample is below the
-        methodology's "minimum power" floor — see METHODOLOGY.md §5.
+        ``warning`` fires when the per-cluster sample is small enough
+        that the row should be treated as suggestive rather than
+        decision-grade evidence.
         """
         cells = self.cells_for_instance(instance_id)
         if not cells:
@@ -1662,23 +1671,12 @@ class LabReader:
         nodes: list[TreeVizNode] = []
         nodes.append(
             TreeVizNode(
-                node_id=snapshot.trunk_id,
-                role="trunk",
-                mutation="(trunk)",
-                sketch=snapshot.trunk_anchor,
+                node_id=snapshot.current_best_id,
+                role="current_best",
+                mutation="(current best)",
+                sketch=snapshot.current_best_anchor,
             )
         )
-        for b in snapshot.branches:
-            nodes.append(
-                TreeVizNode(
-                    node_id=b.branch_id,
-                    role="branch",
-                    mutation=b.mutation,
-                    use_when=b.use_when,
-                    last_verified=b.last_verified,
-                    pr=prs_by_branch.get(b.branch_id),
-                )
-            )
         for r in snapshot.rejected:
             nodes.append(
                 TreeVizNode(
@@ -1953,7 +1951,7 @@ def _parse_roadmap(
     return up_next, suggested, done
 
 
-_IDEAS_TOP_SECTIONS = ("Proposed", "Trying", "Graduated", "Rejected", "Auto-proposed")
+_IDEAS_TOP_SECTIONS = ("Proposed", "Trying", "Accepted", "Rejected", "Auto-proposed")
 _THEME_RE = re.compile(r"^### (.+)\s*$", re.MULTILINE)
 _IDEA_HEADING_RE = re.compile(r"^#### (\S+)\s*\n", re.MULTILINE)
 
@@ -2111,8 +2109,8 @@ def _row_to_usage(r: dict[str, object]) -> UsageSummaryRow:
     )
 
 
-def _row_to_diff(r: dict[str, object]) -> TreeDiffRow:
-    return TreeDiffRow(
+def _row_to_diff(r: dict[str, object]) -> DecisionRow:
+    return DecisionRow(
         instance_id=str(r["instance_id"]),
         slug=str(r.get("slug") or ""),
         kind=str(r.get("kind") or ""),

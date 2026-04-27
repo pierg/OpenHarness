@@ -74,12 +74,8 @@ from openharness.lab.web.markdown import render, rewrite_href
         # route exists for them; an external GitHub link is out of scope
         # for this slice).
         (
-            "../src/openharness/agents/configs/trunk.yaml",
-            "../src/openharness/agents/configs/trunk.yaml",
-        ),
-        (
-            "../.agents/skills/lab-graduate-component/SKILL.md",
-            "../.agents/skills/lab-graduate-component/SKILL.md",
+            "../src/openharness/agents/configs/basic.yaml",
+            "../src/openharness/agents/configs/basic.yaml",
         ),
     ],
 )

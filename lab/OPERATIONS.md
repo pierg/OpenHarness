@@ -2,9 +2,9 @@
 
 Operating guide for the autonomous lab loop.
 
-## The loop
+## The Loop
 
-The daemon runs a resumable **7-phase** pipeline per roadmap slug:
+The daemon runs a resumable 7-phase pipeline per roadmap slug:
 
 1. `preflight`
 2. `design`
@@ -17,20 +17,19 @@ The daemon runs a resumable **7-phase** pipeline per roadmap slug:
 Per-slug state lives in `runs/lab/state/<slug>/phases.json`. A restart
 resumes from the first unfinished phase.
 
-## Core architecture
+## Core Architecture
 
 - parent repo starts on synced `main`
 - preflight creates worktree branch `lab/<slug>`
 - all durable experiment edits live on that worktree branch
-- critique materializes the verdict on the branch
+- critique writes the structured experiment decision to the branch
 - replan writes the roadmap/idea consequences on the branch
-- finalize creates 1 or more PR artifacts and merges them back to `main`
+- finalize creates PR artifact(s) and merges the outcome back to `main`
 - only after that merge does the daemon pick the next roadmap entry
 
-There is no normal "open PR now, wait for a later tick to merge it"
-mode, and there is no normal human `graduate confirm` gate.
+There is no separate human promotion gate in the normal autonomous path.
 
-## Phase ownership
+## Phase Ownership
 
 | Phase | Owner | Output |
 |------|-------|--------|
@@ -38,11 +37,11 @@ mode, and there is no normal human `graduate confirm` gate.
 | `design` | `lab-design-variant` | `runs/lab/state/<slug>/design.md` |
 | `implement` | `lab-implement-variant` | worktree commits + `implement.json` |
 | `run` | deterministic Python | `runs/experiments/<instance-id>/...` + journal stub |
-| `critique` | deterministic Python + Gemini trial critics + Codex aggregate critics | branch-local tree verdict + journal narrative |
+| `critique` | deterministic Python + Gemini trial critics + Codex aggregate critic | branch-local decision + journal narrative |
 | `replan` | `lab-replan-roadmap` | branch-local roadmap/ideas updates + `replan.json` |
 | `finalize` | `lab-finalize-pr` | merged PR outcome + `finalize.json` |
 
-## Important commands
+## Important Commands
 
 Status:
 
@@ -78,11 +77,11 @@ uv run lab preflight list
 uv run lab preflight remove <slug>
 ```
 
-## File ownership
+## File Ownership
 
 | Surface | Human | Daemon / skills |
 |---------|-------|------------------|
-| `lab/ideas.md > ## Proposed / Trying / Graduated / Rejected` | yes | no |
+| `lab/ideas.md > ## Proposed / Trying / Accepted / Rejected` | yes | no |
 | `lab/ideas.md > ## Auto-proposed` | review / promote / reject | yes |
 | `lab/roadmap.md > ## Up next` | yes | yes, during `replan` |
 | `lab/roadmap.md > ## Up next > ### Suggested` | yes | yes |
@@ -90,17 +89,16 @@ uv run lab preflight remove <slug>
 | `lab/experiments.md` | no manual close-out editing | yes |
 | `lab/configs.md` | rare manual repair only | critique/finalize flow |
 | `lab/components.md` | rare manual repair only | critique/finalize flow |
-| `src/openharness/agents/configs/trunk.yaml` | rare manual repair only | critique/finalize flow |
 
-## Finalize rules
+## Finalize Rules
 
-- `add_branch` / `graduate`: merge accepted code + `lab/` changes
+- `accept`: merge accepted code + `lab/` changes
 - `reject` / `no_op`: merge metadata-only `lab/` changes, keep
   rejected implementation out of `main`, record discarded SHA
 
 Finalize must not return success without a merged PR outcome.
 
-## Portable runs via GCS
+## Portable Runs via GCS
 
 Use GCS as a mirror for portable artifacts, not as a mirror of the
 entire `runs/` tree.
@@ -138,7 +136,7 @@ Optional daemon auto-push:
 export OPENHARNESS_RUNS_GCS_AUTO_PUSH=1
 ```
 
-## What to inspect when stuck
+## What To Inspect When Stuck
 
 1. `uv run lab phases show <slug>`
 2. newest file in `runs/lab/logs/`
@@ -149,9 +147,9 @@ Interpretation:
 
 - `design` / `implement` / `replan` / `finalize` failures are usually skill failures
 - `run` failures are usually execution/infrastructure
-- `critique` failures are usually ingest/data/Gemini trial-critic issues
+- `critique` failures are usually ingest/data/Gemini trial-critic or experiment-critic issues
 
-## Critic model policy
+## Critic Model Policy
 
 - `trial-critic` runs through Gemini CLI from
   `critic/trial-evidence.json`; default model is
@@ -161,9 +159,3 @@ Interpretation:
 - Judgment-heavy phases stay on Codex `gpt-5.5` with `xhigh`
   reasoning: experiment critic, cross-experiment critic, replan,
   finalize, design, and implement.
-
-## Legacy notes
-
-`lab graduate confirm` and the old staged-graduate workflow remain only
-for historical cleanup. They are not part of the normal autonomous
-path anymore.

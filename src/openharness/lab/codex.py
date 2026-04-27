@@ -230,7 +230,7 @@ class SkillProfile:
 #
 # Scope: this table covers ONLY skills the orchestrator
 # (`runner.py`) invokes through this adapter. Human-driven skills
-# (`lab-propose-idea`, `lab-graduate-component`) live in the same
+# (`lab-propose-idea`) live in the same
 # `.agents/skills/` tree but are invoked from Cursor against its
 # own model — they never go through `codex exec`, so giving them a
 # profile here would be misleading. The current orchestrator-side
@@ -240,11 +240,8 @@ class SkillProfile:
 #   lab-finalize-pr, trial-critic, task-features, experiment-critic,
 #   cross-experiment-critic
 #
-# (The deprecated `lab-run-experiment` skill is no longer invoked by
-# the daemon — its responsibilities were split across the deterministic
-# `runner._process_entry_phased` plus the three new `lab-*-variant`
-# skills, with the actual run-kickoff moved into
-# `phase_run.run_experiment`.)
+# Run kickoff is deterministic in `phase_run.run_experiment`; no
+# run-phase Codex skill is registered here.
 #
 # Design philosophy: the human optimizes for SIGNAL DENSITY, not
 # throughput or token cost. The lab runs overnight; an extra hour
@@ -409,10 +406,6 @@ SKILL_PROFILES: dict[str, SkillProfile] = {
     #     (cross-experiment-critic and lab-replan-roadmap may write
     #     into ## Auto-proposed directly via `uv run lab idea
     #     auto-propose`, not via this skill.)
-    #   - lab-graduate-component: legacy / human-driven only. The
-    #     refactored daemon graduates by merging the experiment PR;
-    #     this skill remains as a compatibility escape hatch for old
-    #     staged rows.
     #   - lab-operator: a Cursor-side meta-skill that drives
     #     `uv run lab daemon ...`; never invoked from the loop.
 }

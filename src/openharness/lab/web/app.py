@@ -919,11 +919,11 @@ def create_app() -> FastAPI:
             _close_reader(request, reader)
             raise
 
-    @app.get("/_hx/tree-preview", response_class=HTMLResponse)
-    def hx_tree_preview(request: Request, slug: str) -> HTMLResponse:
-        # Recompute the TreeDiff for ``slug`` without applying it. Used
-        # by the "Preview verdict" buttons on /tree and the experiment
-        # detail page so an operator can see exactly what `tree apply`
+    @app.get("/_hx/decision-preview", response_class=HTMLResponse)
+    def hx_decision_preview(request: Request, slug: str) -> HTMLResponse:
+        # Load the experiment decision for ``slug`` without applying it.
+        # Used by the "Preview decision" buttons on /tree and the experiment
+        # detail page so an operator can see exactly what `decision apply`
         # is about to do before clicking through.
         reader = _reader_ctx(request)
         try:
@@ -1169,7 +1169,7 @@ def create_app() -> FastAPI:
         limit: int = 200,
     ) -> HTMLResponse:
         # Unified activity log: web_commands.jsonl + tick history +
-        # spawn finishes + verdicts + trunk swaps. Filters narrow by
+        # spawn finishes + verdicts + current-best changes. Filters narrow by
         # row kind, actor, or slug; the fields the operator clicks on
         # are pre-computed into ``ActivityLogEntry.href``.
         reader = _reader_ctx(request)
@@ -1402,13 +1402,7 @@ def _status_color(status: str | None) -> str:
 
 def _verdict_color(kind: str | None, applied: bool = True) -> str:
     k = (kind or "").lower()
-    if k == "graduate":
-        return (
-            "border-amber-400 bg-amber-50 text-amber-900"
-            if not applied
-            else "border-amber-300 bg-amber-100 text-amber-900"
-        )
-    if k == "add_branch":
+    if k == "accept":
         return "border-emerald-300 bg-emerald-50 text-emerald-900"
     if k == "reject":
         return "border-rose-300 bg-rose-50 text-rose-900"

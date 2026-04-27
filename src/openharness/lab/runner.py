@@ -41,11 +41,11 @@ Phases, in order:
         - ``uv run lab ingest`` → DuckDB.
         - Fan out ``trial-critic`` and ``task-features`` spawns.
         - Run ``experiment-critic`` once all trial critiques land.
-        - ``ingest-critiques``, ``journal_synth.synthesize``,
-          ``tree_ops.evaluate`` + ``tree.apply_diff`` on the
-          worktree copy of ``lab/``.
-        - The verdict (AddBranch / Graduate / Reject / NoOp) is
-          recorded in ``phases.json`` so phase 5 can read it.
+        - ``ingest-critiques``, ``journal_synth.synthesize``, then
+          load the structured ``experiment-critic`` decision and apply
+          it to the worktree copy of ``lab/``.
+        - The decision (accept / reject / no_op) is recorded in
+          ``phases.json`` so phase 5 can read it.
 
     5. replan (codex spawn ``lab-replan-roadmap``)
         - Deep postmortem over the finished run + verdict + current
@@ -62,8 +62,8 @@ Phases, in order:
           ``main`` as needed, create 1 or 2 PR artifacts, and merge
           the experiment outcome back to ``main`` before the loop
           advances.
-        - ``add_branch`` / ``graduate`` merge the experiment branch
-          itself. ``reject`` / ``noop`` merge a metadata-only branch
+        - ``accept`` merges the experiment branch itself. ``reject`` /
+          ``noop`` merge a metadata-only branch
           while recording the discarded implementation SHA.
         - After merge, this module fast-forwards the parent repo's
           ``main`` checkout and deletes the worktree.
@@ -1029,11 +1029,11 @@ def _phase_run(
     lab_root = _worktree_lab_root(worktree)
     run_payload: dict[str, object] = {}
 
-    # Determine the trunk for the journal header. We re-resolve it
-    # at run-time rather than design-time so a graduate that landed
-    # while we were waiting in earlier phases is reflected.
+    # Determine the current best for the journal header. We re-resolve
+    # it at run-time rather than design-time so accepted experiments
+    # that landed while this entry was queued are reflected.
     snap = lab_docs.tree_snapshot()
-    trunk_id = snap.trunk_id or "unknown"
+    trunk_id = snap.current_best_id or "unknown"
 
     # Decide journal entry type. Baselines are broad-sweep; everything
     # else defaults to paired-ablation. The implement payload may
@@ -1251,7 +1251,7 @@ def _phase_critique(
         ", ".join(f"{k}={v}" for k, v in cache_counts.items() if v),
     )
 
-    # Journal narrative + tree apply (deterministic).
+    # Journal narrative + experiment-critic decision.
     try:
         sections = journal_synth.synthesize(
             slug=entry.slug,
@@ -1262,29 +1262,28 @@ def _phase_critique(
     except Exception:
         logger.exception("journal synthesize failed for %s", entry.slug)
 
-    diff: tree_ops.TreeDiff | None = None
+    decision: tree_ops.ExperimentDecision | None = None
     verdict_kind = "unknown"
     verdict_target: str | None = None
     verdict_branch_applied = False
     try:
-        diff = tree_ops.evaluate(summary.instance_id)
-        result = labtree.apply_diff(
+        decision = tree_ops.load_decision(summary.instance_id, run_dir=run_dir)
+        result = labtree.apply_decision(
             slug=entry.slug,
-            diff=diff,
+            decision=decision,
             applied_by="auto:critique",
             lab_root=lab_root,
-            repo_root=worktree,
             mark_applied=False,
         )
-        verdict_kind = diff.kind
-        verdict_target = diff.target_id
+        verdict_kind = decision.kind
+        verdict_target = decision.target_id
         verdict_branch_applied = result.applied
         logger.info(
-            "tree apply %s: kind=%s branch_applied=%s target=%s",
-            entry.slug, diff.kind, result.applied, diff.target_id,
+            "decision apply %s: kind=%s branch_applied=%s target=%s",
+            entry.slug, decision.kind, result.applied, decision.target_id,
         )
     except Exception:
-        logger.exception("tree apply failed for %s", entry.slug)
+        logger.exception("decision apply failed for %s", entry.slug)
 
     _append_commit(
         critique_payload,
@@ -1293,7 +1292,7 @@ def _phase_critique(
             slug=entry.slug,
             phase="critique",
             summary=f"verdict={verdict_kind} branch_applied={verdict_branch_applied}",
-            paths=("lab/", "src/openharness/agents/configs/trunk.yaml"),
+            paths=("lab/",),
         ),
     )
 
@@ -1302,10 +1301,10 @@ def _phase_critique(
         "verdict_kind": verdict_kind,
         "verdict_target": verdict_target,
         "verdict_branch_applied": verdict_branch_applied,
-        "verdict_rationale": diff.rationale if diff else None,
-        "verdict_confidence": diff.confidence if diff else None,
-        "use_when": diff.use_when if diff else None,
-        "cluster_evidence": diff.cluster_evidence if diff else [],
+        "verdict_rationale": decision.rationale if decision else None,
+        "verdict_confidence": decision.confidence if decision else None,
+        "promotability_notes": decision.promotability_notes if decision else None,
+        "cluster_evidence": decision.cluster_evidence if decision else [],
     })
     phase_state.mark_ok(entry.slug, "critique", payload=critique_payload)
     gcs_sync.maybe_auto_push(

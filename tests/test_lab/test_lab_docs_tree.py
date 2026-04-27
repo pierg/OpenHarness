@@ -1,10 +1,10 @@
-"""Tests for the new tree-shaped helpers in `lab_docs`.
+"""Tests for config-state helpers in `lab_docs`.
 
 Covers:
 - `set_section` / `get_section` round-trip on a stub journal entry.
 - `append_journal_entry` produces the canonical 5-section shell.
-- `tree_snapshot` parses Trunk + Branches + Rejected.
-- `add_branch` / `add_rejected` / `set_trunk` are idempotent.
+- `tree_snapshot` parses Current best + Rejected.
+- `add_rejected` / `set_current_best` are idempotent.
 - `add_suggested_followup` and `promote_suggested` round-trip.
 """
 
@@ -89,14 +89,14 @@ def test_set_section_inserts_in_canonical_order(lab_root: Path) -> None:
     )
     lab_docs.set_section(
         slug="x", section="Tree effect",
-        body="-   **Verdict:** add_branch",
+        body="-   **Verdict:** accept",
         lab_root=lab_root,
     )
     body = lab_docs.get_section(
         slug="x", section="Tree effect", lab_root=lab_root
     )
     assert body is not None
-    assert "**Verdict:** add_branch" in body
+    assert "**Verdict:** accept" in body
 
 
 def test_set_section_replaces_existing(lab_root: Path) -> None:
@@ -130,43 +130,21 @@ def test_set_section_missing_entry_raises(lab_root: Path) -> None:
 
 def test_tree_snapshot_bootstraps_empty_skeleton(lab_root: Path) -> None:
     snap = lab_docs.tree_snapshot(lab_root=lab_root)
-    assert snap.trunk_id == "basic"
+    assert snap.current_best_id == "basic"
     assert snap.branches == []
     assert snap.rejected == []
 
 
-def test_set_trunk_then_snapshot_roundtrips(lab_root: Path) -> None:
-    lab_docs.set_trunk(
-        trunk_id="planner_executor",
+def test_set_current_best_then_snapshot_roundtrips(lab_root: Path) -> None:
+    lab_docs.set_current_best(
+        agent_id="planner_executor",
         reason="best on multi-file tasks",
         journal_link="[`x`](experiments.md#x)",
         lab_root=lab_root,
     )
     snap = lab_docs.tree_snapshot(lab_root=lab_root)
-    assert snap.trunk_id == "planner_executor"
-    assert snap.trunk_anchor and "best on multi-file tasks" in snap.trunk_anchor
-
-
-def test_add_branch_is_idempotent(lab_root: Path) -> None:
-    lab_docs.add_branch(
-        branch_id="planner_executor",
-        mutation="adds explicit planner subagent",
-        use_when="task_features.category=multi_file",
-        last_verified="2026-04-18",
-        lab_root=lab_root,
-    )
-    lab_docs.add_branch(
-        branch_id="planner_executor",
-        mutation="REVISED mutation text",
-        use_when="task_features.category=multi_file",
-        last_verified="2026-04-19",
-        lab_root=lab_root,
-    )
-    snap = lab_docs.tree_snapshot(lab_root=lab_root)
-    assert len(snap.branches) == 1
-    assert snap.branches[0].branch_id == "planner_executor"
-    assert snap.branches[0].mutation == "REVISED mutation text"
-    assert snap.branches[0].last_verified == "2026-04-19"
+    assert snap.current_best_id == "planner_executor"
+    assert snap.current_best_anchor and "best on multi-file tasks" in snap.current_best_anchor
 
 
 def test_add_rejected_appears_in_snapshot(lab_root: Path) -> None:

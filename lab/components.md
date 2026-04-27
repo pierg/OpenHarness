@@ -5,8 +5,8 @@
 | ID | Status | Description | Used by | Evidence |
 |----|--------|-------------|---------|----------|
 | `single-loop` | validated | one model, one tool budget, no subagents and no scratchpad | `basic` | [tb2-baseline-full-sweep](experiments.md#2026-04-17--tb2-baseline-full-sweep) |
-| `planner-executor` | branch | planner subagent emits a plan; executor carries it out in the same env | `planner_executor` | [tb2-baseline-full-sweep](experiments.md#2026-04-17--tb2-baseline-full-sweep) (wins on security_certificates, system_administration, python_data) |
-| `react-loop` | branch | ReAct: thought → action → observation in a tight scratchpad-driven loop | `react` | [tb2-baseline-full-sweep](experiments.md#2026-04-17--tb2-baseline-full-sweep) (one positive cluster; needs targeted re-test) |
+| `planner-executor` | rejected | planner subagent emits a plan; executor carries it out in the same env | `planner_executor` | [tb2-baseline-full-sweep](experiments.md#2026-04-17--tb2-baseline-full-sweep) showed narrow cluster wins, but [planner-schema-guard-paired](experiments.md#2026-04-24--planner-schema-guard-paired) matched control on score. |
+| `react-loop` | rejected | ReAct: thought → action → observation in a tight scratchpad-driven loop | `react` | [tb2-baseline-full-sweep](experiments.md#2026-04-17--tb2-baseline-full-sweep) had one narrow positive cluster and no standing branch in the simplified lab. |
 | `reflection-loop` | rejected | worker + critic; critic reflects on each turn before the next | `reflection` | [tb2-baseline-full-sweep](experiments.md#2026-04-17--tb2-baseline-full-sweep) (≥500k input tokens / trial). Re-add gated on `context-compaction`. |
 
 ## Runtime

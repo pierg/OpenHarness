@@ -175,7 +175,7 @@ def test_idea_theme_vocabulary_locked() -> None:
 def test_component_status_vocabulary_locked() -> None:
     for ok in ["proposed", "experimental", "branch", "validated", "rejected", "superseded"]:
         assert labcmd._COMPONENT_STATUS.fullmatch(ok)
-    for bad in ["Proposed", "graduated", "promoted", ""]:
+    for bad in ["Proposed", "done", "promoted", ""]:
         assert not labcmd._COMPONENT_STATUS.fullmatch(bad)
 
 
@@ -409,7 +409,7 @@ def test_log_page_renders_filter_form_and_kind_pills() -> None:
     assert 'name="kind"' in body
     assert 'name="actor"' in body
     # The five activity kinds the unified log merges.
-    for kind in ("cmd", "tick", "spawn", "verdict", "trunk-swap"):
+    for kind in ("cmd", "tick", "spawn", "verdict", "current-best"):
         assert kind in body, f"kind '{kind}' missing from /log"
 
 
@@ -444,7 +444,7 @@ def test_tree_page_renders_with_pr_badge_template_available() -> None:
     r = _client().get("/tree")
     assert r.status_code == 200
     body = r.text
-    assert "Configuration tree" in body
+    assert "Configuration state" in body
     # Verdict workflow surface is part of the redesigned tree page.
     assert "Verdicts" in body
 

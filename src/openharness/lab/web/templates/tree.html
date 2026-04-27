@@ -1,9 +1,9 @@
 {% extends "base.html" %}
-{% block title %}Tree · OpenHarness lab{% endblock %}
-{% block crumbs %}<a href="/" class="hover:underline">Home</a> / Tree{% endblock %}
+{% block title %}Config · OpenHarness lab{% endblock %}
+{% block crumbs %}<a href="/" class="hover:underline">Home</a> / Config{% endblock %}
 {% block content %}
 <div class="flex flex-wrap items-baseline gap-3 mb-4">
-  <h1 class="text-xl font-semibold">Configuration tree</h1>
+  <h1 class="text-xl font-semibold">Configuration state</h1>
   {# Cross-links to the catalogs that the tree is composed from.
      These pages are also reachable from the sidebar's "More views"
      disclosure but having them inline here keeps the operator from
@@ -18,15 +18,15 @@
 </div>
 
 <section class="bg-white border border-emerald-300 rounded-lg p-5 mb-6">
-  <div class="text-xs text-emerald-700 font-semibold uppercase">Trunk</div>
-  <div class="font-mono text-lg mt-1">{{ snapshot.trunk_id }}</div>
-  {% if snapshot.trunk_anchor %}
-    <p class="text-sm text-slate-600 mt-2"><strong>Why:</strong> {{ snapshot.trunk_anchor }}</p>
+  <div class="text-xs text-emerald-700 font-semibold uppercase">Current best</div>
+  <div class="font-mono text-lg mt-1">{{ snapshot.current_best_id }}</div>
+  {% if snapshot.current_best_anchor %}
+    <p class="text-sm text-slate-600 mt-2"><strong>Why:</strong> {{ snapshot.current_best_anchor }}</p>
   {% endif %}
 </section>
 
-{# Verdict workflow surface: lets an admin preview + apply tree
-   diffs without dropping to the CLI. Re-fetches itself on
+{# Verdict workflow surface: lets an admin preview + apply decisions
+   without dropping to the CLI. Re-fetches itself on
    ``lab-tree-changed`` so applying a verdict immediately reflects in
    the lists below. #}
 <section id="tree-verdict-panel"
@@ -42,7 +42,7 @@
   </div>
 
   {# Container the preview button swaps into. #}
-  <div id="tree-diff-preview" class="mb-4 empty:hidden"></div>
+  <div id="decision-preview" class="mb-4 empty:hidden"></div>
 
   {% if pending_merge %}
     <div class="mb-4">
@@ -59,8 +59,8 @@
               </div>
               {% if d.rationale %}<p class="text-xs text-slate-600 mt-1 line-clamp-2">{{ d.rationale }}</p>{% endif %}
             </div>
-            <button hx-get="/_hx/tree-preview?slug={{ d.slug or d.instance_id }}"
-                    hx-target="#tree-diff-preview" hx-swap="innerHTML"
+            <button hx-get="/_hx/decision-preview?slug={{ d.slug or d.instance_id }}"
+                    hx-target="#decision-preview" hx-swap="innerHTML"
                     class="text-xs bg-white border border-slate-300 hover:border-slate-500 rounded px-2.5 py-1">
               Preview verdict
             </button>
@@ -88,8 +88,8 @@
                 {% if e.pass_rate_pct is not none %}· {{ '{:.0f}%'.format(e.pass_rate_pct) }} pass{% endif %}
               </p>
             </div>
-            <button hx-get="/_hx/tree-preview?slug={{ e.instance_id }}"
-                    hx-target="#tree-diff-preview" hx-swap="innerHTML"
+            <button hx-get="/_hx/decision-preview?slug={{ e.instance_id }}"
+                    hx-target="#decision-preview" hx-swap="innerHTML"
                     class="text-xs bg-white border border-slate-300 hover:border-slate-500 rounded px-2.5 py-1">
               Preview verdict
             </button>
@@ -113,8 +113,8 @@
             {% set pr = pr_by_slug.get(d.slug) or pr_by_instance.get(d.instance_id) %}
             {% include "_pr_badge.html" with context %}
             {% if d.applied_at %}<span class="text-slate-400 ml-auto">{{ fmt_dt(d.applied_at) }}</span>{% endif %}
-            <button hx-get="/_hx/tree-preview?slug={{ d.slug or d.instance_id }}"
-                    hx-target="#tree-diff-preview" hx-swap="innerHTML"
+            <button hx-get="/_hx/decision-preview?slug={{ d.slug or d.instance_id }}"
+                    hx-target="#decision-preview" hx-swap="innerHTML"
                     class="text-xs underline text-slate-500 hover:text-slate-800">re-evaluate</button>
           </li>
         {% endfor %}
@@ -125,42 +125,12 @@
   {% if not pending_merge and not pending_eval and not recent_diffs %}
     <p class="text-sm text-slate-500 italic">
       No verdicts yet. Run an experiment, then return here once it's
-      ingested to preview and apply its <code>tree apply</code> diff.
+      ingested to preview and apply its decision.
     </p>
   {% endif %}
 </section>
 
 <div id="cmd-result" class="mb-4"></div>
-
-<section class="bg-white border border-slate-200 rounded-lg p-5 mb-6">
-  <h2 class="font-semibold mb-3">Branches ({{ snapshot.branches|length }})</h2>
-  {% if snapshot.branches %}
-    <div class="-mx-5 px-5 overflow-x-auto">
-    <table class="w-full text-sm min-w-[640px]">
-      <thead>
-        <tr class="text-xs uppercase text-slate-500 border-b border-slate-200 text-left">
-          <th class="py-2">ID</th>
-          <th>Mutation</th>
-          <th>Use when</th>
-          <th>Last verified</th>
-        </tr>
-      </thead>
-      <tbody>
-        {% for b in snapshot.branches %}
-          <tr class="border-b border-slate-100">
-            <td class="py-2 font-mono text-xs">{{ b.branch_id }}</td>
-            <td>{{ b.mutation }}</td>
-            <td class="text-slate-600">{{ b.use_when }}</td>
-            <td class="text-xs text-slate-500">{{ b.last_verified or "—" }}</td>
-          </tr>
-        {% endfor %}
-      </tbody>
-    </table>
-    </div>
-  {% else %}
-    <p class="text-sm text-slate-500">No branches yet.</p>
-  {% endif %}
-</section>
 
 <section class="bg-white border border-slate-200 rounded-lg p-5 mb-6">
   <h2 class="font-semibold mb-3">Rejected ({{ snapshot.rejected|length }})</h2>
@@ -219,7 +189,7 @@
 </section>
 
 <section class="bg-white border border-slate-200 rounded-lg p-5">
-  <h2 class="font-semibold mb-3">Trunk swap history</h2>
+  <h2 class="font-semibold mb-3">Current best history</h2>
   {% if trunk_history %}
     <ul class="text-sm space-y-3">
       {% for h in trunk_history %}

@@ -6,19 +6,19 @@
 
 -   **Motivation:** Once loop-guard lands as a runtime atom on trunk, the same mechanism is more likely to help on planner_executor (which adds a planning hop that can also stall) than on basic alone. Composition test, not yet runnable.
 -   **Sketch:** Paired ablation on planner_executor only: leg A current YAML; leg B same YAML with loop-guard runtime atom enabled. Run on the three positive clusters from the planner_executor branch (security_certificates, system_administration, python_data) plus a same-size negative-cluster control.
--   **Auto-proposed by:** lab-reflect-and-plan@2026-04-18
+-   **Auto-proposed by:** legacy-reflect-and-plan@2026-04-18
 
 #### tool-result-summariser-paired
 
 -   **Motivation:** Sibling of context-compaction but cheaper to test in isolation: rather than truncating raw tool stdout, inject an LLM-generated short summary of any tool result above K tokens before the next turn. Could rescue reflection (currently rejected) without the brittle line-count heuristic of context-compaction.
 -   **Sketch:** Implement behind an AgentConfig flag (off by default). Paired ablation on basic (cheapest harness) with the flag on/off on a slice biased toward tasks where tool stdout exceeded 50 lines in tb2-baseline-full-sweep. Re-test on reflection only if the basic ablation is positive.
--   **Auto-proposed by:** lab-reflect-and-plan@2026-04-18
+-   **Auto-proposed by:** legacy-reflect-and-plan@2026-04-18
 
 #### artifact-first-output-policy
 
 -   **Motivation:** 15 trials in extended-budget-paired-on-trunk made partial progress but never wrote the required output artifact, so the run spent budget without producing the thing the verifier actually scores.
 -   **Sketch:** Add a runtime or prompt policy that creates or updates the required output artifact early and forces a verifier-aware recheck before more analysis. Test it first with a paired ablation on file-output-heavy tasks such as db-wal-recovery, password-recovery, and write-compressor.
--   **Auto-proposed by:** lab-reflect-and-plan@2026-04-23
+-   **Auto-proposed by:** legacy-reflect-and-plan@2026-04-23
 
 #### loop-guard-on-creates-new-file
 
@@ -113,7 +113,7 @@
 #### component-catalog-registration-gate
 
 -   **Motivation:** [medium confidence: 32 unknown_id misconfiguration rows] Components can be present in trials.components_active while still being flagged as unknown_id, with planner-schema-guard and executor-bash-timeout-aware-retry both affected.
--   **Sketch:** Add a preflight or ingest gate that requires every active component id to resolve against the component catalog before the run becomes verdict-bearing. If a branch-local component is intentionally experimental, register it deterministically during tree apply or mark it with an explicit experimental catalog entry.
+-   **Sketch:** Add a preflight or ingest gate that requires every active component id to resolve against the component catalog before the run becomes verdict-bearing. If a branch-local component is intentionally experimental, register it deterministically during decision apply or mark it with an explicit experimental catalog entry.
 -   **Auto-proposed by:** cross-experiment-critic@2026-04-26
 
 #### critic-score-outcome-consistency-check
@@ -197,27 +197,27 @@
 
 #### cluster-combined-slice-shape
 
--   **Motivation:** `tb2` clusters are tiny (42 of 56 categories have n=1; only `python_data` and `python_ml` clear the §6 floor as single-cluster slices at `n_attempts=1`). The current `cluster: <names>` shape silently treats multi-cluster lists as separate slices when it should treat them as one combined slice, making cluster-based confirmations awkward.
--   **Sketch:** Add `cluster_combined: <names>` to `## Slice` shapes (METHODOLOGY §2). Spec-side, this resolves to a single `task_filter:` over the union; verdict-side, `tree_ops.evaluate` reports both per-cluster Δpp (current behaviour) AND a combined Δpp on the union (new). Lets `planner-executor-cluster-confirmation` declare `cluster_combined: python_data, system_administration, security_certificates` and clear the floor at `n_attempts=2` (n=22/leg) without per-cluster gymnastics.
--   **Referenced from:** METHODOLOGY §2, Appendix B.
+-   **Motivation:** `tb2` clusters are tiny (42 of 56 categories have n=1; only `python_data` and `python_ml` are large enough to stand alone at `n_attempts=1`). The current `cluster: <names>` shape silently treats multi-cluster lists as separate slices when it should treat them as one combined slice, making cluster-based confirmations awkward.
+-   **Sketch:** Add `cluster_combined: <names>` to slice shapes. Spec-side, this resolves to a single `task_filter:` over the union; critic-side, report both per-cluster notes and a combined summary on the union. Lets `planner-executor-cluster-confirmation` declare `cluster_combined: python_data, system_administration, security_certificates` and reach n=22/leg without per-cluster gymnastics.
+-   **Referenced from:** methodology simplification follow-up.
 
 #### adaptive-repetitions
 
 -   **Motivation:** Blanket `paired-double` (n_attempts=2) doubles cost on every cell, even cells where leg A passes 1/1 and leg B passes 1/1 (no information gained from re-rolling). On cells where legs disagree (1/1 vs 0/1) or where pass-rate falls in [0.3, 0.7], a third or fourth re-roll is high-value.
 -   **Sketch:** Add a "phase 3.5" between `phase_run` and `phase_critique` that examines per-cell results from phase 3, identifies borderline cells per the rule above, and queues re-runs (capped by `max=k` from the spec) on just those cells. Target cost: ~1.2-1.4× single-shot vs 2× for paired-double. Implementation: extend the spec to declare `adaptive: max=3`; phase 3.5 runs `uv run exec <spec> --profile retop --tasks <list>`; ingest merges the new trials into the same `instance_id`.
--   **Referenced from:** METHODOLOGY §4.
+-   **Referenced from:** methodology simplification follow-up.
 
 #### historical-control-shape
 
 -   **Motivation:** Every experiment currently re-runs its control fresh. For runtime-flag ablations on byte-identical existing branches (e.g. `loop-guard` on `planner_executor`), the control trials already exist in `runs/lab/trials.duckdb` from a prior run. Borrowing them cuts spend ~50% AND wall-clock ~50% on those experiments.
--   **Sketch:** Add `control: historical: <instance_id>/<leg_id>` and `control: historical+replay: ...` modes to `## Slice` (METHODOLOGY §5). Implement phase blocks the run unless drift guards pass: control config hash, bench version pin, verifier hash, model pin (vendor + checkpoint), and `n_attempts` all byte-match. Trunk-graduation invalidates historical references to the old trunk (DB marks them stale; design phase rejects them). The `+replay` variant adds a third leg that re-runs the borrowed config on the slice to bound regression-to-the-mean noise (recommended for derived slices like `near-miss`).
--   **Referenced from:** METHODOLOGY §5.
+-   **Sketch:** Add `control: historical: <instance_id>/<leg_id>` and `control: historical+replay: ...` modes. Implement phase blocks the run unless drift guards pass: control config hash, bench version pin, verifier hash, model pin (vendor + checkpoint), and `n_attempts` all byte-match. Current-best changes invalidate historical references to the old baseline (DB marks them stale; design phase rejects them). The `+replay` variant adds a third leg that re-runs the borrowed config on the slice to bound regression-to-the-mean noise (recommended for derived slices like `near-miss`).
+-   **Referenced from:** methodology simplification follow-up.
 
-#### graduate-replication-gate
+#### accept-replication-gate
 
--   **Motivation:** A `Graduate` TreeDiff swaps trunk — the highest-stakes mutation in the lab. Today finalize can merge a graduate outcome after one verdict, so one lucky run could land a regressing config on trunk and contaminate downstream experiments.
--   **Sketch:** Add a finalize-time replication requirement for `graduate`: run one fresh replication on the same slice before merging the trunk swap, then require the second verdict to agree (`graduate` or runtime-admissible `add_branch` with Δ ≥ +3pp). Adds ~1× experiment cost per graduate, but graduates are rare and trunk integrity is worth it.
--   **Referenced from:** METHODOLOGY §7.
+-   **Motivation:** An `accept` decision updates the current best — the highest-stakes mutation in the lab. Today finalize can merge an accepted outcome after one run, so one lucky run could land a regressing config and contaminate downstream experiments.
+-   **Sketch:** Add a finalize-time replication option for accepted outcomes: run one fresh replication on the same slice before merging the current-best update, then require the second decision to agree. Adds ~1× experiment cost for rare high-stakes accepts.
+-   **Referenced from:** methodology simplification follow-up.
 
 ## Trying
 
@@ -226,7 +226,7 @@
 -   **Motivation:** The 30/8192 baseline sometimes hits the agent-phase timeout on heavier `build-*` and `git-*` tasks. Raising to 60/16384 might convert near-misses into passes.
 -   **Sketch:** Bump `defaults.max_turns` to 60 and `max_tokens` to 16384 in `experiments/tb2-baseline.yaml` (and matching agent configs).
 
-## Graduated
+## Accepted
 
 _(none)_
 

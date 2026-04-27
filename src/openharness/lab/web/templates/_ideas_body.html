@@ -1,14 +1,14 @@
 {# Body of /ideas. Loaded standalone via /_hx/ideas-body when a command
    emits ``lab-ideas-changed``. #}
-{% set sections = ["Proposed", "Trying", "Graduated", "Rejected", "Auto-proposed"] %}
+{% set sections = ["Proposed", "Trying", "Accepted", "Rejected", "Auto-proposed"] %}
 {# Move targets per current section. ``rejected`` is always available as a
    one-way exit; everything else respects the canonical lifecycle:
-   Proposed → Trying → Graduated. The CLI accepts moves in any direction
+   Proposed → Trying → Accepted. The CLI accepts moves in any direction
    so we offer a Reset-to-Proposed option for accidental advances. #}
 {% set move_targets = {
   "Proposed":      [("trying", "Try it"), ("rejected", "Reject")],
-  "Trying":        [("graduated", "Graduate"), ("proposed", "Reset"), ("rejected", "Reject")],
-  "Graduated":     [("trying", "Demote"), ("proposed", "Reset")],
+  "Trying":        [("accepted", "Accept"), ("proposed", "Reset"), ("rejected", "Reject")],
+  "Accepted":      [("trying", "Demote"), ("proposed", "Reset")],
   "Rejected":      [("proposed", "Re-open"), ("trying", "Try anyway")],
   "Auto-proposed": [("proposed", "Adopt"), ("rejected", "Discard")],
 } %}

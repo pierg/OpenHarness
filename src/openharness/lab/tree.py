@@ -1,28 +1,10 @@
-"""Apply-side of the tree: TreeDiff → branch files + DB cache lifecycle.
-
-`tree_ops.evaluate(instance_id)` produces a `TreeDiff`. This module
-turns that diff into actual edits:
-
-- During critique, the diff is materialized on the experiment branch:
-  `lab/configs.md`, `lab/components.md`, `lab/experiments.md`, and
-  for `graduate`, `src/openharness/agents/configs/trunk.yaml`.
-- The DB cache row in `tree_diffs` is written with `applied=false`
-  until finalize merges the experiment outcome back to `main`.
-- Finalize then calls :func:`mark_diff_merged` to flip the DB row to
-  `applied=true` and, for `graduate`, append the `trunk_changes`
-  audit row.
-
-Idempotent at the branch-file layer (re-applying a diff with the same
-slug rewrites the same sections) and at the DB layer (`upsert_tree_diff`
-+ `mark_diff_merged`).
-"""
+"""Apply experiment decisions to the lab markdown + DB cache."""
 
 from __future__ import annotations
 
 import json
-import shutil
 from dataclasses import dataclass
-from datetime import date, datetime, timezone
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -30,109 +12,59 @@ from openharness.lab import components_doc as cdoc
 from openharness.lab import db as labdb
 from openharness.lab import lab_docs
 from openharness.lab.paths import REPO_ROOT
-from openharness.lab.tree_ops import (
-    TreeDiff,
-    insert_trunk_change,
-    upsert_tree_diff,
-)
-
-def _agent_configs_dir(*, repo_root: Path | None = None) -> Path:
-    root = repo_root or REPO_ROOT
-    return root / "src" / "openharness" / "agents" / "configs"
-
-
-def _trunk_yaml(*, repo_root: Path | None = None) -> Path:
-    return _agent_configs_dir(repo_root=repo_root) / "trunk.yaml"
+from openharness.lab.tree_ops import ExperimentDecision, upsert_tree_diff
 
 
 @dataclass(slots=True)
 class ApplyResult:
     slug: str
-    diff: TreeDiff
+    diff: ExperimentDecision
     applied: bool
     applied_by: str
     journal_block_written: bool
     notes: list[str]
 
+    @property
+    def decision(self) -> ExperimentDecision:
+        return self.diff
 
-def apply_diff(
+
+def apply_decision(
     *,
     slug: str,
-    diff: TreeDiff,
+    decision: ExperimentDecision,
     applied_by: str = "auto:daemon",
-    today: date | None = None,
     lab_root: Path | None = None,
-    repo_root: Path | None = None,
     mark_applied: bool = False,
+    **_: object,
 ) -> ApplyResult:
-    """Apply a TreeDiff to the current checkout and upsert the DB row."""
-    today = today or date.today()
+    """Apply an experiment-critic decision to the current checkout."""
     notes: list[str] = []
     branch_applied = True
     lr = {"lab_root": lab_root} if lab_root is not None else {}
 
-    prev_trunk_id: str | None = None
-    if diff.kind == "graduate":
-        snap = lab_docs.tree_snapshot(**lr)
-        prev_trunk_id = snap.trunk_id
-        target_yaml = _agent_configs_dir(repo_root=repo_root) / f"{diff.target_id}.yaml"
-        trunk_yaml = _trunk_yaml(repo_root=repo_root)
-        if not target_yaml.is_file():
-            raise FileNotFoundError(
-                f"Cannot apply graduate `{diff.target_id}`: {target_yaml} not found."
-            )
-        shutil.copyfile(target_yaml, trunk_yaml)
-        notes.append(f"trunk.yaml ← copy of {target_yaml.name}")
+    if decision.kind == "accept":
         journal_link = f"[`{slug}`](experiments.md#{slug})"
-        lab_docs.set_trunk(
-            trunk_id=diff.target_id,
-            reason=diff.rationale[:200],
+        lab_docs.set_current_best(
+            agent_id=decision.target_id,
+            reason=decision.rationale[:200],
             journal_link=journal_link,
             **lr,
         )
-        notes.append(f"configs.md > ## Trunk now points at `{diff.target_id}`")
-        if prev_trunk_id and prev_trunk_id != diff.target_id:
-            try:
-                lab_docs.add_branch(
-                    branch_id=prev_trunk_id,
-                    mutation="(former trunk; preserved for history)",
-                    use_when="legacy trunk anchor",
-                    last_verified=today.isoformat(),
-                    **lr,
-                )
-                notes.append(f"former trunk `{prev_trunk_id}` archived as a branch")
-            except lab_docs.LabDocError as exc:
-                notes.append(f"could not archive former trunk: {exc}")
-
-    if diff.kind == "add_branch":
-        body_use_when = _format_use_when(diff.use_when)
-        lab_docs.add_branch(
-            branch_id=diff.target_id,
-            mutation=diff.rationale.split(";")[0][:120].strip() or "(see journal)",
-            use_when=body_use_when,
-            last_verified=today.isoformat(),
-            **lr,
-        )
-        notes.append(
-            f"appended branch `{diff.target_id}` to configs.md > ## Branches"
-        )
-    elif diff.kind == "reject":
-        evidence = ", ".join(str(p) for p in diff.evidence_paths[:2]) or "(see journal)"
+        notes.append(f"configs.md > ## Current best now points at `{decision.target_id}`")
+    elif decision.kind == "reject":
+        evidence = ", ".join(str(p) for p in decision.evidence_paths[:2]) or "(see journal)"
         lab_docs.add_rejected(
-            branch_id=diff.target_id,
-            reason=diff.rationale[:200],
+            branch_id=decision.target_id,
+            reason=decision.rationale[:200],
             evidence=evidence,
             **lr,
         )
-        notes.append(
-            f"appended `{diff.target_id}` to configs.md > ## Rejected"
-        )
-    elif diff.kind == "no_op":
-        notes.append("no_op: no tree mutation; recorded in journal only")
-    elif diff.kind == "graduate":
-        notes.append(f"applied graduate of `{diff.target_id}` on the experiment branch")
+        notes.append(f"appended `{decision.target_id}` to configs.md > ## Rejected")
+    else:
+        notes.append("no_op: no config mutation; recorded in journal only")
 
-    block = render_tree_effect_block(diff, slug=slug, applied=branch_applied)
+    block = render_decision_block(decision, slug=slug)
     try:
         lab_docs.set_section(slug=slug, section="Tree effect", body=block, **lr)
         journal_written = True
@@ -140,8 +72,7 @@ def apply_diff(
         notes.append(f"journal write skipped: {exc}")
         journal_written = False
 
-    bump_notes = _bump_components_for_diff(diff, lab_root=lab_root)
-    notes.extend(bump_notes)
+    notes.extend(_bump_components_for_decision(decision, lab_root=lab_root))
 
     applied_at = datetime.now(timezone.utc) if mark_applied else None
     try:
@@ -149,22 +80,29 @@ def apply_diff(
             upsert_tree_diff(
                 conn,
                 slug=slug,
-                diff=diff,
+                diff=decision,
                 applied=mark_applied,
                 applied_by=applied_by if mark_applied else "pending_finalize",
                 applied_at=applied_at,
             )
-    except Exception as exc:
+    except Exception as exc:  # best-effort cache; markdown is canonical
         notes.append(f"DB cache update skipped: {exc}")
 
     return ApplyResult(
         slug=slug,
-        diff=diff,
+        diff=decision,
         applied=branch_applied,
         applied_by=applied_by,
         journal_block_written=journal_written,
         notes=notes,
     )
+
+
+def apply_diff(**kwargs: Any) -> ApplyResult:
+    """Backward-compatible wrapper for callers still using `diff=`."""
+    if "decision" not in kwargs and "diff" in kwargs:
+        kwargs["decision"] = kwargs.pop("diff")
+    return apply_decision(**kwargs)
 
 
 def mark_diff_merged(
@@ -180,7 +118,8 @@ def mark_diff_merged(
     branch_sha: str | None = None,
     applied_at: datetime | None = None,
 ) -> None:
-    """Flip a branch-applied diff to ``applied=true`` after PR merge."""
+    """Flip a branch-applied decision to `applied=true` after PR merge."""
+    _ = (slug, kind, target_id, rationale, from_id)
     applied_at = applied_at or datetime.now(timezone.utc)
     with labdb.writer() as conn:
         conn.execute(
@@ -195,177 +134,56 @@ def mark_diff_merged(
             """,
             [applied_by, applied_at, pr_url, branch_sha, instance_id],
         )
-        if kind == "graduate":
-            insert_trunk_change(
-                conn,
-                at_ts=applied_at,
-                from_id=from_id,
-                to_id=target_id,
-                reason=(rationale or "")[:200] or None,
-                applied_by=applied_by,
-                instance_id=instance_id,
-            )
 
 
-def confirm_graduate(
-    *,
-    slug: str,
-    diff: TreeDiff,
-    applied_by: str,
-    reason: str | None = None,
-    today: date | None = None,
-) -> ApplyResult:
-    """Legacy helper for historical staged Graduate diffs.
-
-    Effects:
-      1. `trunk.yaml` becomes a copy of `<target_id>.yaml`.
-      2. The previous trunk id (if any) is moved to `## Branches`
-         with `use_when: legacy trunk anchor` (preserves history;
-         a human can re-categorise to ## Rejected later if needed).
-      3. The `### Tree effect` block is rewritten with the APPLIED
-         badge and the timestamp.
-      4. `trunk_changes` gets a new row.
-      5. `tree_diffs.applied` flips to true.
-    """
-    if diff.kind != "graduate":
-        raise ValueError(f"confirm_graduate called with kind={diff.kind!r}")
-    today = today or date.today()
-    notes: list[str] = []
-
-    target_yaml = _agent_configs_dir() / f"{diff.target_id}.yaml"
-    if not target_yaml.is_file():
-        raise FileNotFoundError(
-            f"Cannot graduate `{diff.target_id}`: {target_yaml} not found."
-        )
-
-    prev_trunk_id: str | None = None
-    trunk_yaml = _trunk_yaml()
-    if trunk_yaml.is_file():
-        try:
-            import yaml
-            data = yaml.safe_load(trunk_yaml.read_text()) or {}
-            n = data.get("name")
-            if isinstance(n, str):
-                prev_trunk_id = n
-        except Exception:
-            prev_trunk_id = None
-
-    shutil.copyfile(target_yaml, trunk_yaml)
-    notes.append(f"trunk.yaml ← copy of {target_yaml.name}")
-
-    journal_link = f"[`{slug}`](experiments.md#{slug})"
-    lab_docs.set_trunk(
-        trunk_id=diff.target_id,
-        reason=reason or diff.rationale[:200],
-        journal_link=journal_link,
-    )
-    notes.append(f"configs.md > ## Trunk now points at `{diff.target_id}`")
-
-    if prev_trunk_id and prev_trunk_id != diff.target_id:
-        try:
-            lab_docs.add_branch(
-                branch_id=prev_trunk_id,
-                mutation="(former trunk; preserved for history)",
-                use_when="legacy trunk anchor",
-                last_verified=today.isoformat(),
-            )
-            notes.append(f"former trunk `{prev_trunk_id}` archived as a branch")
-        except lab_docs.LabDocError as exc:
-            notes.append(f"could not archive former trunk: {exc}")
-
-    block = render_tree_effect_block(diff, slug=slug, applied=True)
-    try:
-        lab_docs.set_section(slug=slug, section="Tree effect", body=block)
-    except lab_docs.LabDocError as exc:
-        notes.append(f"journal rewrite skipped: {exc}")
-
-    applied_at = datetime.now(timezone.utc)
-    try:
-        with labdb.writer() as conn:
-            upsert_tree_diff(
-                conn,
-                slug=slug,
-                diff=diff,
-                applied=True,
-                applied_by=applied_by,
-                applied_at=applied_at,
-            )
-            insert_trunk_change(
-                conn,
-                at_ts=applied_at,
-                from_id=prev_trunk_id,
-                to_id=diff.target_id,
-                reason=reason or diff.rationale[:200],
-                applied_by=applied_by,
-                instance_id=diff.instance_id,
-            )
-    except Exception as exc:
-        notes.append(f"DB audit write skipped: {exc}")
-
-    return ApplyResult(
-        slug=slug,
-        diff=diff,
-        applied=True,
-        applied_by=applied_by,
-        journal_block_written=True,
-        notes=notes,
-    )
-
-
-def render_tree_effect_block(diff: TreeDiff, *, slug: str, applied: bool) -> str:
+def render_decision_block(decision: ExperimentDecision, *, slug: str) -> str:
     """Render the `### Tree effect` body for the journal entry."""
+    _ = slug
     badge = {
-        "graduate": "**Graduate** — experiment outcome supports trunk promotion",
-        "add_branch": "**Add branch** — experiment outcome supports a specialized branch",
-        "reject": "**Reject** — experiment outcome supports rejection",
+        "accept": "**Accept** — experiment outcome supports making this the current best",
+        "reject": "**Reject** — experiment outcome argues against this variant",
         "no_op": "**No-op** — recorded for trend analysis",
-    }[diff.kind]
+    }[decision.kind]
 
     lines: list[str] = [
         f"-   **Verdict:** {badge}",
-        f"-   **Target:** `{diff.target_id}`",
+        f"-   **Target:** `{decision.target_id}`",
     ]
-    if diff.trunk_leg or diff.mutation_leg:
+    if decision.baseline_leg or decision.candidate_leg:
         lines.append(
-            f"-   **Pair:** trunk leg `{diff.trunk_leg or '?'}` vs mutation `{diff.mutation_leg or '?'}`"
+            f"-   **Pair:** baseline leg `{decision.baseline_leg or '?'}` "
+            f"vs candidate `{decision.candidate_leg or '?'}`"
         )
-    if diff.pass_rate_delta_pp is not None:
-        lines.append(f"-   **Δ pass-rate:** {diff.pass_rate_delta_pp:+.2f} pp")
-    if diff.cost_per_pass_delta_pct is not None:
-        lines.append(f"-   **Δ $/pass:** {diff.cost_per_pass_delta_pct:+.1f}%")
-    lines.append(f"-   **Confidence:** {diff.confidence:.2f}")
-    lines.append(f"-   **Rationale:** {diff.rationale}")
-    if diff.use_when:
-        lines.append(f"-   **Use-when:** `{json.dumps(diff.use_when)}`")
-    if diff.evidence_paths:
-        ev = ", ".join(f"[`{Path(p).name}`]({_journal_relpath(Path(p))})"
-                       for p in diff.evidence_paths[:4])
+    lines.append(f"-   **Confidence:** {decision.confidence:.2f}")
+    lines.append(f"-   **Rationale:** {decision.rationale}")
+    if decision.promotability_notes:
+        lines.append(f"-   **Generalization notes:** {decision.promotability_notes}")
+    if decision.evidence_paths:
+        ev = ", ".join(
+            f"[`{Path(p).name}`]({_journal_relpath(Path(p))})"
+            for p in decision.evidence_paths[:4]
+        )
         lines.append(f"-   **Evidence:** {ev}")
-    if diff.cluster_evidence:
+    if decision.cluster_evidence:
         lines.append("")
-        lines.append("| Cluster | trunk pass | mut pass | Δ pp |")
-        lines.append("|---------|-----------:|---------:|-----:|")
-        for c in diff.cluster_evidence[:8]:
-            lines.append(
-                f"| `{c['cluster']}` | "
-                f"{int(c['trunk_pass'])}/{int(c['trunk_n'])} | "
-                f"{int(c['mut_pass'])}/{int(c['mut_n'])} | "
-                f"{c['delta_pp']:+.1f} |"
-            )
+        lines.append("| Cluster | Evidence |")
+        lines.append("|---------|----------|")
+        for row in decision.cluster_evidence[:8]:
+            cluster = row.get("cluster") or row.get("category") or "(unknown)"
+            detail = row.get("summary") or row.get("evidence") or json.dumps(row, sort_keys=True)
+            lines.append(f"| `{cluster}` | {detail} |")
     return "\n".join(lines)
 
 
-def _format_use_when(use_when: dict[str, Any] | None) -> str:
-    if not use_when:
-        return "(no predicate)"
-    rows = use_when.get("any_of") or []
-    parts: list[str] = []
-    for r in rows:
-        for k, v in r.items():
-            parts.append(f"{k}={v}")
-    if not parts:
-        return f"`{json.dumps(use_when)}`"
-    return " OR ".join(parts)
+def render_tree_effect_block(
+    diff: ExperimentDecision,
+    *,
+    slug: str,
+    applied: bool = True,
+) -> str:
+    """Backward-compatible wrapper for the old render name."""
+    _ = applied
+    return render_decision_block(diff, slug=slug)
 
 
 def _journal_relpath(path: Path) -> str:
@@ -377,13 +195,8 @@ def _journal_relpath(path: Path) -> str:
     return "../" + str(rel)
 
 
-# ---------------------------------------------------------------------------
-# Verdict → component-status side-effects
-# ---------------------------------------------------------------------------
-
-# Map an `architecture:` value in an agent YAML to the catalog component id.
 _ARCHITECTURE_TO_COMPONENT = {
-    None: "single-loop",            # absent ⇒ single-loop
+    None: "single-loop",
     "": "single-loop",
     "single-loop": "single-loop",
     "planner_executor": "planner-executor",
@@ -392,86 +205,54 @@ _ARCHITECTURE_TO_COMPONENT = {
 }
 
 
-def _bump_components_for_diff(
-    diff: TreeDiff, *, lab_root: Path | None
+def _bump_components_for_decision(
+    decision: ExperimentDecision,
+    *,
+    lab_root: Path | None,
 ) -> list[str]:
-    """Bump the catalog status of components implicated by a TreeDiff.
-
-    Best-effort: any failure is logged into the returned notes list but
-    does not abort `apply_diff`. The catalog is the *secondary* artefact;
-    `configs.md` is canonical for verdicts.
-
-    Bump rules (forward-only — see `components_doc.STATUS_ORDER`):
-      - ``add_branch(target)``: components unique to the target (not in
-        trunk) → ``branch``.
-      - ``graduate(target)``: all components of the new trunk → ``validated``.
-      - ``no_op``: components present on the mutation leg → ``experimental``
-        (we ran them, even if the verdict was inconclusive).
-      - ``reject``: no auto-bump (conservative — a rejected agent may have
-        valid components that just don't help in this composition).
-    """
+    """Best-effort component status updates for accepted/measured variants."""
     notes: list[str] = []
-    target_id = diff.target_id
-    target_components = _components_from_agent_yaml(target_id)
+    target_components = _components_from_agent_yaml(decision.target_id)
     if target_components is None:
         return notes
 
-    if diff.kind == "add_branch":
-        trunk_components = (
-            _components_from_agent_yaml(diff.trunk_leg) if diff.trunk_leg else set()
-        ) or set()
-        unique = target_components - trunk_components
-        bumped = _safe_bump(unique, "branch", lab_root=lab_root)
-        if bumped:
-            notes.append(
-                f"components.md: bumped {sorted(bumped)} → branch"
-            )
-    elif diff.kind == "graduate":
+    if decision.kind == "accept":
         bumped = _safe_bump(target_components, "validated", lab_root=lab_root)
         if bumped:
-            notes.append(
-                f"components.md: bumped {sorted(bumped)} → validated"
-            )
-    elif diff.kind == "no_op":
+            notes.append(f"components.md: bumped {sorted(bumped)} → validated")
+    elif decision.kind == "no_op":
         bumped = _safe_bump(target_components, "experimental", lab_root=lab_root)
         if bumped:
-            notes.append(
-                f"components.md: bumped {sorted(bumped)} → experimental"
-            )
+            notes.append(f"components.md: bumped {sorted(bumped)} → experimental")
     return notes
 
 
 def _safe_bump(
-    component_ids: set[str], target_status: str, *, lab_root: Path | None
+    component_ids: set[str],
+    target_status: str,
+    *,
+    lab_root: Path | None,
 ) -> list[str]:
-    """Try to bump each id; silently skip ids missing from the catalog."""
     out: list[str] = []
-    for cid in sorted(component_ids):
+    for component_id in sorted(component_ids):
         try:
             kwargs = {"lab_root": lab_root} if lab_root is not None else {}
-            cdoc.bump_status(component_id=cid, target=target_status, **kwargs)
-            out.append(cid)
+            cdoc.bump_status(component_id=component_id, target=target_status, **kwargs)
+            out.append(component_id)
         except cdoc.LabDocError:
-            continue
-        except Exception:
             continue
     return out
 
 
 def _components_from_agent_yaml(agent_id: str | None) -> set[str] | None:
-    """Read the agent YAML and infer which catalog components it composes.
-
-    Returns ``None`` if the YAML can't be read (the bumping path is
-    best-effort and silent on failure). Returns an empty set if the YAML
-    is readable but yields no recognised components.
-    """
     if not agent_id:
         return None
-    yaml_path = _agent_configs_dir() / f"{agent_id}.yaml"
+    yaml_path = REPO_ROOT / "src" / "openharness" / "agents" / "configs" / f"{agent_id}.yaml"
     if not yaml_path.is_file():
         return None
     try:
         import yaml
+
         data = yaml.safe_load(yaml_path.read_text()) or {}
     except Exception:
         return None
@@ -491,7 +272,5 @@ def _components_from_agent_yaml(agent_id: str | None) -> set[str] | None:
         out.add(model)
     explicit = data.get("components") or ()
     if isinstance(explicit, (list, tuple)):
-        for c in explicit:
-            if isinstance(c, str) and c:
-                out.add(c)
+        out.update(c for c in explicit if isinstance(c, str) and c)
     return out

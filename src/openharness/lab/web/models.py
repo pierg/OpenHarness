@@ -155,10 +155,10 @@ class UsageSummaryRow:
 
 
 @dataclass(eq=False, slots=True)
-class TreeDiffRow:
+class DecisionRow:
     instance_id: str
     slug: str
-    kind: str  # graduate | add_branch | reject | no_op
+    kind: str  # accept | reject | no_op
     target_id: str
     rationale: str | None
     use_when: Json
@@ -189,7 +189,7 @@ class ExperimentSummary:
     n_passed: int
     pass_rate_pct: float | None
     cost_usd: float | None
-    verdict: TreeDiffRow | None
+    verdict: DecisionRow | None
 
 
 @dataclass(eq=False, slots=True)
@@ -257,7 +257,7 @@ class DoneEntryView:
 @dataclass(eq=False, slots=True)
 class IdeaEntryView:
     idea_id: str
-    section: str  # Proposed | Trying | Graduated | Rejected | Auto-proposed
+    section: str  # Proposed | Trying | Accepted | Rejected | Auto-proposed
     theme: str | None
     motivation: str | None
     sketch: str | None
@@ -478,8 +478,8 @@ class ComponentDetail:
 # Phase 3 — PR-aware redesign view models
 #
 # Surface the methodology dimensions documented in lab/METHODOLOGY.md:
-# every Verdict (`add_branch` / `graduate` / …) is bound to a PR landing
-# on `main`. The web UI needs to know, per row, whether that PR is open,
+# every accepted/rejected/no-op decision is bound to a PR landing on
+# `main`. The web UI needs to know, per row, whether that PR is open,
 # merged, or rejected — and the daemon's idle reason needs to surface it
 # when the next tick is parked waiting for CI to go green.
 # ---------------------------------------------------------------------------
@@ -502,7 +502,7 @@ class PRStateRow:
 
     slug: str
     instance_id: str
-    kind: str  # add_branch | graduate
+    kind: str
     pr_url: str
     pr_number: int | None
     state: str | None  # OPEN | MERGED | CLOSED
@@ -548,16 +548,16 @@ class ActivityLogEntry:
 
     Fold-in of audit-log entries (``runs/lab/web_commands.jsonl``),
     tick history (from daemon_state.history), spawn finishes (from
-    DuckDB ``spawns``), trunk swaps (``trunk_changes``), and tree
-    verdicts (``tree_diffs``). Lets the operator see "what changed in
-    the last hour" without bouncing between four pages.
+    DuckDB ``spawns``), current-best history (``trunk_changes``), and
+    tree verdicts (``tree_diffs``). Lets the operator see "what changed
+    in the last hour" without bouncing between four pages.
 
     ``kind`` is one of:
       - ``cmd``            — web /api/cmd execution
       - ``tick``           — daemon tick finished
       - ``spawn``          — codex skill spawn finished
       - ``verdict``        — tree_diffs row appeared
-      - ``trunk-swap``     — trunk_changes row appeared
+      - ``current-best``   — current-best history row appeared
     """
 
     at_ts: datetime
@@ -625,7 +625,7 @@ class ClusterDeltaRow:
 class TreeVizNode:
     """One node in the configuration-tree visualisation.
 
-    Joined view: ``lab/configs.md`` (trunk + branches + rejected +
+    Joined view: ``lab/configs.md`` (current best + rejected +
     proposed) + ``tree_diffs.pr_url`` + the live PR cache. The
     template uses this to render the SVG with per-node badges
     indicating which branch has an open PR (dashed outline), a
@@ -633,7 +633,7 @@ class TreeVizNode:
     """
 
     node_id: str
-    role: str  # trunk | branch | rejected | proposed
+    role: str  # current_best | rejected | proposed
     mutation: str | None = None
     use_when: str | None = None
     sketch: str | None = None

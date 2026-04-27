@@ -58,7 +58,7 @@ __all__ = [
 # enough to refuse shell metacharacters.
 _SAFE_TOKEN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.\-]{0,127}$")
 _SAFE_ACTOR = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.@:\-/]{0,127}$")
-_IDEA_TARGETS = re.compile(r"^(?:proposed|trying|graduated|rejected)$", re.IGNORECASE)
+_IDEA_TARGETS = re.compile(r"^(?:proposed|trying|accepted|rejected)$", re.IGNORECASE)
 _ROADMAP_SECTIONS = re.compile(r"^(?:up-next|suggested|done)$")
 
 # Free text fields (motivation, hypothesis, plan, evidence, …). Allow any
@@ -188,35 +188,6 @@ class CommandError(RuntimeError):
 
 
 COMMANDS: dict[str, CommandSpec] = {
-    "graduate-confirm": CommandSpec(
-        cmd_id="graduate-confirm",
-        label="Confirm trunk swap",
-        description=(
-            "Legacy escape hatch for historical staged-graduate rows: "
-            "copies the new branch YAML into trunk.yaml and writes an audit row."
-        ),
-        argv_template=["graduate", "confirm", "{slug}", "--applied-by", "{applied_by}"],
-        params=[
-            ParamSpec(
-                name="slug",
-                pattern=_SAFE_TOKEN,
-                label="Experiment slug",
-                placeholder="tb2-runtime-shell-shim",
-            ),
-            ParamSpec(
-                name="applied_by",
-                pattern=_SAFE_ACTOR,
-                label="Applied by",
-                default="human:webui",
-                help_text="Who is making the call (recorded in the audit log).",
-            ),
-        ],
-        confirm_text=(
-            "This will swap the active trunk to the new branch. Continue?"
-        ),
-        danger=True,
-        events=["lab-pending-changed", "lab-tree-changed", "lab-roadmap-changed"],
-    ),
     "roadmap-promote": CommandSpec(
         cmd_id="roadmap-promote",
         label="Promote to roadmap",
@@ -378,15 +349,15 @@ COMMANDS: dict[str, CommandSpec] = {
         # Filled in below — defined as a closure so it can import
         # lazily without a top-level psutil dependency at module load.
     ),
-    "tree-apply": CommandSpec(
-        cmd_id="tree-apply",
-        label="Apply tree verdict",
+    "decision-apply": CommandSpec(
+        cmd_id="decision-apply",
+        label="Apply decision",
         description=(
-            "Recompute the TreeDiff for an experiment slug and apply it. "
+            "Load the experiment-critic decision for an experiment slug and apply it. "
             "On `main` this records a direct main-line verdict; on a "
             "worktree branch it materializes branch-local state pending finalize."
         ),
-        argv_template=["tree", "apply", "{slug}", "--applied-by", "{applied_by}"],
+        argv_template=["decision", "apply", "{slug}", "--applied-by", "{applied_by}"],
         params=[
             ParamSpec(
                 name="slug",
@@ -404,7 +375,7 @@ COMMANDS: dict[str, CommandSpec] = {
         ],
         confirm_text=(
             "Apply this verdict to the current checkout? This updates "
-            "the lab tree and journal deterministically."
+            "lab configs and the journal deterministically."
         ),
         events=[
             "lab-pending-changed",
@@ -417,7 +388,7 @@ COMMANDS: dict[str, CommandSpec] = {
         label="Move idea",
         description=(
             "Move an entry between top-level sections of `lab/ideas.md` "
-            "(Proposed / Trying / Graduated / Rejected)."
+            "(Proposed / Trying / Accepted / Rejected)."
         ),
         argv_template=["idea", "move", "{idea_id}", "{target}"],
         params=[
@@ -426,7 +397,7 @@ COMMANDS: dict[str, CommandSpec] = {
                 name="target",
                 pattern=_IDEA_TARGETS,
                 label="Target section",
-                placeholder="proposed | trying | graduated | rejected",
+                placeholder="proposed | trying | accepted | rejected",
             ),
         ],
         confirm_text=None,

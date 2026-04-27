@@ -1,18 +1,18 @@
-"""Tests for the ``tree apply`` web slice.
+"""Tests for the decision-apply web slice.
 
 Covers three contracts in one place:
 
 1. ``LabReader.resolve_slug`` — mirrors the CLI's resolver; not running
-   the resolver from the web UI was the original ``tree apply`` UX
+   the resolver from the web UI was the original decision-apply UX
    blocker.
 2. ``LabReader.preview_diff`` — returns ``None`` for unknown slugs
    (the only behaviour we depend on without a populated DB), otherwise
-   a dict with the canonical fields.
-3. ``commands.COMMANDS["tree-apply"]`` — argv template, param specs,
+   a dict with the canonical decision fields.
+3. ``commands.COMMANDS["decision-apply"]`` — argv template, param specs,
    and the events list (used by ``HX-Trigger`` to auto-refresh the
-   verdict panels).
+   decision panels).
 
-Doesn't exercise an actual ``tree apply`` invocation because that
+Doesn't exercise an actual ``decision apply`` invocation because that
 requires a populated experiments table; the integration check lives
 in the project's smoke tests.
 """
@@ -30,19 +30,19 @@ from openharness.lab.web import data as labdata
 # ---------------------------------------------------------------------------
 
 
-def test_tree_apply_in_whitelist() -> None:
-    spec = labcmd.COMMANDS.get("tree-apply")
-    assert spec is not None, "tree-apply must be in the web command whitelist"
-    assert spec.cmd_id == "tree-apply"
-    # Must shell out to ``uv run lab tree apply <slug> --applied-by …``.
-    assert spec.argv_template[:2] == ["tree", "apply"]
+def test_decision_apply_in_whitelist() -> None:
+    spec = labcmd.COMMANDS.get("decision-apply")
+    assert spec is not None, "decision-apply must be in the web command whitelist"
+    assert spec.cmd_id == "decision-apply"
+    # Must shell out to ``uv run lab decision apply <slug> --applied-by ...``.
+    assert spec.argv_template[:2] == ["decision", "apply"]
     assert "{slug}" in spec.argv_template
     assert "--applied-by" in spec.argv_template
     assert "{applied_by}" in spec.argv_template
 
 
-def test_tree_apply_param_specs() -> None:
-    spec = labcmd.COMMANDS["tree-apply"]
+def test_decision_apply_param_specs() -> None:
+    spec = labcmd.COMMANDS["decision-apply"]
     by_name = {p.name: p for p in spec.params}
     assert "slug" in by_name and "applied_by" in by_name
     # Slug regex must reject shell metacharacters.
@@ -54,8 +54,8 @@ def test_tree_apply_param_specs() -> None:
     assert by_name["applied_by"].default == "human:webui"
 
 
-def test_tree_apply_emits_refresh_events() -> None:
-    events = labcmd.trigger_events("tree-apply")
+def test_decision_apply_emits_refresh_events() -> None:
+    events = labcmd.trigger_events("decision-apply")
     # Tree panel + drawer + roadmap suggested-list all refresh.
     assert "lab-tree-changed" in events
     assert "lab-pending-changed" in events
@@ -95,8 +95,8 @@ def test_preview_diff_unknown_slug_against_real_db() -> None:
 
 
 def test_preview_diff_known_slug_shape() -> None:
-    # If the DB has at least one experiment, preview_diff must echo the
-    # canonical TreeDiff dict plus the slug + resolved instance id.
+    # If the DB has at least one experiment with a critic decision,
+    # preview_diff must echo the canonical dict plus slug + instance id.
     with labdata.LabReader() as r:
         if not r.db_available:
             return
@@ -105,30 +105,31 @@ def test_preview_diff_known_slug_shape() -> None:
             return
         instance_id = exps[0].instance_id
         out = r.preview_diff(instance_id)
-        assert out is not None
-        # Canonical TreeDiff fields.
+        if out is None:
+            return
+        # Canonical decision fields.
         for field in ("kind", "target_id", "rationale", "use_when",
                       "confidence", "evidence_paths", "cluster_evidence"):
-            assert field in out, f"preview_diff missing TreeDiff field {field!r}"
+            assert field in out, f"preview_diff missing decision field {field!r}"
         # Web-only echo fields.
         assert out["slug"] == instance_id
         assert out["resolved_instance_id"] == instance_id
-        # Kind must be one of the documented verdict kinds.
-        assert out["kind"] in {"graduate", "add_branch", "reject", "no_op"}
+        # Kind must be one of the documented decision kinds.
+        assert out["kind"] in {"accept", "reject", "no_op"}
 
 
 # ---------------------------------------------------------------------------
-# Render path: /_hx/tree-preview must return well-formed HTML
+# Render path: /_hx/decision-preview must return well-formed HTML
 # ---------------------------------------------------------------------------
 
 
-def test_tree_preview_partial_renders_unknown_slug() -> None:
+def test_decision_preview_partial_renders_unknown_slug() -> None:
     from fastapi.testclient import TestClient
 
     from openharness.lab.web.app import create_app
 
     client = TestClient(create_app())
-    r = client.get("/_hx/tree-preview", params={"slug": "totally-bogus-slug-xx"})
+    r = client.get("/_hx/decision-preview", params={"slug": "totally-bogus-slug-xx"})
     assert r.status_code == 200
     body = r.text
     assert "No experiment found" in body
@@ -148,4 +149,4 @@ def test_tree_page_includes_verdict_panel() -> None:
     # The whole verdict surface lives inside this id so HTMX can target
     # it for in-place refresh on lab-tree-changed.
     assert 'id="tree-verdict-panel"' in r.text
-    assert 'id="tree-diff-preview"' in r.text
+    assert 'id="decision-preview"' in r.text

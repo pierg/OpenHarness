@@ -26,7 +26,7 @@ from typing import Iterable
 
 from openharness.lab.paths import LAB_ROOT
 
-VALID_IDEAS_SECTIONS: tuple[str, ...] = ("Proposed", "Trying", "Graduated", "Rejected")
+VALID_IDEAS_SECTIONS: tuple[str, ...] = ("Proposed", "Trying", "Accepted", "Rejected")
 VALID_ROADMAP_SECTIONS: tuple[str, ...] = ("Up next", "Done")
 VALID_THEMES: tuple[str, ...] = (
     "Prompting",
@@ -49,8 +49,8 @@ JOURNAL_SECTIONS: tuple[str, ...] = (
     "Linked follow-ups",
 )
 
-# Sections inside `lab/configs.md` (the configuration tree).
-TREE_SECTIONS: tuple[str, ...] = ("Trunk", "Branches", "Rejected", "Proposed")
+# Sections inside `lab/configs.md` (the measured configuration state).
+TREE_SECTIONS: tuple[str, ...] = ("Current best", "Rejected", "Proposed")
 
 
 class LabDocError(RuntimeError):
@@ -147,7 +147,7 @@ def parse_ideas(text: str) -> dict[str, list[IdeaEntry]]:
         if heading is None or heading not in VALID_IDEAS_SECTIONS:
             continue
         # Inside Proposed, themes are `### Architecture` etc.
-        # Inside Trying/Graduated/Rejected entries are flat.
+        # Inside Trying/Accepted/Rejected entries are flat.
         if heading == "Proposed":
             for theme, theme_body in _split_top_sections(body, level=3):
                 if theme is None:
@@ -781,7 +781,7 @@ def append_journal_entry(
     """Insert a new tree-shaped journal entry at the top of `experiments.md`.
 
     Stub-shaped: header bullets present, every `### <section>` empty,
-    populated later by `synthesize` and `tree apply`.
+    populated later by `synthesize` and `decision apply`.
 
     ``branch`` is the experiment branch name (e.g. ``lab/<slug>``) the
     code variant lives on. Always rendered — either as the recorded
@@ -943,14 +943,6 @@ def set_journal_branch(
 
 
 @dataclass(slots=True)
-class TreeBranch:
-    branch_id: str
-    mutation: str
-    use_when: str
-    last_verified: str | None = None
-
-
-@dataclass(slots=True)
 class TreeRejected:
     branch_id: str
     reason: str
@@ -966,19 +958,29 @@ class TreeProposed:
 
 @dataclass(slots=True)
 class TreeSnapshot:
-    trunk_id: str
-    trunk_anchor: str | None
-    branches: list[TreeBranch]
+    current_best_id: str
+    current_best_anchor: str | None
     rejected: list[TreeRejected]
     proposed: list[TreeProposed]
 
+    @property
+    def trunk_id(self) -> str:
+        """Backward-compatible alias while callers move to `current_best_id`."""
+        return self.current_best_id
+
+    @property
+    def trunk_anchor(self) -> str | None:
+        """Backward-compatible alias while callers move to `current_best_anchor`."""
+        return self.current_best_anchor
+
+    @property
+    def branches(self) -> list[object]:
+        """Branches were removed from the simplified lab state."""
+        return []
+
 
 def _ensure_configs_skeleton(text: str) -> str:
-    """If configs.md is missing any tree section, add an empty one.
-
-    Adds empty Trunk / Branches / Rejected / Proposed sections at the
-    end of the file if any are missing.
-    """
+    """If configs.md is missing any state section, add an empty one."""
     out = text.rstrip()
     for s in TREE_SECTIONS:
         if not re.search(rf"^## {re.escape(s)}\b", out, re.MULTILINE):
@@ -987,32 +989,21 @@ def _ensure_configs_skeleton(text: str) -> str:
 
 
 def tree_snapshot(*, lab_root: Path = LAB_ROOT) -> TreeSnapshot:
-    """Parse `lab/configs.md` and return the current configuration-tree state."""
+    """Parse `lab/configs.md` and return the current lab configuration state."""
     path = _configs_path(lab_root)
     text = _read(path)
     text = _ensure_configs_skeleton(text)
     parts = dict(_split_top_sections(text, level=2))
 
-    trunk_body = parts.get("Trunk", "")
-    trunk_id = "basic"
-    trunk_anchor: str | None = None
-    m_id = re.search(r"\*\*Agent:\*\*\s*\[`([^`]+)`\]", trunk_body)
+    current_body = parts.get("Current best", "") or parts.get("Trunk", "")
+    current_best_id = "basic"
+    current_best_anchor: str | None = None
+    m_id = re.search(r"\*\*Agent:\*\*\s*\[`([^`]+)`\]", current_body)
     if m_id:
-        trunk_id = m_id.group(1)
-    m_why = re.search(r"\*\*Why:\*\*\s*(.+)", trunk_body)
+        current_best_id = m_id.group(1)
+    m_why = re.search(r"\*\*Why:\*\*\s*(.+)", current_body)
     if m_why:
-        trunk_anchor = m_why.group(1).strip()
-
-    branches: list[TreeBranch] = []
-    for row in _parse_md_table(parts.get("Branches", "")):
-        if len(row) < 4:
-            continue
-        branches.append(TreeBranch(
-            branch_id=_strip_md_link(row[0]),
-            mutation=row[1],
-            use_when=row[2],
-            last_verified=row[3] or None,
-        ))
+        current_best_anchor = m_why.group(1).strip()
 
     rejected: list[TreeRejected] = []
     for row in _parse_md_table(parts.get("Rejected", "")):
@@ -1036,9 +1027,8 @@ def tree_snapshot(*, lab_root: Path = LAB_ROOT) -> TreeSnapshot:
         ))
 
     return TreeSnapshot(
-        trunk_id=trunk_id,
-        trunk_anchor=trunk_anchor,
-        branches=branches,
+        current_best_id=current_best_id,
+        current_best_anchor=current_best_anchor,
         rejected=rejected,
         proposed=proposed,
     )
@@ -1079,6 +1069,29 @@ def _strip_md_link(cell: str) -> str:
     return cell
 
 
+def set_current_best(
+    *,
+    agent_id: str,
+    reason: str,
+    journal_link: str | None = None,
+    lab_root: Path = LAB_ROOT,
+) -> str:
+    """Rewrite `## Current best` in configs.md to point at `agent_id`."""
+    path = _configs_path(lab_root)
+    text = _read(path)
+    text = _ensure_configs_skeleton(text)
+    body_lines = [
+        f"-   **Agent:** [`{agent_id}`](../src/openharness/agents/configs/{agent_id}.yaml)",
+        f"-   **Why:** {reason.strip()}",
+    ]
+    if journal_link:
+        body_lines.append(f"-   **Anchored by:** {journal_link.strip()}")
+    new_body = "\n".join(body_lines)
+    new_text = _replace_top_section(text, "Current best", new_body)
+    _write(path, new_text)
+    return new_text
+
+
 def set_trunk(
     *,
     trunk_id: str,
@@ -1086,44 +1099,13 @@ def set_trunk(
     journal_link: str | None = None,
     lab_root: Path = LAB_ROOT,
 ) -> str:
-    """Rewrite `## Trunk` in configs.md to point at `trunk_id`."""
-    path = _configs_path(lab_root)
-    text = _read(path)
-    text = _ensure_configs_skeleton(text)
-    body_lines = [
-        f"-   **Agent:** [`{trunk_id}`](../src/openharness/agents/configs/{trunk_id}.yaml)",
-        f"-   **Why:** {reason.strip()}",
-    ]
-    if journal_link:
-        body_lines.append(f"-   **Anchored by:** {journal_link.strip()}")
-    new_body = "\n".join(body_lines)
-    new_text = _replace_top_section(text, "Trunk", new_body)
-    _write(path, new_text)
-    return new_text
-
-
-def add_branch(
-    *,
-    branch_id: str,
-    mutation: str,
-    use_when: str,
-    last_verified: str,
-    lab_root: Path = LAB_ROOT,
-) -> str:
-    """Append a row to `## Branches` (or replace if `branch_id` already there)."""
-    path = _configs_path(lab_root)
-    text = _read(path)
-    text = _ensure_configs_skeleton(text)
-    snap = tree_snapshot(lab_root=lab_root)
-    branches = [b for b in snap.branches if b.branch_id != branch_id]
-    branches.append(TreeBranch(
-        branch_id=branch_id, mutation=mutation,
-        use_when=use_when, last_verified=last_verified,
-    ))
-    body = _render_branches_table(branches)
-    new_text = _replace_top_section(text, "Branches", body)
-    _write(path, new_text)
-    return new_text
+    """Backward-compatible wrapper for `set_current_best`."""
+    return set_current_best(
+        agent_id=trunk_id,
+        reason=reason,
+        journal_link=journal_link,
+        lab_root=lab_root,
+    )
 
 
 def add_rejected(
@@ -1144,21 +1126,6 @@ def add_rejected(
     new_text = _replace_top_section(text, "Rejected", body)
     _write(path, new_text)
     return new_text
-
-
-def _render_branches_table(branches: list[TreeBranch]) -> str:
-    if not branches:
-        return "_(none)_"
-    lines = [
-        "| ID | Mutation vs trunk | Use-when predicate | Last verified |",
-        "|----|-------------------|--------------------|---------------|",
-    ]
-    for b in branches:
-        lines.append(
-            f"| `{b.branch_id}` | {b.mutation} | {b.use_when} | "
-            f"{b.last_verified or ''} |"
-        )
-    return "\n".join(lines)
 
 
 def _render_rejected_table(rejected: list[TreeRejected]) -> str:

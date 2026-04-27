@@ -43,9 +43,9 @@ wires:
 2. **Proposed component** — `<id>.yaml` lands here with
    `status: proposed`. The lab daemon may exercise it via paired
    ablations queued in `lab/roadmap.md`.
-3. **Active** — once `lab-graduate-component` records measured
-   impact, the entry is bumped to `status: active` and listed in
-   `lab/components.md > ## Active`.
+3. **Validated** — once an accepted experiment records measured
+   impact, the entry is bumped to `status: validated` in
+   `lab/components.md`.
 4. **Retired** — flipped to `status: retired` (kept on disk for
    reproducibility) and moved to `lab/components.md > ## Retired`.
 

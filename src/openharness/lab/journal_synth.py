@@ -8,11 +8,11 @@ that live in `lab/experiments.md`:
 - ``### Aggregate``         — pass-rate / cost / token table per leg.
 - ``### Mutation impact``   — what swapping the mutation actually moved.
 - ``### Failure modes``     — recurring failure clusters from comparisons.
-- ``### Linked follow-ups`` — ideas / branches / rejected items spawned.
+- ``### Linked follow-ups`` — ideas and roadmap consequences spawned.
 
-Note: the ``### Tree effect`` block is owned by ``tree.apply_diff``
-(it depends on ``tree_ops.evaluate`` and the verdict, not on the
-experiment-critic JSON), so we never write it from here.
+Note: the ``### Tree effect`` block is owned by ``tree.apply_decision``
+(it depends on the structured experiment-critic decision), so we never
+write it from here.
 
 This module is **deterministic**. The narrative content comes from
 the agent JSON; this module only stitches it into markdown.

@@ -41,6 +41,7 @@ import json
 import os
 import subprocess
 import sys
+from dataclasses import asdict
 from datetime import datetime, timezone
 import time
 from pathlib import Path
@@ -75,8 +76,8 @@ exp_app = typer.Typer(no_args_is_help=True, help="Edit lab/experiments.md.")
 roadmap_app = typer.Typer(no_args_is_help=True, help="Edit lab/roadmap.md.")
 daemon_app = typer.Typer(no_args_is_help=True, help="Orchestrator daemon and phase loop.")
 tree_app = typer.Typer(no_args_is_help=True, help="Inspect / mutate the configuration tree (lab/configs.md).")
-trunk_app = typer.Typer(no_args_is_help=True, help="Show / set the trunk pointer.")
-graduate_app = typer.Typer(no_args_is_help=True, help="Legacy staged-graduate repair helpers.")
+decision_app = typer.Typer(no_args_is_help=True, help="Apply experiment-critic decisions.")
+trunk_app = typer.Typer(no_args_is_help=True, help="Show / set the current-best pointer.")
 components_app = typer.Typer(no_args_is_help=True, help="Inspect / mutate the components catalog (lab/components.md).")
 runs_app = typer.Typer(no_args_is_help=True, help="Manage runs/experiments/<id>/ directories on disk.")
 preflight_app = typer.Typer(
@@ -93,8 +94,8 @@ app.add_typer(exp_app, name="experiments")
 app.add_typer(roadmap_app, name="roadmap")
 app.add_typer(daemon_app, name="daemon")
 app.add_typer(tree_app, name="tree")
+app.add_typer(decision_app, name="decision")
 app.add_typer(trunk_app, name="trunk")
-app.add_typer(graduate_app, name="graduate")
 app.add_typer(components_app, name="components")
 app.add_typer(runs_app, name="runs")
 app.add_typer(preflight_app, name="preflight")
@@ -688,7 +689,7 @@ def dump_critiques_to_files_cmd(
 @idea_app.command("move")
 def cmd_idea_move(
     idea_id: str,
-    target: str = typer.Argument(..., help="Section: proposed | trying | graduated | rejected"),
+    target: str = typer.Argument(..., help="Section: proposed | trying | accepted | rejected"),
     cross_ref: Optional[str] = typer.Option(
         None, "--cross-ref", help="Bullet to append to the moved entry."
     ),
@@ -795,7 +796,7 @@ def cmd_exp_append_entry(
 
     Header is filled in immediately; the five `### <section>` blocks
     are stubbed empty and populated later by `experiments synthesize`
-    and `tree apply`.
+    and `decision apply`.
     """
     if not trunk:
         snap = lab_docs.tree_snapshot()
@@ -848,8 +849,8 @@ def cmd_exp_set_branch(
     """Replace the **Branch:** bullet on the journal entry for `slug`.
 
     Called from the `lab-finalize-pr` skill after deciding whether to
-    push the experiment branch and open a PR (verdict AddBranch /
-    Graduate) or to discard the worktree (verdict Reject / NoOp).
+    push the experiment branch and open a PR (`accept`) or to discard
+    the worktree (`reject` / `no_op`).
     Also writes the PR URL / discarded SHA into the `tree_diffs`
     cache so downstream tooling (web UI, audit queries, finalize
     recovery) can find them with a SQL query.
@@ -1332,16 +1333,15 @@ def analyze(
     typer.echo(f"\nanalyze done in {elapsed:.0f}s ({elapsed/60:.1f}m).")
 
 
-# ===== tree / trunk / graduate / experiments-synthesize ===================
+# ===== config decisions / current best / experiments-synthesize ============
 #
 # All of these commands are *deterministic* mutations of the lab.
 # They never touch codex. Critic skills and the daemon call them via
 # this CLI; humans do too. The runner's close-loop is just:
 #
 #   lab experiments synthesize <slug>      # write Aggregate / Mutation impact
-#   lab tree apply <slug>                  # tree_ops.evaluate + tree.apply_diff
+#   lab decision apply <slug>              # experiment-critic decision apply
 #   lab roadmap suggest <new_slug> ...     # legacy suggestion stream
-#   lab graduate confirm <slug>            # legacy/manual escape hatch
 
 
 def _lookup_instance_for_slug(conn: object, slug: str) -> str | None:
@@ -1392,12 +1392,11 @@ def _lookup_instance_for_slug(conn: object, slug: str) -> str | None:
 
 
 def _resolve_diff_for_slug(slug: str):
-    # -> tuple[str, tree_ops.TreeDiff]; lazy import to avoid cycles.
-    """Look up the experiment instance for a slug and recompute its diff.
+    # -> tuple[str, tree_ops.ExperimentDecision]; lazy import to avoid cycles.
+    """Look up the experiment instance for a slug and load its decision.
 
     Falls back to the cached row in `tree_diffs` if the slug isn't in
-    `experiments`. We always recompute from `tree_ops.evaluate` when
-    we have an instance_id so the verdict reflects the latest data.
+    `experiments`.
     """
     from openharness.lab import tree_ops as _tree_ops
 
@@ -1411,37 +1410,25 @@ def _resolve_diff_for_slug(slug: str):
         )
         raise typer.Exit(2)
 
-    diff = _tree_ops.evaluate(instance_id)
+    diff = _tree_ops.load_decision(instance_id)
     return instance_id, diff
 
 
 @tree_app.command("show")
 def tree_show(json_out: bool = typer.Option(False, "--json")) -> None:
-    """Print the current configuration tree (trunk + branches + rejected)."""
+    """Print the current lab configuration state."""
     snap = lab_docs.tree_snapshot()
     if json_out:
         typer.echo(json.dumps({
-            "trunk_id": snap.trunk_id,
-            "trunk_anchor": snap.trunk_anchor,
-            "branches": [b.__dict__ for b in snap.branches],
-            "rejected": [r.__dict__ for r in snap.rejected],
-            "proposed": [p.__dict__ for p in snap.proposed],
+            "current_best_id": snap.current_best_id,
+            "current_best_anchor": snap.current_best_anchor,
+            "rejected": [asdict(r) for r in snap.rejected],
+            "proposed": [asdict(p) for p in snap.proposed],
         }, indent=2))
         return
-    console.print(f"[bold]Trunk:[/bold] [cyan]{snap.trunk_id}[/cyan]")
-    if snap.trunk_anchor:
-        console.print(f"  [dim]{snap.trunk_anchor}[/dim]")
-    if snap.branches:
-        t = Table(title="Branches", show_header=True)
-        t.add_column("ID")
-        t.add_column("Mutation")
-        t.add_column("Use-when")
-        t.add_column("Last verified")
-        for b in snap.branches:
-            t.add_row(b.branch_id, b.mutation, b.use_when, b.last_verified or "")
-        console.print(t)
-    else:
-        console.print("[dim]Branches: (none)[/dim]")
+    console.print(f"[bold]Current best:[/bold] [cyan]{snap.current_best_id}[/cyan]")
+    if snap.current_best_anchor:
+        console.print(f"  [dim]{snap.current_best_anchor}[/dim]")
     if snap.rejected:
         t = Table(title="Rejected", show_header=True)
         t.add_column("ID")
@@ -1452,8 +1439,8 @@ def tree_show(json_out: bool = typer.Option(False, "--json")) -> None:
         console.print(t)
 
 
-@tree_app.command("apply")
-def tree_apply(
+@decision_app.command("apply")
+def decision_apply(
     slug: str = typer.Argument(...),
     instance: Optional[str] = typer.Option(
         None, "--instance",
@@ -1462,10 +1449,10 @@ def tree_apply(
     applied_by: str = typer.Option("auto:cli", "--applied-by"),
     dry_run: bool = typer.Option(
         False, "--dry-run",
-        help="Print the diff that would be applied; do not write.",
+        help="Print the decision that would be applied; do not write.",
     ),
 ) -> None:
-    """Recompute the TreeDiff for `slug` and apply it to the current checkout.
+    """Load the experiment-critic decision for `slug` and apply it.
 
     On `main`, this is treated as a direct main-line mutation and the
     DB cache is marked `applied=true`. On any non-`main` branch/worktree
@@ -1476,11 +1463,11 @@ def tree_apply(
     from openharness.lab import preflight as _preflight
 
     if instance:
-        diff = _tree_ops.evaluate(instance)
+        diff = _tree_ops.load_decision(instance)
     else:
         _, diff = _resolve_diff_for_slug(slug)
 
-    console.print(f"[bold]TreeDiff for {slug}:[/bold]")
+    console.print(f"[bold]Decision for {slug}:[/bold]")
     console.print(json.dumps(diff.to_dict(), indent=2, default=str))
 
     if dry_run:
@@ -1500,9 +1487,9 @@ def tree_apply(
         current_branch = ""
     mark_applied = current_branch == _preflight.DEFAULT_BASE_BRANCH
 
-    result = _tree.apply_diff(
+    result = _tree.apply_decision(
         slug=slug,
-        diff=diff,
+        decision=diff,
         applied_by=applied_by,
         mark_applied=mark_applied,
     )
@@ -1517,10 +1504,10 @@ def tree_apply(
 
 @trunk_app.command("show")
 def trunk_show() -> None:
-    """Print the current trunk id (last `trunk_changes` row, else trunk.yaml)."""
+    """Print the current-best id."""
     from openharness.lab import tree_ops as _tree_ops
 
-    tid = _tree_ops.current_trunk_id()
+    tid = _tree_ops.current_best_id()
     typer.echo(tid)
 
 
@@ -1537,20 +1524,15 @@ def trunk_set(
         help="Also append a `trunk_changes` row.",
     ),
 ) -> None:
-    """Manually set the `## Trunk` pointer in configs.md (and audit it).
+    """Manually set the `## Current best` pointer in configs.md."""
+    from openharness.lab.tree_ops import current_best_id, insert_current_best_change
 
-    NOTE: this only edits the markdown + audit log. It does NOT copy
-    `<trunk_id>.yaml → trunk.yaml`. Use `lab graduate confirm` only
-    for legacy staged-graduate repairs.
-    """
-    from openharness.lab.tree_ops import current_trunk_id, insert_trunk_change
-
-    prev = current_trunk_id()
-    lab_docs.set_trunk(trunk_id=trunk_id, reason=reason, journal_link=journal_link)
-    msg = f"trunk set to {trunk_id!r}"
+    prev = current_best_id()
+    lab_docs.set_current_best(agent_id=trunk_id, reason=reason, journal_link=journal_link)
+    msg = f"current best set to {trunk_id!r}"
     if audit:
         with labdb.writer() as conn:
-            insert_trunk_change(
+            insert_current_best_change(
                 conn,
                 at_ts=datetime.now(timezone.utc),
                 from_id=prev if prev != trunk_id else None,
@@ -1558,129 +1540,8 @@ def trunk_set(
                 reason=reason,
                 applied_by="human:cli",
             )
-        msg += " (audited in trunk_changes)"
+        msg += " (audited in current-best history)"
     typer.echo(msg)
-
-
-@graduate_app.command("confirm")
-def graduate_confirm(
-    slug: str = typer.Argument(...),
-    applied_by: str = typer.Option(
-        ..., "--applied-by",
-        help="e.g. 'human:alice' — required so trunk swaps are attributable.",
-    ),
-    reason: Optional[str] = typer.Option(
-        None, "--reason",
-        help="Override the rationale (else the diff's own rationale is used).",
-    ),
-    instance: Optional[str] = typer.Option(
-        None, "--instance",
-        help="Override: use this instance_id (else resolved from slug).",
-    ),
-    skip_pr_merge_check: bool = typer.Option(
-        False, "--skip-pr-merge-check",
-        help="Bypass the requirement that the experiment's PR be "
-             "merged first. ONLY use when graduating an experiment "
-             "that pre-dates the PR-merge gate (e.g. trunk swaps "
-             "from before this check was added). Records "
-             "`pr_merge_check_skipped=true` in the audit log.",
-    ),
-) -> None:
-    """Confirm a STAGED Graduate diff: copy `<target>.yaml → trunk.yaml` + audit.
-
-    This is the only path that swaps the actual trunk YAML. It
-    requires `--applied-by` so we always know who made the call.
-
-    Gates on the experiment PR being merged (see
-    [`lab/METHODOLOGY.md`](../../lab/METHODOLOGY.md) §6) — trunk
-    must never reference code that isn't on `main`. Bypass with
-    `--skip-pr-merge-check` only for legacy graduations that
-    pre-date the gate.
-    """
-    from openharness.lab import tree as _tree
-    from openharness.lab import tree_ops as _tree_ops
-
-    if instance:
-        diff = _tree_ops.evaluate(instance)
-    else:
-        _, diff = _resolve_diff_for_slug(slug)
-
-    if diff.kind != "graduate":
-        err_console.print(
-            f"[red]TreeDiff for {slug!r} is kind={diff.kind!r}, not 'graduate'."
-            f" Nothing to confirm.[/red]"
-        )
-        raise typer.Exit(2)
-
-    if not skip_pr_merge_check:
-        ok, msg = _check_pr_merged(slug)
-        if not ok:
-            err_console.print(f"[red]Cannot graduate {slug!r}: {msg}[/red]")
-            err_console.print(
-                "[yellow]Either merge the PR first or re-run with "
-                "--skip-pr-merge-check (only for pre-gate "
-                "experiments).[/yellow]"
-            )
-            raise typer.Exit(2)
-
-    result = _tree.confirm_graduate(
-        slug=slug, diff=diff, applied_by=applied_by, reason=reason,
-    )
-    typer.echo(f"graduated `{diff.target_id}` → trunk (by={applied_by}).")
-    for note in result.notes:
-        typer.echo(f"  - {note}")
-
-
-def _check_pr_merged(slug: str) -> tuple[bool, str]:
-    """Return ``(merged, human_message)`` for the slug's PR.
-
-    Looks up `tree_diffs.pr_url` for the latest diff on this slug,
-    then asks `gh` whether the PR has been merged. Used only by the
-    legacy ``graduate confirm`` escape hatch. Treats any communication
-    error with ``gh`` as "unknown, do not advance".
-    """
-    import json as _json
-    import shutil
-    import subprocess
-
-    with labdb.reader() as conn:
-        row = conn.execute(
-            "SELECT pr_url FROM tree_diffs WHERE slug = ? AND pr_url IS NOT NULL "
-            "ORDER BY applied_at DESC NULLS LAST LIMIT 1",
-            [slug],
-        ).fetchone()
-    if row is None or not row[0]:
-        return False, (
-            f"no PR URL recorded in tree_diffs for slug {slug!r} — has "
-            "lab-finalize-pr run yet?"
-        )
-    pr_url = row[0]
-    if not shutil.which("gh"):
-        return False, (
-            "`gh` CLI is not on PATH; cannot verify PR merge state. "
-            f"Inspect {pr_url} manually."
-        )
-    try:
-        proc = subprocess.run(
-            ["gh", "pr", "view", pr_url, "--json", "state,mergedAt,mergeCommit"],
-            check=False, capture_output=True, text=True, timeout=30,
-        )
-    except Exception as exc:  # noqa: BLE001
-        return False, f"`gh pr view {pr_url}` raised {exc!r}"
-    if proc.returncode != 0:
-        return False, (
-            f"`gh pr view {pr_url}` exit={proc.returncode}: "
-            f"{proc.stderr.strip()[:200]}"
-        )
-    try:
-        data = _json.loads(proc.stdout or "{}")
-    except _json.JSONDecodeError as exc:
-        return False, f"`gh pr view {pr_url}` returned invalid JSON: {exc!r}"
-    state = (data.get("state") or "").upper()
-    if state == "MERGED" and data.get("mergedAt"):
-        return True, f"merged at {data['mergedAt']}"
-    return False, f"PR {pr_url} state={state!r} (mergedAt={data.get('mergedAt')!r})"
-
 
 @exp_app.command("synthesize")
 def cmd_exp_synthesize(
@@ -1695,7 +1556,7 @@ def cmd_exp_synthesize(
             "Repeat to limit which `### <section>`s are synthesised. "
             "Default: Aggregate, Mutation impact, Failure modes, "
             "Linked follow-ups (the four narrative sections; "
-            "Tree effect comes from `lab tree apply`)."
+            "Tree effect comes from `lab decision apply`)."
         ),
     ),
 ) -> None:

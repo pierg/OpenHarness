@@ -1,13 +1,15 @@
 # Lab
 
-The lab is the repo's autonomous experiment surface.
+The lab is the repo's autonomous experiment surface. Its job is to find
+generalizable improvements to agentic harnesses, using Harbor,
+Terminal-Bench 2, and future benchmarks as measurement tools.
 
 ## Files
 
 | File | Purpose |
 |------|---------|
-| `configs.md` | configuration tree: trunk + branches + rejected + proposed |
-| `components.md` | catalog of atoms and their status |
+| `configs.md` | current best config + rejected + proposed configs |
+| `components.md` | catalog of reusable building blocks |
 | `experiments.md` | append-only journal of experiment outcomes |
 | `ideas.md` | themed backlog |
 | `roadmap.md` | ranked execution queue |
@@ -20,24 +22,23 @@ One experiment owns one branch.
 2. preflight creates `lab/<slug>` worktree from `main`
 3. the slug runs through:
    `preflight → design → implement → run → critique → replan → finalize`
-4. critique materializes the verdict on the experiment branch
+4. critique writes the experiment-critic decision on the experiment branch
 5. replan rewrites the queue consequences on that same branch
 6. finalize creates the required PR artifact(s) and merges them back to `main`
 7. only then does the daemon pick the next roadmap entry
 
-This means the parent repo no longer accumulates side commits to
-`lab/` during run/critique. Durable experiment state lives on the
-experiment branch until finalize lands it.
+Durable experiment state lives on the experiment branch until finalize
+lands it. The parent checkout should not accumulate side commits during
+run/critique/replan.
 
-## Verdicts
+## Decisions
 
-- `add_branch`: merge accepted code + `lab/` updates
-- `graduate`: merge accepted code + `lab/` updates
+- `accept`: merge accepted code + `lab/` updates
 - `reject`: merge metadata-only `lab/` updates, preserve discarded implementation SHA
 - `no_op`: merge metadata-only `lab/` updates, preserve discarded implementation SHA
 
-The normal flow does **not** require a human `graduate confirm`
-step. That path is legacy-only.
+The critic decision is a recommendation backed by evidence and
+confidence. Replan decides what that evidence means for the queue.
 
 ## Planning
 
@@ -65,13 +66,12 @@ Humans can use the same pipeline without bypassing it:
   contract (`lab-design-variant`, `lab-implement-variant`,
   `lab-replan-roadmap`, or `lab-finalize-pr`)
 
-Manual edits should preserve the same rule as the daemon: offline
-task names, task features, and prior outcomes may select a slice or
-explain a result, but promotable runtime behavior must be derived
-from the task instruction, workspace, tools, and observations.
+Manual edits should preserve the same goal as the daemon: use benchmark
+evidence to learn, but prefer runtime policies and harness mechanisms
+that generalize beyond one benchmark identity.
 
 ## Where to read more
 
-- `lab/METHODOLOGY.md` for experiment-design and verdict thresholds
+- `lab/METHODOLOGY.md` for experiment-design guidance
 - `lab/OPERATIONS.md` for daemon/service/worktree operation
 - `.agents/skills/lab/SKILL.md` for the skill-level routing model

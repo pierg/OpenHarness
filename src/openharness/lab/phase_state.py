@@ -15,10 +15,12 @@ The file is the source of truth for **resumability**:
 -   Each phase records the timestamp it succeeded at plus a small
     payload (commit list, run id, PR url, …). Operators can read these
     files directly to debug "what did the daemon think happened here".
--   Failed phases are *not* sticky — the runner clears them at the
-    start of each retry attempt, then re-marks them on the new outcome.
-    "Stuck on the same phase forever" is detected via the existing
-    consecutive-failure counter in :mod:`daemon_state`, not here.
+-   Failed phase status can be retried, but the failure history is
+    deliberately sticky across retry attempts. ``mark_running`` clears
+    the transient status/error fields, while ``failure_count`` and
+    ``prior_failures`` survive so the runner can enforce the repair
+    budget and the next skill spawn can read repair context. Success
+    (``mark_ok``) or an explicit operator reset clears that history.
 
 Layout:
 
