@@ -49,9 +49,7 @@ def _validate_one(path: Path, validator: Draft202012Validator) -> list[str]:
         loc = ".".join(str(p) for p in err.absolute_path) or "<root>"
         errors.append(f"{path.name}::{loc}: {err.message}")
     if (cid := raw.get("id")) and cid != path.stem:
-        errors.append(
-            f"{path.name}: id {cid!r} must match filename stem {path.stem!r}"
-        )
+        errors.append(f"{path.name}: id {cid!r} must match filename stem {path.stem!r}")
     return errors
 
 
@@ -73,11 +71,15 @@ def _check_conflict_symmetry(specs: dict[str, dict]) -> list[str]:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("targets", nargs="*", type=Path,
-                        help="Optional list of component YAML paths "
-                             "(pre-commit passes the changed files).")
-    parser.add_argument("--json", action="store_true",
-                        help="Emit JSON instead of human-readable lines.")
+    parser.add_argument(
+        "targets",
+        nargs="*",
+        type=Path,
+        help="Optional list of component YAML paths (pre-commit passes the changed files).",
+    )
+    parser.add_argument(
+        "--json", action="store_true", help="Emit JSON instead of human-readable lines."
+    )
     args = parser.parse_args(argv)
 
     if not COMPONENTS_DIR.is_dir():
@@ -109,10 +111,12 @@ def main(argv: list[str] | None = None) -> int:
     failed = sum(1 for e in per_file.values() if e) + (1 if cross else 0)
 
     if args.json:
-        print(json.dumps(
-            {"per_file": per_file, "cross_file": cross, "failed": failed},
-            indent=2,
-        ))
+        print(
+            json.dumps(
+                {"per_file": per_file, "cross_file": cross, "failed": failed},
+                indent=2,
+            )
+        )
     else:
         for fname, errs in per_file.items():
             if errs:

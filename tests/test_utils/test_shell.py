@@ -37,21 +37,6 @@ def test_resolve_shell_command_wraps_with_script_when_pty_requested(monkeypatch)
     assert command == ["/usr/bin/script", "-qefc", "echo hi", "/dev/null"]
 
 
-def test_resolve_shell_command_wraps_with_bsd_script_on_macos(monkeypatch):
-    def fake_which(name: str) -> str | None:
-        mapping = {
-            "bash": "/bin/bash",
-            "script": "/usr/bin/script",
-        }
-        return mapping.get(name)
-
-    monkeypatch.setattr("openharness.utils.shell.shutil.which", fake_which)
-
-    command = resolve_shell_command("echo hi", platform_name="macos", prefer_pty=True)
-
-    assert command == ["/usr/bin/script", "-q", "/dev/null", "/bin/bash", "-lc", "echo hi"]
-
-
 def test_resolve_shell_command_uses_powershell_on_windows(monkeypatch):
     def fake_which(name: str) -> str | None:
         mapping = {
@@ -70,6 +55,21 @@ def test_resolve_shell_command_uses_powershell_on_windows(monkeypatch):
         "-Command",
         "Write-Output hi",
     ]
+
+
+def test_resolve_shell_command_skips_script_on_macos(monkeypatch):
+    def fake_which(name: str) -> str | None:
+        mapping = {
+            "bash": "/bin/bash",
+            "script": "/usr/bin/script",
+        }
+        return mapping.get(name)
+
+    monkeypatch.setattr("openharness.utils.shell.shutil.which", fake_which)
+
+    command = resolve_shell_command("echo hi", platform_name="macos", prefer_pty=True)
+
+    assert command == ["/bin/bash", "-lc", "echo hi"]
 
 
 def test_resolve_shell_command_linux_without_script_falls_back(monkeypatch):

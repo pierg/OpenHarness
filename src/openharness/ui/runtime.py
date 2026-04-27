@@ -8,8 +8,10 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Awaitable, Callable, Iterable
 
-from openharness.api.client import SupportsStreamingMessages
-from openharness.api.factory import create_api_client
+from openharness.api.client import AnthropicApiClient, SupportsStreamingMessages
+from openharness.api.codex_client import CodexApiClient
+from openharness.api.copilot_client import CopilotClient
+from openharness.api.openai_client import OpenAICompatibleClient
 from openharness.api.provider import auth_status, detect_provider
 from openharness.bridge import get_bridge_manager
 from openharness.commands import CommandContext, CommandResult, create_default_command_registry
@@ -27,12 +29,9 @@ from openharness.hooks import HookEvent, HookExecutionContext, HookExecutor, loa
 from openharness.hooks.hot_reload import HookReloader
 from openharness.mcp.client import McpClientManager
 from openharness.mcp.config import load_mcp_server_configs
-from openharness.observability import NullTraceObserver, TraceObserver, create_trace_observer
 from openharness.permissions import PermissionChecker
-from openharness.permissions.modes import PermissionMode
 from openharness.plugins import load_plugins
 from openharness.prompts import build_runtime_system_prompt
-from openharness.runs.context import RunContext
 from openharness.state import AppState, AppStateStore
 from openharness.services.session_backend import DEFAULT_SESSION_BACKEND, SessionBackend
 from openharness.tools import ToolRegistry, create_default_tool_registry
@@ -62,8 +61,6 @@ class RuntimeBundle:
     session_id: str = ""
     settings_overrides: dict[str, Any] = field(default_factory=dict)
     session_backend: SessionBackend = DEFAULT_SESSION_BACKEND
-    run_context: RunContext | None = None
-    trace_observer: TraceObserver = field(default_factory=NullTraceObserver)
     extra_skill_dirs: tuple[str, ...] = ()
     extra_plugin_roots: tuple[str, ...] = ()
 
@@ -124,20 +121,53 @@ def _resolve_api_client_from_settings(settings) -> SupportsStreamingMessages:
     # Ensure profile fields (base_url, model, api_format) are projected to settings
     settings = settings.materialize_active_profile()
 
-    try:
-        return create_api_client(settings)
-    except ValueError as exc:
-        message = str(exc)
-        if "No API key found" not in message and "No credentials found" not in message:
-            raise
-        print(
-            "Error: No API key configured.\n"
-            "  Run `oh auth login` to set up authentication, or set the\n"
-            "  GOOGLE_API_KEY, GEMINI_API_KEY, ANTHROPIC_API_KEY, or OPENAI_API_KEY "
-            "environment variable.",
-            file=sys.stderr,
+    def _safe_resolve_auth():
+        try:
+            return settings.resolve_auth()
+        except (ValueError, Exception):
+            print(
+                "Error: No API key configured.\n"
+                "  Run `oh auth login` to set up authentication, or set the\n"
+                "  ANTHROPIC_API_KEY (or OPENAI_API_KEY) environment variable.",
+                file=sys.stderr,
+            )
+            raise SystemExit(1)
+
+    if settings.api_format == "copilot":
+        from openharness.api.copilot_client import COPILOT_DEFAULT_MODEL
+
+        copilot_model = (
+            COPILOT_DEFAULT_MODEL
+            if settings.model
+            in {"claude-sonnet-4-20250514", "claude-sonnet-4-6", "sonnet", "default"}
+            else settings.model
         )
-        raise SystemExit(1) from exc
+        return CopilotClient(model=copilot_model)
+    if settings.provider == "openai_codex":
+        auth = _safe_resolve_auth()
+        return CodexApiClient(
+            auth_token=auth.value,
+            base_url=settings.base_url,
+        )
+    if settings.provider == "anthropic_claude":
+        return AnthropicApiClient(
+            auth_token=_safe_resolve_auth().value,
+            base_url=settings.base_url,
+            claude_oauth=True,
+            auth_token_resolver=lambda: settings.resolve_auth().value,
+        )
+    if settings.api_format in ("openai", "openai_compat"):
+        auth = _safe_resolve_auth()
+        return OpenAICompatibleClient(
+            api_key=auth.value,
+            base_url=settings.base_url,
+            timeout=settings.timeout,
+        )
+    auth = _safe_resolve_auth()
+    return AnthropicApiClient(
+        api_key=auth.value,
+        base_url=settings.base_url,
+    )
 
 
 async def build_runtime(
@@ -150,9 +180,6 @@ async def build_runtime(
     system_prompt: str | None = None,
     api_key: str | None = None,
     api_format: str | None = None,
-    permission_mode: str | None = None,
-    allowed_tools: list[str] | None = None,
-    disallowed_tools: list[str] | None = None,
     active_profile: str | None = None,
     api_client: SupportsStreamingMessages | None = None,
     permission_prompt: PermissionPrompt | None = None,
@@ -161,14 +188,11 @@ async def build_runtime(
     restore_tool_metadata: dict[str, object] | None = None,
     enforce_max_turns: bool = True,
     session_backend: SessionBackend | None = None,
-    run_id: str | None = None,
-    trace_observer: TraceObserver | None = None,
+    permission_mode: str | None = None,
     extra_skill_dirs: Iterable[str | Path] | None = None,
     extra_plugin_roots: Iterable[str | Path] | None = None,
 ) -> RuntimeBundle:
     """Build the shared runtime for an OpenHarness session."""
-    from uuid import uuid4
-
     settings_overrides: dict[str, Any] = {
         "model": model,
         "max_turns": max_turns,
@@ -180,57 +204,27 @@ async def build_runtime(
         "permission_mode": permission_mode,
     }
     settings = load_settings().merge_cli_overrides(**settings_overrides)
-    runtime_cwd = str(Path(cwd or Path.cwd()).resolve())
+    cwd = str(Path(cwd).expanduser().resolve()) if cwd else str(Path.cwd())
     normalized_skill_dirs = tuple(
         str(Path(path).expanduser().resolve()) for path in (extra_skill_dirs or ())
     )
     normalized_plugin_roots = tuple(
         str(Path(path).expanduser().resolve()) for path in (extra_plugin_roots or ())
     )
-    if permission_mode is not None:
-        resolved_permission_mode = (
-            permission_mode
-            if isinstance(permission_mode, PermissionMode)
-            else PermissionMode(permission_mode)
-        )
-        settings = settings.model_copy(
-            update={
-                "permission": settings.permission.model_copy(
-                    update={"mode": resolved_permission_mode}
-                )
-            }
-        )
-    plugins = load_plugins(settings, runtime_cwd, extra_roots=normalized_plugin_roots)
+    plugins = load_plugins(settings, cwd, extra_roots=normalized_plugin_roots)
     if api_client:
         resolved_api_client = api_client
     else:
         resolved_api_client = _resolve_api_client_from_settings(settings)
     mcp_manager = McpClientManager(load_mcp_server_configs(settings, plugins))
     await mcp_manager.connect_all()
-    tool_registry = create_default_tool_registry(
-        mcp_manager,
-        allowed_tools=allowed_tools,
-        disallowed_tools=disallowed_tools,
-    )
-    session_id = uuid4().hex[:12]
+    tool_registry = create_default_tool_registry(mcp_manager)
+    # Register plugin-provided tools
+    for plugin in plugins:
+        if plugin.enabled and plugin.tools:
+            for tool in plugin.tools:
+                tool_registry.register(tool)
     provider = detect_provider(settings)
-    run_context = RunContext.create(
-        runtime_cwd,
-        interface="interactive",
-        run_id=run_id,
-        metadata={
-            "session_id": session_id,
-        },
-    )
-    resolved_trace_observer = trace_observer or create_trace_observer(
-        session_id=session_id,
-        interface="interactive",
-        cwd=runtime_cwd,
-        model=settings.model,
-        provider=provider.name,
-        run_id=run_context.run_id,
-    )
-    run_context.bind_trace_observer(resolved_trace_observer)
     bridge_manager = get_bridge_manager()
     app_state = AppStateStore(
         AppState(
@@ -239,7 +233,7 @@ async def build_runtime(
             model=settings.model,
             permission_mode=settings.permission.mode.value,
             theme=settings.theme,
-            cwd=runtime_cwd,
+            cwd=cwd,
             provider=provider.name,
             auth_status=auth_status(settings),
             base_url=settings.base_url or "",
@@ -265,7 +259,7 @@ async def build_runtime(
         if api_client is None
         else load_hook_registry(settings, plugins),
         HookExecutionContext(
-            cwd=Path(runtime_cwd).resolve(),
+            cwd=Path(cwd).resolve(),
             api_client=resolved_api_client,
             default_model=settings.model,
         ),
@@ -273,16 +267,21 @@ async def build_runtime(
     engine_max_turns = settings.max_turns if (enforce_max_turns or max_turns is not None) else None
     system_prompt_text = build_runtime_system_prompt(
         settings,
-        cwd=runtime_cwd,
+        cwd=cwd,
         latest_user_prompt=prompt,
         extra_skill_dirs=normalized_skill_dirs,
         extra_plugin_roots=normalized_plugin_roots,
     )
+    from uuid import uuid4
+
+    session_id = uuid4().hex[:12]
+
     restored_metadata = {
         "permission_mode": settings.permission.mode.value,
         "read_file_state": [],
         "invoked_skills": [],
         "async_agent_state": [],
+        "async_agent_tasks": [],
         "recent_work_log": [],
         "recent_verified_work": [],
         "task_focus_state": {
@@ -302,7 +301,7 @@ async def build_runtime(
         api_client=resolved_api_client,
         tool_registry=tool_registry,
         permission_checker=PermissionChecker(settings.permission),
-        cwd=runtime_cwd,
+        cwd=cwd,
         model=settings.model,
         system_prompt=system_prompt_text,
         max_tokens=settings.max_tokens,
@@ -318,13 +317,11 @@ async def build_runtime(
         tool_metadata={
             "mcp_manager": mcp_manager,
             "bridge_manager": bridge_manager,
-            "run_context": run_context,
             "extra_skill_dirs": normalized_skill_dirs,
             "extra_plugin_roots": normalized_plugin_roots,
             "session_id": session_id,
             **restored_metadata,
         },
-        trace_observer=resolved_trace_observer,
     )
     # Restore messages from a saved session if provided
     if restore_messages:
@@ -337,11 +334,11 @@ async def build_runtime(
     if settings.sandbox.enabled and settings.sandbox.backend == "docker":
         from openharness.sandbox.session import start_docker_sandbox
 
-        await start_docker_sandbox(settings, session_id, Path(runtime_cwd))
+        await start_docker_sandbox(settings, session_id, Path(cwd))
 
     return RuntimeBundle(
         api_client=resolved_api_client,
-        cwd=runtime_cwd,
+        cwd=cwd,
         mcp_manager=mcp_manager,
         tool_registry=tool_registry,
         app_state=app_state,
@@ -357,8 +354,6 @@ async def build_runtime(
         session_id=session_id,
         settings_overrides=settings_overrides,
         session_backend=session_backend or DEFAULT_SESSION_BACKEND,
-        run_context=run_context,
-        trace_observer=resolved_trace_observer,
         extra_skill_dirs=normalized_skill_dirs,
         extra_plugin_roots=normalized_plugin_roots,
     )
@@ -366,15 +361,6 @@ async def build_runtime(
 
 async def start_runtime(bundle: RuntimeBundle) -> None:
     """Run session start hooks."""
-    metadata = {
-        "session_id": bundle.session_id,
-        "cwd": bundle.cwd,
-        "provider": bundle.app_state.get().provider,
-        "model": bundle.app_state.get().model,
-    }
-    if bundle.run_context is not None:
-        bundle.run_context.start(metadata=metadata)
-    bundle.trace_observer.start_session(metadata=metadata)
     await bundle.hook_executor.execute(
         HookEvent.SESSION_START,
         {"cwd": bundle.cwd, "event": HookEvent.SESSION_START.value},
@@ -399,18 +385,6 @@ async def close_runtime(bundle: RuntimeBundle) -> None:
         HookEvent.SESSION_END,
         {"cwd": bundle.cwd, "event": HookEvent.SESSION_END.value},
     )
-    if bundle.run_context is not None:
-        _sync_run_artifacts(bundle)
-    bundle.trace_observer.end_session(
-        output={"message_count": len(bundle.engine.messages)},
-        metadata={"session_id": bundle.session_id},
-    )
-    if bundle.run_context is not None:
-        bundle.run_context.finish(
-            status="completed",
-            results=_build_interactive_results(bundle),
-            metrics=_build_interactive_metrics(bundle),
-        )
 
 
 def _last_user_text(messages: list[ConversationMessage]) -> str:
@@ -418,52 +392,6 @@ def _last_user_text(messages: list[ConversationMessage]) -> str:
         if msg.role == "user" and msg.text.strip():
             return msg.text.strip()
     return ""
-
-
-def _last_assistant_text(messages: list[ConversationMessage]) -> str:
-    for msg in reversed(messages):
-        if msg.role == "assistant" and msg.text.strip():
-            return msg.text.strip()
-    return ""
-
-
-def _build_interactive_results(bundle: RuntimeBundle) -> dict[str, Any]:
-    return {
-        "message_count": len(bundle.engine.messages),
-        "last_user_text": _last_user_text(bundle.engine.messages),
-        "last_assistant_text": _last_assistant_text(bundle.engine.messages),
-        "pending_continuation": bundle.engine.has_pending_continuation(),
-    }
-
-
-def _build_interactive_metrics(bundle: RuntimeBundle) -> dict[str, Any]:
-    usage = bundle.engine.total_usage
-    return {
-        "input_tokens": int(getattr(usage, "input_tokens", 0)),
-        "output_tokens": int(getattr(usage, "output_tokens", 0)),
-        "cache_creation_input_tokens": int(getattr(usage, "cache_creation_input_tokens", 0)),
-        "cache_read_input_tokens": int(getattr(usage, "cache_read_input_tokens", 0)),
-        "total_tokens": int(getattr(usage, "input_tokens", 0))
-        + int(getattr(usage, "output_tokens", 0)),
-    }
-
-
-def _sync_run_artifacts(bundle: RuntimeBundle) -> None:
-    if bundle.run_context is None:
-        return
-    bundle.run_context.append_messages(bundle.engine.messages)
-    bundle.run_context.write_metrics(_build_interactive_metrics(bundle))
-    bundle.run_context.write_results(_build_interactive_results(bundle))
-
-
-async def _render_and_record_event(
-    bundle: RuntimeBundle,
-    event: StreamEvent,
-    render_event: StreamRenderer,
-) -> None:
-    if bundle.run_context is not None:
-        bundle.run_context.log_event(event)
-    await render_event(event)
 
 
 def _truncate(text: str, limit: int) -> str:
@@ -619,7 +547,7 @@ async def handle_line(
             bundle.engine.set_system_prompt(system_prompt)
             try:
                 async for event in bundle.engine.submit_message(submit_prompt):
-                    await _render_and_record_event(bundle, event, render_event)
+                    await render_event(event)
             except MaxTurnsExceeded as exc:
                 await print_system(f"Stopped after {exc.max_turns} turns (max_turns).")
                 pending = _format_pending_tool_results(bundle.engine.messages)
@@ -637,7 +565,6 @@ async def handle_line(
                 session_id=bundle.session_id,
                 tool_metadata=bundle.engine.tool_metadata,
             )
-            _sync_run_artifacts(bundle)
         if result.continue_pending:
             settings = bundle.current_settings()
             if bundle.enforce_max_turns:
@@ -657,7 +584,7 @@ async def handle_line(
             )
             try:
                 async for event in bundle.engine.continue_pending(max_turns=turns):
-                    await _render_and_record_event(bundle, event, render_event)
+                    await render_event(event)
             except MaxTurnsExceeded as exc:
                 await print_system(f"Stopped after {exc.max_turns} turns (max_turns).")
                 pending = _format_pending_tool_results(bundle.engine.messages)
@@ -672,7 +599,6 @@ async def handle_line(
                 session_id=bundle.session_id,
                 tool_metadata=bundle.engine.tool_metadata,
             )
-            _sync_run_artifacts(bundle)
         sync_app_state(bundle)
         return not result.should_exit
 
@@ -689,7 +615,7 @@ async def handle_line(
     bundle.engine.set_system_prompt(system_prompt)
     try:
         async for event in bundle.engine.submit_message(line):
-            await _render_and_record_event(bundle, event, render_event)
+            await render_event(event)
     except MaxTurnsExceeded as exc:
         await print_system(f"Stopped after {exc.max_turns} turns (max_turns).")
         pending = _format_pending_tool_results(bundle.engine.messages)
@@ -704,7 +630,6 @@ async def handle_line(
             session_id=bundle.session_id,
             tool_metadata=bundle.engine.tool_metadata,
         )
-        _sync_run_artifacts(bundle)
         sync_app_state(bundle)
         return True
     bundle.session_backend.save_snapshot(
@@ -716,7 +641,6 @@ async def handle_line(
         session_id=bundle.session_id,
         tool_metadata=bundle.engine.tool_metadata,
     )
-    _sync_run_artifacts(bundle)
     sync_app_state(bundle)
     return True
 

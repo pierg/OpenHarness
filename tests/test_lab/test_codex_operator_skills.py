@@ -19,8 +19,10 @@ def isolated_codex(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[Pat
     monkeypatch.setenv("OPENHARNESS_REPO_ROOT", str(repo))
 
     import openharness.lab.paths as paths
+
     importlib.reload(paths)
     import openharness.lab.codex as codex
+
     importlib.reload(codex)
 
     return repo, codex
@@ -49,11 +51,13 @@ def test_ensure_skill_path_deploys_operator_skills(
             return subprocess.CompletedProcess(
                 cmd,
                 0,
-                stdout=json.dumps({
-                    "ok": True,
-                    "repo": "pierg/OpenHarness",
-                    "registered": True,
-                }),
+                stdout=json.dumps(
+                    {
+                        "ok": True,
+                        "repo": "pierg/OpenHarness",
+                        "registered": True,
+                    }
+                ),
                 stderr="",
             )
         if cmd[1] == "deploy":
@@ -107,11 +111,13 @@ def test_ensure_skill_path_deploys_into_worktree_with_parent_repo_key(
             return subprocess.CompletedProcess(
                 cmd,
                 0,
-                stdout=json.dumps({
-                    "ok": True,
-                    "repo": "pierg/OpenHarness",
-                    "registered": True,
-                }),
+                stdout=json.dumps(
+                    {
+                        "ok": True,
+                        "repo": "pierg/OpenHarness",
+                        "registered": True,
+                    }
+                ),
                 stderr="",
             )
         if cmd[1] == "deploy":
@@ -156,11 +162,13 @@ def test_ensure_skill_path_raises_when_operator_deploy_fails(
             return subprocess.CompletedProcess(
                 cmd,
                 0,
-                stdout=json.dumps({
-                    "ok": True,
-                    "repo": "pierg/OpenHarness",
-                    "registered": True,
-                }),
+                stdout=json.dumps(
+                    {
+                        "ok": True,
+                        "repo": "pierg/OpenHarness",
+                        "registered": True,
+                    }
+                ),
                 stderr="",
             )
         if cmd[1] == "deploy":

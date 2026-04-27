@@ -64,7 +64,13 @@ PhaseName = Literal[
     "finalize",
 ]
 PHASE_ORDER: tuple[PhaseName, ...] = (
-    "preflight", "design", "implement", "run", "critique", "replan", "finalize",
+    "preflight",
+    "design",
+    "implement",
+    "run",
+    "critique",
+    "replan",
+    "finalize",
 )
 
 
@@ -189,7 +195,9 @@ def _atomic_write(path: Path, text: str) -> None:
     """
     path.parent.mkdir(parents=True, exist_ok=True)
     fd, tmp_path = tempfile.mkstemp(
-        prefix=f".{path.name}.", suffix=".tmp", dir=str(path.parent),
+        prefix=f".{path.name}.",
+        suffix=".tmp",
+        dir=str(path.parent),
     )
     try:
         with os.fdopen(fd, "w") as f:

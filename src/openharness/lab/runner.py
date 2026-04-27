@@ -116,8 +116,8 @@ logger = logging.getLogger("openharness.lab.runner")
 
 DEFAULT_POLL_INTERVAL_SEC = 60
 DEFAULT_RUN_TIMEOUT_SEC = 16 * 60 * 60  # 16h cap on a single experiment run.
-DEFAULT_IDLE_SLEEP_SEC = 15              # idle poll cadence; SIGUSR1 wakes early.
-DEFAULT_XEXP_EVERY = 1                   # cross-experiment-critic every M runs.
+DEFAULT_IDLE_SLEEP_SEC = 15  # idle poll cadence; SIGUSR1 wakes early.
+DEFAULT_XEXP_EVERY = 1  # cross-experiment-critic every M runs.
 
 # Module-level wake event. The runner installs a SIGUSR1 handler that
 # sets this event; the loop uses Event.wait() instead of time.sleep()
@@ -183,14 +183,19 @@ def parse_up_next(roadmap_path: Path = LAB_ROOT / "roadmap.md") -> list[RoadmapE
                 depends_on = re.findall(r"`([^`]+)`", val)
         entries.append(
             RoadmapEntry(
-                slug=slug, body=body, idea_id=idea_id,
-                hypothesis=hypothesis, depends_on=depends_on,
+                slug=slug,
+                body=body,
+                idea_id=idea_id,
+                hypothesis=hypothesis,
+                depends_on=depends_on,
             )
         )
     return entries
 
 
-def is_dependency_satisfied(entry: RoadmapEntry, *, roadmap_path: Path = LAB_ROOT / "roadmap.md") -> bool:
+def is_dependency_satisfied(
+    entry: RoadmapEntry, *, roadmap_path: Path = LAB_ROOT / "roadmap.md"
+) -> bool:
     """A dependency is satisfied if every depends-on slug already lives in `## Done`."""
     if not entry.depends_on:
         return True
@@ -221,8 +226,9 @@ def find_latest_run_dir(*, since: datetime | None = None) -> Path | None:
     return max(candidates, key=lambda p: p.stat().st_mtime)
 
 
-def wait_for_summary(run_dir: Path, *, timeout: int = DEFAULT_RUN_TIMEOUT_SEC,
-                     poll: int = DEFAULT_POLL_INTERVAL_SEC) -> bool:
+def wait_for_summary(
+    run_dir: Path, *, timeout: int = DEFAULT_RUN_TIMEOUT_SEC, poll: int = DEFAULT_POLL_INTERVAL_SEC
+) -> bool:
     """Block until `results/summary.md` appears or timeout expires."""
     deadline = time.monotonic() + timeout
     summary = run_dir / "results" / "summary.md"
@@ -417,9 +423,14 @@ class TickResult:
 # Roadmap entries whose work should bypass design+implement entirely.
 # Heuristic: idea_id is one of these magic strings, OR the slug ends
 # in a hand-curated infrastructure/baseline marker.
-_BASELINE_IDEA_IDS: frozenset[str] = frozenset({
-    "baseline snapshot", "infrastructure", "baseline", "infra",
-})
+_BASELINE_IDEA_IDS: frozenset[str] = frozenset(
+    {
+        "baseline snapshot",
+        "infrastructure",
+        "baseline",
+        "infra",
+    }
+)
 
 
 def _entry_needs_variant(entry: RoadmapEntry) -> bool:
@@ -545,7 +556,9 @@ def _maybe_write_repair_context(
     return path, attempt_number
 
 
-def _repair_args(slug: str, phase: phase_state.PhaseName, state: phase_state.SlugPhases) -> list[str]:
+def _repair_args(
+    slug: str, phase: phase_state.PhaseName, state: phase_state.SlugPhases
+) -> list[str]:
     """Return the CLI flags that inject repair-context into a skill spawn.
 
     Empty list when the phase has no prior failures (the common
@@ -605,26 +618,41 @@ def _commit_worktree_changes(
     env = _git_env()
     diff = subprocess.run(
         ["git", "status", "--porcelain", "--", *paths],
-        cwd=str(worktree), env=env, text=True, capture_output=True,
+        cwd=str(worktree),
+        env=env,
+        text=True,
+        capture_output=True,
     )
     if not diff.stdout.strip():
         return None
     msg = f"lab({slug}): {phase} — {_summary_truncate(summary, n=72)}"
     subprocess.run(
         ["git", "add", "--", *paths],
-        cwd=str(worktree), env=env, check=True, capture_output=True,
+        cwd=str(worktree),
+        env=env,
+        check=True,
+        capture_output=True,
     )
     subprocess.run(
         ["git", "commit", "-m", msg],
-        cwd=str(worktree), env=env, check=True, capture_output=True,
+        cwd=str(worktree),
+        env=env,
+        check=True,
+        capture_output=True,
     )
     sha = subprocess.run(
         ["git", "rev-parse", "HEAD"],
-        cwd=str(worktree), env=env, check=True, text=True, capture_output=True,
+        cwd=str(worktree),
+        env=env,
+        check=True,
+        text=True,
+        capture_output=True,
     ).stdout.strip()
     logger.info(
         "committed worktree changes for %s phase=%s sha=%s",
-        slug, phase, sha[:8],
+        slug,
+        phase,
+        sha[:8],
     )
     return sha
 
@@ -638,7 +666,10 @@ def _worktree_changed_paths(worktree: Path) -> list[str]:
     """
     proc = subprocess.run(
         ["git", "status", "--porcelain"],
-        cwd=str(worktree), env=_git_env(), text=True, capture_output=True,
+        cwd=str(worktree),
+        env=_git_env(),
+        text=True,
+        capture_output=True,
         check=True,
     )
     out: list[str] = []
@@ -674,11 +705,17 @@ def _discard_uncommitted_paths(worktree: Path, paths: list[str]) -> None:
     env = _git_env()
     subprocess.run(
         ["git", "restore", "--", *paths],
-        cwd=str(worktree), env=env, check=False, capture_output=True,
+        cwd=str(worktree),
+        env=env,
+        check=False,
+        capture_output=True,
     )
     subprocess.run(
         ["git", "clean", "-f", "--", *paths],
-        cwd=str(worktree), env=env, check=False, capture_output=True,
+        cwd=str(worktree),
+        env=env,
+        check=False,
+        capture_output=True,
     )
 
 
@@ -713,11 +750,17 @@ def _fast_forward_parent_main() -> None:
     env = _git_env()
     subprocess.run(
         ["git", "fetch", "origin", "main"],
-        cwd=str(REPO_ROOT), env=env, check=True, capture_output=True,
+        cwd=str(REPO_ROOT),
+        env=env,
+        check=True,
+        capture_output=True,
     )
     subprocess.run(
         ["git", "merge", "--ff-only", "origin/main"],
-        cwd=str(REPO_ROOT), env=env, check=True, capture_output=True,
+        cwd=str(REPO_ROOT),
+        env=env,
+        check=True,
+        capture_output=True,
     )
 
 
@@ -797,7 +840,10 @@ def _phase_preflight(
     )
     logger.info(
         "preflight ok for %s: worktree=%s branch=%s base=%s",
-        entry.slug, result.info.path, result.info.branch, result.base_sha[:8],
+        entry.slug,
+        result.info.path,
+        result.info.branch,
+        result.base_sha[:8],
     )
     return None
 
@@ -813,7 +859,8 @@ def _phase_design(
     """Spawn ``lab-design-variant`` to produce ``design.md``."""
     if not state.needs_variant:
         phase_state.mark_skipped(
-            entry.slug, "design",
+            entry.slug,
+            "design",
             reason="baseline / infrastructure entry; no variant to design",
         )
         return None
@@ -855,7 +902,9 @@ def _phase_design(
         body = last[:160] or tail or f"(see log {res.log_path.name})"
         msg = f"design spawn exit={res.exit_code}: {body}"
         phase_state.mark_failed(
-            entry.slug, "design", error=msg,
+            entry.slug,
+            "design",
+            error=msg,
             payload={"log_path": str(res.log_path) if res.log_path else None},
         )
         return TickResult(ok=False, outcome="error", summary=msg)
@@ -864,7 +913,8 @@ def _phase_design(
         phase_state.mark_failed(entry.slug, "design", error=msg)
         return TickResult(ok=False, outcome="no-run-dir", summary=msg)
     phase_state.mark_ok(
-        entry.slug, "design",
+        entry.slug,
+        "design",
         payload={
             "design_path": str(design_path),
             "log_path": str(res.log_path) if res.log_path else None,
@@ -884,7 +934,8 @@ def _phase_implement(
     """Spawn ``lab-implement-variant`` to apply the design in the worktree."""
     if not state.needs_variant:
         phase_state.mark_skipped(
-            entry.slug, "implement",
+            entry.slug,
+            "implement",
             reason="baseline / infrastructure entry; nothing to implement",
         )
         return None
@@ -939,7 +990,10 @@ def _phase_implement(
     if failed_checks:
         msg = f"implement validations failed: {failed_checks}"
         phase_state.mark_failed(
-            entry.slug, "implement", error=msg, payload=implement_data,
+            entry.slug,
+            "implement",
+            error=msg,
+            payload=implement_data,
         )
         return TickResult(ok=False, outcome="error", summary=msg)
 
@@ -955,7 +1009,10 @@ def _phase_implement(
             "and record the outcome before phase 3 can run)"
         )
         phase_state.mark_failed(
-            entry.slug, "implement", error=msg, payload=implement_data,
+            entry.slug,
+            "implement",
+            error=msg,
+            payload=implement_data,
         )
         return TickResult(ok=False, outcome="error", summary=msg)
     smoke_errors = smoke.get("errors") or []
@@ -965,25 +1022,32 @@ def _phase_implement(
             f"{_summary_truncate(str(smoke_errors), n=200)}"
         )
         phase_state.mark_failed(
-            entry.slug, "implement", error=msg, payload=implement_data,
+            entry.slug,
+            "implement",
+            error=msg,
+            payload=implement_data,
         )
         return TickResult(ok=False, outcome="error", summary=msg)
     legs = smoke.get("legs") or []
     if not legs:
         msg = "implement smoke block has no legs[] — wiring almost certainly broken"
         phase_state.mark_failed(
-            entry.slug, "implement", error=msg, payload=implement_data,
+            entry.slug,
+            "implement",
+            error=msg,
+            payload=implement_data,
         )
         return TickResult(ok=False, outcome="error", summary=msg)
     errored_legs = [
-        leg.get("leg_id") or "(?)"
-        for leg in legs
-        if isinstance(leg, dict) and leg.get("errored")
+        leg.get("leg_id") or "(?)" for leg in legs if isinstance(leg, dict) and leg.get("errored")
     ]
     if errored_legs:
         msg = f"implement smoke ERRORED on legs: {errored_legs}"
         phase_state.mark_failed(
-            entry.slug, "implement", error=msg, payload=implement_data,
+            entry.slug,
+            "implement",
+            error=msg,
+            payload=implement_data,
         )
         return TickResult(ok=False, outcome="error", summary=msg)
     no_trial_legs = [
@@ -997,7 +1061,10 @@ def _phase_implement(
             "smoke must complete at least one trial per leg"
         )
         phase_state.mark_failed(
-            entry.slug, "implement", error=msg, payload=implement_data,
+            entry.slug,
+            "implement",
+            error=msg,
+            payload=implement_data,
         )
         return TickResult(ok=False, outcome="error", summary=msg)
 
@@ -1127,19 +1194,23 @@ def _phase_run(
         # didn't get patched. Log loudly so the operator can fix.
         logger.warning(
             "could not update journal Run bullet for %s: %s",
-            entry.slug, exc,
+            entry.slug,
+            exc,
         )
 
-    run_payload.update({
-        "instance_id": outcome.instance_id,
-        "run_dir": str(outcome.run_dir),
-        "spec_name": outcome.spec_name,
-        "log_path": str(outcome.log_path),
-        "baseline_at_runtime": operational_baseline_id,
-    })
+    run_payload.update(
+        {
+            "instance_id": outcome.instance_id,
+            "run_dir": str(outcome.run_dir),
+            "spec_name": outcome.spec_name,
+            "log_path": str(outcome.log_path),
+            "baseline_at_runtime": operational_baseline_id,
+        }
+    )
     phase_state.mark_ok(entry.slug, "run", payload=run_payload)
     gcs_sync.maybe_auto_push(
-        instance_id=outcome.instance_id, include_lab_wide=False,
+        instance_id=outcome.instance_id,
+        include_lab_wide=False,
     )
     return None
 
@@ -1169,7 +1240,9 @@ def _phase_critique(
         summary = labingest.ingest_run(run_dir)
         logger.info(
             "ingested instance=%s legs=%d trials=%d",
-            summary.instance_id, summary.legs_inserted, summary.trials_inserted,
+            summary.instance_id,
+            summary.legs_inserted,
+            summary.trials_inserted,
         )
     except Exception as exc:
         msg = f"ingest failed: {exc}"
@@ -1203,8 +1276,7 @@ def _phase_critique(
         failed = [r for r in results if not r.ok]
         if failed:
             msg = (
-                f"{len(failed)} Gemini trial-critic spawn(s) failed; "
-                f"first log={failed[0].log_path}"
+                f"{len(failed)} Gemini trial-critic spawn(s) failed; first log={failed[0].log_path}"
             )
             phase_state.mark_failed(entry.slug, "critique", error=msg)
             return TickResult(ok=False, outcome="error", summary=msg)
@@ -1217,30 +1289,31 @@ def _phase_critique(
         )
         codex_adapter.run_many(
             [("task-features", [c]) for c in unseen],
-            cfg=cx, parent_run_dir=run_dir,
+            cfg=cx,
+            parent_run_dir=run_dir,
             expected_orchestrator_pid=my_pid,
         )
 
     still_needing = trials_needing_critique(summary.instance_id)
     if still_needing:
-        msg = (
-            f"{len(still_needing)} trials still missing critiques; "
-            "not running experiment-critic"
-        )
+        msg = f"{len(still_needing)} trials still missing critiques; not running experiment-critic"
         logger.warning(msg)
         phase_state.mark_failed(entry.slug, "critique", error=msg)
         return TickResult(ok=False, outcome="error", summary=msg)
     else:
         ds.update_tick(phase="critique", note="experiment-critic")
         codex_adapter.run(
-            "experiment-critic", [summary.instance_id],
-            cfg=cx, parent_run_dir=run_dir,
+            "experiment-critic",
+            [summary.instance_id],
+            cfg=cx,
+            parent_run_dir=run_dir,
             expected_orchestrator_pid=my_pid,
         )
 
     cache_counts = labingest.ingest_critiques([run_dir])
     logger.info(
-        "ingest-critiques after %s: %s", entry.slug,
+        "ingest-critiques after %s: %s",
+        entry.slug,
         ", ".join(f"{k}={v}" for k, v in cache_counts.items() if v),
     )
 
@@ -1273,7 +1346,10 @@ def _phase_critique(
         verdict_branch_applied = result.applied
         logger.info(
             "evaluation apply %s: verdict=%s branch_applied=%s target=%s",
-            entry.slug, evaluation_result.verdict, result.applied, evaluation_result.target_id,
+            entry.slug,
+            evaluation_result.verdict,
+            result.applied,
+            evaluation_result.target_id,
         )
     except Exception:
         logger.exception("evaluation apply failed for %s", entry.slug)
@@ -1289,21 +1365,24 @@ def _phase_critique(
         ),
     )
 
-    critique_payload.update({
-        "instance_id": summary.instance_id,
-        "verdict_kind": verdict_kind,
-        "verdict_target": verdict_target,
-        "verdict_branch_applied": verdict_branch_applied,
-        "verdict_rationale": evaluation_result.rationale if evaluation_result else None,
-        "verdict_confidence": evaluation_result.confidence if evaluation_result else None,
-        "promotability_notes": (
-            evaluation_result.promotability_notes if evaluation_result else None
-        ),
-        "cluster_evidence": evaluation_result.cluster_evidence if evaluation_result else [],
-    })
+    critique_payload.update(
+        {
+            "instance_id": summary.instance_id,
+            "verdict_kind": verdict_kind,
+            "verdict_target": verdict_target,
+            "verdict_branch_applied": verdict_branch_applied,
+            "verdict_rationale": evaluation_result.rationale if evaluation_result else None,
+            "verdict_confidence": evaluation_result.confidence if evaluation_result else None,
+            "promotability_notes": (
+                evaluation_result.promotability_notes if evaluation_result else None
+            ),
+            "cluster_evidence": evaluation_result.cluster_evidence if evaluation_result else [],
+        }
+    )
     phase_state.mark_ok(entry.slug, "critique", payload=critique_payload)
     gcs_sync.maybe_auto_push(
-        instance_id=summary.instance_id, include_lab_wide=True,
+        instance_id=summary.instance_id,
+        include_lab_wide=True,
     )
     return None
 
@@ -1479,12 +1558,7 @@ def _phase_finalize(
         return TickResult(ok=False, outcome="error", summary=_summary_truncate(msg))
 
     canonical_pr_url = (
-        str(
-            finalize_data.get("experiment_pr_url")
-            or finalize_data.get("pr_url")
-            or ""
-        )
-        or None
+        str(finalize_data.get("experiment_pr_url") or finalize_data.get("pr_url") or "") or None
     )
     if not canonical_pr_url:
         msg = (
@@ -1496,10 +1570,7 @@ def _phase_finalize(
 
     experiment_pr_state = str(finalize_data.get("experiment_pr_state") or "").lower()
     expected_pr_state = "merged" if verdict_kind == "accept" else "closed"
-    if (
-        verdict_kind in ("accept", "reject", "no_op")
-        and experiment_pr_state != expected_pr_state
-    ):
+    if verdict_kind in ("accept", "reject", "no_op") and experiment_pr_state != expected_pr_state:
         msg = (
             f"finalize left canonical experiment PR in state "
             f"{experiment_pr_state or '(missing)'}; expected {expected_pr_state}"
@@ -1553,12 +1624,12 @@ _PHASE_DISPATCH: tuple[
     ...,
 ] = (
     ("preflight", _phase_preflight),
-    ("design",    _phase_design),
+    ("design", _phase_design),
     ("implement", _phase_implement),
-    ("run",       _phase_run),
-    ("critique",  _phase_critique),
-    ("replan",    _phase_replan),
-    ("finalize",  _phase_finalize),
+    ("run", _phase_run),
+    ("critique", _phase_critique),
+    ("replan", _phase_replan),
+    ("finalize", _phase_finalize),
 )
 
 
@@ -1573,9 +1644,7 @@ def _pause_after_phase_if_requested(
     successfully. Stopping before the boundary risks killing an
     in-flight harbor run or leaving the next resume ambiguous.
     """
-    if not ds.consume_pause_after_if_matches(
-        phase=phase_name, slug=entry.slug, actor="daemon"
-    ):
+    if not ds.consume_pause_after_if_matches(phase=phase_name, slug=entry.slug, actor="daemon"):
         return None
     msg = f"paused after {phase_name} for {entry.slug}"
     ds.update_tick(phase=phase_name, note=msg)
@@ -1616,13 +1685,15 @@ def _process_entry(entry: RoadmapEntry, cfg: OrchestratorConfig) -> TickResult:
         return TickResult(ok=True, outcome="ok", summary="dry-run")
 
     state = phase_state.load_or_init(
-        entry.slug, needs_variant=_entry_needs_variant(entry),
+        entry.slug,
+        needs_variant=_entry_needs_variant(entry),
     )
     next_phase = state.first_unfinished()
     if next_phase is None:
         logger.info("entry %s is already fully closed; nothing to do", entry.slug)
         return TickResult(
-            ok=True, outcome="ok",
+            ok=True,
+            outcome="ok",
             summary=f"all phases already ok for {entry.slug}",
         )
 
@@ -1639,22 +1710,20 @@ def _process_entry(entry: RoadmapEntry, cfg: OrchestratorConfig) -> TickResult:
     failed_rec = state.get(next_phase)
     if failed_rec.status == "failed":
         budget = phase_state.MAX_REPAIRS_PER_PHASE
-        late_run_summary = (
-            next_phase == "run" and _timed_out_run_has_summary(failed_rec)
-        )
-        if (
-            next_phase != "preflight"
-            and failed_rec.failure_count > budget
-            and not late_run_summary
-        ):
+        late_run_summary = next_phase == "run" and _timed_out_run_has_summary(failed_rec)
+        if next_phase != "preflight" and failed_rec.failure_count > budget and not late_run_summary:
             logger.warning(
                 "%s for %s exhausted repair budget (%d failures, max=%d); "
                 "leaving sticky-failed for the failure gate",
-                next_phase, entry.slug, failed_rec.failure_count, budget,
+                next_phase,
+                entry.slug,
+                failed_rec.failure_count,
+                budget,
             )
             err = failed_rec.error or "(no error message recorded)"
             return TickResult(
-                ok=False, outcome="error",
+                ok=False,
+                outcome="error",
                 summary=(
                     f"{next_phase} failed after {failed_rec.failure_count} "
                     f"attempt(s); repair budget exhausted: "
@@ -1676,8 +1745,10 @@ def _process_entry(entry: RoadmapEntry, cfg: OrchestratorConfig) -> TickResult:
             )
         logger.info(
             "retrying %s for %s (repair attempt %d of %d)",
-            next_phase, entry.slug,
-            failed_rec.failure_count + 1, budget + 1,
+            next_phase,
+            entry.slug,
+            failed_rec.failure_count + 1,
+            budget + 1,
         )
 
     for phase_name, handler in _PHASE_DISPATCH:
@@ -1702,13 +1773,15 @@ def _process_entry(entry: RoadmapEntry, cfg: OrchestratorConfig) -> TickResult:
     # All phases ok / skipped.
     summary = state.get("critique").payload.get("instance_id") or entry.slug
     return TickResult(
-        ok=True, outcome="ok",
+        ok=True,
+        outcome="ok",
         summary=f"runs/experiments/{summary}",
     )
 
 
 def _select_next_entry(
-    ready: list[RoadmapEntry], state: ds.DaemonState,
+    ready: list[RoadmapEntry],
+    state: ds.DaemonState,
 ) -> RoadmapEntry | None:
     """Pick the next entry to process given current state.
 
@@ -1780,8 +1853,8 @@ def _idle_log(reason: str, sleep_sec: int) -> None:
     last_reason = getattr(_idle_log, "_last_reason", None)
     if now - last > 60 or reason != last_reason:
         logger.info("%s; sleeping %ds (or until SIGUSR1)", reason, sleep_sec)
-        _idle_log._last_at = now            # type: ignore[attr-defined]
-        _idle_log._last_reason = reason     # type: ignore[attr-defined]
+        _idle_log._last_at = now  # type: ignore[attr-defined]
+        _idle_log._last_reason = reason  # type: ignore[attr-defined]
 
 
 def _idle_wait(seconds: float) -> bool:
@@ -1818,14 +1891,8 @@ def loop(cfg: OrchestratorConfig | None = None) -> None:
         state = ds.load()
         entries = parse_up_next()
         blocked = _blocked_failure_slugs(state)
-        blocked_ready = [
-            e for e in entries
-            if e.slug in blocked and is_dependency_satisfied(e)
-        ]
-        ready = [
-            e for e in entries
-            if e.slug not in blocked and is_dependency_satisfied(e)
-        ]
+        blocked_ready = [e for e in entries if e.slug in blocked and is_dependency_satisfied(e)]
+        ready = [e for e in entries if e.slug not in blocked and is_dependency_satisfied(e)]
         entry = _select_next_entry(ready, state)
         if entry is None:
             if cfg.once:
@@ -1972,8 +2039,12 @@ def start(*, foreground: bool = True, once: bool = False, dry_run: bool = False)
             logger.info(
                 "orchestrator started (pid=%d, once=%s, dry_run=%s, mode=%s, "
                 "approvals=%d, max_failures_before_demote=%d)",
-                os.getpid(), once, dry_run, state.mode,
-                len(state.approved_slugs), state.max_failures_before_demote,
+                os.getpid(),
+                once,
+                dry_run,
+                state.mode,
+                len(state.approved_slugs),
+                state.max_failures_before_demote,
             )
             loop(cfg)
     except KeyboardInterrupt:

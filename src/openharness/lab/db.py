@@ -83,8 +83,7 @@ def connect(*, db_path: Path | None = None, read_only: bool = False) -> duckdb.D
         path.parent.mkdir(parents=True, exist_ok=True)
     elif not path.exists():
         raise FileNotFoundError(
-            f"Lab DB does not exist at {path}. Run `uv run lab init` (or any write "
-            "command) first."
+            f"Lab DB does not exist at {path}. Run `uv run lab init` (or any write command) first."
         )
     conn = duckdb.connect(str(path), read_only=read_only)
     if not read_only:

@@ -75,9 +75,7 @@ def preflight_check(langfuse: bool = True, docker: bool = True):
 
         try:
             log.info("Checking Docker daemon...")
-            subprocess.run(
-                ["docker", "info"], capture_output=True, check=True, timeout=10
-            )
+            subprocess.run(["docker", "info"], capture_output=True, check=True, timeout=10)
             log.info("Docker daemon OK.")
         except (subprocess.CalledProcessError, FileNotFoundError, subprocess.TimeoutExpired):
             typer.echo(

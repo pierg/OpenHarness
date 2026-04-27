@@ -192,9 +192,10 @@ def _row_from_db(row: tuple[object, ...]) -> RankingRow:
     cost_usd = _opt_float(cost_usd_raw)
     total_tokens = _opt_int(total_tokens_raw)
     evidence_scope = "full_suite" if n_trials >= FULL_SUITE_MIN_TASKS else "slice"
-    target_matches = (
-        _identifier_matches(str(evaluation_target_id) if evaluation_target_id else None, str(agent_id), str(leg_id))
-        or _identifier_matches(str(candidate_leg) if candidate_leg else None, str(agent_id), str(leg_id))
+    target_matches = _identifier_matches(
+        str(evaluation_target_id) if evaluation_target_id else None, str(agent_id), str(leg_id)
+    ) or _identifier_matches(
+        str(candidate_leg) if candidate_leg else None, str(agent_id), str(leg_id)
     )
     eligible, reason = _eligibility(
         verdict=str(verdict) if verdict else None,
@@ -221,7 +222,9 @@ def _row_from_db(row: tuple[object, ...]) -> RankingRow:
         cost_per_task_usd=(cost_usd / n_trials) if cost_usd is not None and n_trials else None,
         cost_per_pass_usd=(cost_usd / n_passed) if cost_usd is not None and n_passed else None,
         total_tokens=total_tokens,
-        tokens_per_task=(total_tokens / n_trials) if total_tokens is not None and n_trials else None,
+        tokens_per_task=(total_tokens / n_trials)
+        if total_tokens is not None and n_trials
+        else None,
         median_duration_sec=_opt_float(median_duration_raw),
         created_at=created_at if isinstance(created_at, datetime) else None,
         eligible=eligible,
@@ -234,8 +237,7 @@ def _identifier_matches(value: str | None, agent_id: str, leg_id: str) -> bool:
     if value is None:
         return False
     needles = {
-        token.strip().strip("`")
-        for token in value.replace(",", " ").replace(";", " ").split()
+        token.strip().strip("`") for token in value.replace(",", " ").replace(";", " ").split()
     }
     return bool(needles & {agent_id, leg_id})
 
@@ -256,11 +258,7 @@ def _eligibility(
 def _sort_key(row: RankingRow) -> tuple[bool, float, float, float, float, int, str]:
     cost = row.cost_per_task_usd if row.cost_per_task_usd is not None else float("inf")
     tokens = row.tokens_per_task if row.tokens_per_task is not None else float("inf")
-    duration = (
-        row.median_duration_sec
-        if row.median_duration_sec is not None
-        else float("inf")
-    )
+    duration = row.median_duration_sec if row.median_duration_sec is not None else float("inf")
     return (
         not row.eligible,
         -(row.pass_rate_pct if row.pass_rate_pct is not None else -1.0),

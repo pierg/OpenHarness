@@ -5,11 +5,12 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Protocol
+from typing import TYPE_CHECKING, Any, Protocol
 
 from pydantic import BaseModel
 
-from openharness.workspace import Workspace
+if TYPE_CHECKING:
+    from openharness.hooks.executor import HookExecutor
 
 
 @dataclass
@@ -18,6 +19,7 @@ class ToolExecutionContext:
 
     cwd: Path
     metadata: dict[str, Any] = field(default_factory=dict)
+    hook_executor: HookExecutor | None = None
 
 
 @dataclass(frozen=True)
@@ -78,7 +80,7 @@ class ToolRegistry:
 
 
 class ToolRegistryFactory(Protocol):
-    """Factory that creates a tool registry bound to a concrete workspace."""
+    """Factory protocol for producing tool registries per workspace."""
 
-    def build(self, workspace: Workspace) -> ToolRegistry:
-        """Return a tool registry bound to *workspace*."""
+    def build(self, workspace: Any) -> ToolRegistry:
+        """Build and return a tool registry."""

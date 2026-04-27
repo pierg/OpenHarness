@@ -123,16 +123,18 @@ def _leg_stats_from_db(instance_id: str) -> list[dict[str, Any]]:
     for r in rows:
         n = int(r[2] or 0)
         np = int(r[3] or 0)
-        out.append({
-            "leg_id": r[0],
-            "agent_id": r[1] or r[0],
-            "n_trials": n,
-            "n_passed": np,
-            "n_failed": int(r[4] or 0),
-            "pass_rate": (np / n) if n else 0.0,
-            "cost_usd": float(r[5] or 0.0),
-            "duration_sec": float(r[6] or 0.0),
-        })
+        out.append(
+            {
+                "leg_id": r[0],
+                "agent_id": r[1] or r[0],
+                "n_trials": n,
+                "n_passed": np,
+                "n_failed": int(r[4] or 0),
+                "pass_rate": (np / n) if n else 0.0,
+                "cost_usd": float(r[5] or 0.0),
+                "duration_sec": float(r[6] or 0.0),
+            }
+        )
     return out
 
 
@@ -152,11 +154,13 @@ def _render_section(
         return _render_aggregate(leg_stats=leg_stats, exp_payload=exp_payload)
     if section == "Mutation impact":
         return _render_mutation_impact(
-            exp_payload=exp_payload, leg_stats=leg_stats,
+            exp_payload=exp_payload,
+            leg_stats=leg_stats,
         )
     if section == "Failure modes":
         return _render_failure_modes(
-            exp_payload=exp_payload, cmp_payloads=cmp_payloads,
+            exp_payload=exp_payload,
+            cmp_payloads=cmp_payloads,
         )
     if section == "Linked follow-ups":
         return _render_followups(exp_payload=exp_payload)

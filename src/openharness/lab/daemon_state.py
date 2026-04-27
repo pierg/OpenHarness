@@ -88,15 +88,15 @@ HISTORY_LIMIT = 50
 
 TickPhase = Literal[
     # New phased pipeline (one per `_process_entry_phased` step):
-    "preflight",           # git clean-check + worktree create (deterministic)
-    "design",              # `lab-design-variant` codex spawn (read-only)
-    "implement",           # `lab-implement-variant` codex spawn (worktree-write)
-    "run",                 # harbor exec + poll for results/summary.md
-    "critique",            # ingest + per-trial critic fan-out + evaluation apply
-    "replan",              # `lab-replan-roadmap` codex spawn + roadmap rewrite
-    "finalize",            # `lab-finalize-pr` codex spawn + cleanup
+    "preflight",  # git clean-check + worktree create (deterministic)
+    "design",  # `lab-design-variant` codex spawn (read-only)
+    "implement",  # `lab-implement-variant` codex spawn (worktree-write)
+    "run",  # harbor exec + poll for results/summary.md
+    "critique",  # ingest + per-trial critic fan-out + evaluation apply
+    "replan",  # `lab-replan-roadmap` codex spawn + roadmap rewrite
+    "finalize",  # `lab-finalize-pr` codex spawn + cleanup
     # Post-pipeline / generic:
-    "done",                # successful close-out, awaiting next tick
+    "done",  # successful close-out, awaiting next tick
     # Legacy values kept so historical `daemon-state.json` files still
     # rehydrate cleanly. The new pipeline never writes these.
     "verdict-pending",
@@ -121,15 +121,15 @@ PipelinePhase = Literal[
 """Real pipeline phases that can be used as pause-after barriers."""
 
 TickOutcome = Literal[
-    "ok",                  # full pipeline succeeded
-    "paused",              # operator-requested pause after a phase completed
-    "refuse",              # codex skill returned REFUSE (e.g. missing creds)
-    "no-run-dir",          # skill said OK but no new run dir appeared
-    "timeout",             # results/summary.md never landed
-    "error",               # unhandled exception in the pipeline
-    "cancelled",           # operator pressed Cancel
-    "auto-demoted",        # exit gate pushed entry to Suggested
-    "blocked",             # exit gate fired — skipped until failures reset
+    "ok",  # full pipeline succeeded
+    "paused",  # operator-requested pause after a phase completed
+    "refuse",  # codex skill returned REFUSE (e.g. missing creds)
+    "no-run-dir",  # skill said OK but no new run dir appeared
+    "timeout",  # results/summary.md never landed
+    "error",  # unhandled exception in the pipeline
+    "cancelled",  # operator pressed Cancel
+    "auto-demoted",  # exit gate pushed entry to Suggested
+    "blocked",  # exit gate fired — skipped until failures reset
 ]
 """How a tick ended. Drives both the failure counter and the history
 panel rendering (color, icon, retry suggestion)."""

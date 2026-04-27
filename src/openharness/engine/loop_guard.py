@@ -24,11 +24,18 @@ import hashlib
 import json
 import logging
 from dataclasses import dataclass, field
+from typing import Protocol
 
 from openharness.engine.messages import ConversationMessage, TextBlock, ToolUseBlock
-from openharness.engine.query import TurnResult
 
 log = logging.getLogger(__name__)
+
+
+class TurnResultLike(Protocol):
+    """Minimal turn-result shape required by loop-guard checks."""
+
+    text: str
+    tool_calls: list[ToolUseBlock]
 
 
 @dataclass(frozen=True)
@@ -104,7 +111,7 @@ def _nudge_identical_tool_call(name: str, count: int) -> ConversationMessage:
     )
 
 
-def inspect_turn(state: LoopGuardState, result: TurnResult) -> ConversationMessage | None:
+def inspect_turn(state: LoopGuardState, result: TurnResultLike) -> ConversationMessage | None:
     """Inspect a completed turn; mutate state; return a nudge message or ``None``.
 
     The caller is responsible for injecting the returned message into the

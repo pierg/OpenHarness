@@ -51,8 +51,6 @@ class ThinkTool(BaseTool):
         del arguments
         return True
 
-    async def execute(
-        self, arguments: ThinkToolInput, context: ToolExecutionContext
-    ) -> ToolResult:
+    async def execute(self, arguments: ThinkToolInput, context: ToolExecutionContext) -> ToolResult:
         del context
         return ToolResult(output=arguments.thought)

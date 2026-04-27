@@ -154,6 +154,7 @@ def render_evaluation_block(evaluation: ExperimentEvaluation, *, slug: str) -> s
             lines.append(f"| `{cluster}` | {detail} |")
     return "\n".join(lines)
 
+
 def _journal_relpath(path: Path) -> str:
     """Render a repo-relative link suitable for `lab/experiments.md`."""
     try:

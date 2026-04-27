@@ -9,6 +9,7 @@ import pytest
 
 import openharness.commands.registry as registry_module
 from openharness.commands.registry import CommandContext, create_default_command_registry
+from openharness.autopilot import RepoVerificationStep
 from openharness.config.paths import (
     get_feedback_log_path,
     get_project_issue_file,
@@ -129,7 +130,9 @@ async def test_reload_plugins_command_is_marked_local_only(tmp_path: Path, monke
 
 
 @pytest.mark.asyncio
-async def test_reload_plugins_command_supports_explicit_remote_admin_opt_in(tmp_path: Path, monkeypatch):
+async def test_reload_plugins_command_supports_explicit_remote_admin_opt_in(
+    tmp_path: Path, monkeypatch
+):
     monkeypatch.setenv("OPENHARNESS_CONFIG_DIR", str(tmp_path / "config"))
     registry = create_default_command_registry()
     command, _ = registry.lookup("/reload-plugins")
@@ -304,6 +307,86 @@ async def test_provider_command_switches_profile_and_requests_runtime_refresh(
     assert loaded.active_profile == "kimi-anthropic"
     assert loaded.base_url == "https://api.moonshot.cn/anthropic"
     assert loaded.model == "kimi-k2.5"
+
+
+@pytest.mark.asyncio
+async def test_autopilot_command_add_list_and_complete(tmp_path: Path, monkeypatch):
+    monkeypatch.setenv("OPENHARNESS_CONFIG_DIR", str(tmp_path / "config"))
+    registry = create_default_command_registry()
+    context = _make_context(tmp_path)
+
+    add_command, add_args = registry.lookup(
+        "/autopilot add idea Build unified queue :: intake from issues and prs"
+    )
+    assert add_command is not None
+    add_result = await add_command.handler(add_args, context)
+    assert "Queued autopilot card" in add_result.message
+
+    list_command, list_args = registry.lookup("/autopilot list")
+    assert list_command is not None
+    list_result = await list_command.handler(list_args, context)
+    assert "Build unified queue" in list_result.message
+
+    next_command, next_args = registry.lookup("/autopilot next")
+    next_result = await next_command.handler(next_args, context)
+    assert "Build unified queue" in next_result.message
+    card_id = next_result.message.split()[0]
+
+    complete_command, complete_args = registry.lookup(f"/autopilot complete {card_id} implemented")
+    complete_result = await complete_command.handler(complete_args, context)
+    assert "-> completed" in complete_result.message
+
+    status_command, status_args = registry.lookup("/autopilot status")
+    status_result = await status_command.handler(status_args, context)
+    assert "- completed: 1" in status_result.message
+
+
+@pytest.mark.asyncio
+async def test_autopilot_command_export_dashboard(tmp_path: Path, monkeypatch):
+    monkeypatch.setenv("OPENHARNESS_CONFIG_DIR", str(tmp_path / "config"))
+    registry = create_default_command_registry()
+    context = _make_context(tmp_path)
+
+    command, args = registry.lookup("/autopilot export-dashboard")
+    assert command is not None
+    result = await command.handler(args, context)
+
+    assert "Exported autopilot dashboard:" in result.message
+    output_dir = Path(result.message.split(": ", 1)[1])
+    assert (output_dir / "index.html").exists()
+    assert (output_dir / "snapshot.json").exists()
+
+
+@pytest.mark.asyncio
+async def test_ship_command_queues_and_executes_card(tmp_path: Path, monkeypatch):
+    monkeypatch.setenv("OPENHARNESS_CONFIG_DIR", str(tmp_path / "config"))
+    registry = create_default_command_registry()
+    context = _make_context(tmp_path)
+
+    async def fake_run_agent_prompt(
+        self, prompt: str, *, model, max_turns, permission_mode, cwd=None
+    ):
+        return "Implemented the requested feature."
+
+    def fake_run_verification_steps(self, policies, *, cwd=None):
+        return [RepoVerificationStep(command="uv run pytest -q", returncode=0, status="success")]
+
+    monkeypatch.setattr(
+        "openharness.autopilot.service.RepoAutopilotStore._run_agent_prompt",
+        fake_run_agent_prompt,
+    )
+    monkeypatch.setattr(
+        "openharness.autopilot.service.RepoAutopilotStore._run_verification_steps",
+        fake_run_verification_steps,
+    )
+
+    command, args = registry.lookup("/ship Build autopilot tick :: end-to-end automation")
+    assert command is not None
+    result = await command.handler(args, context)
+
+    assert "-> completed" in result.message
+    assert "run report:" in result.message
+    assert "verification report:" in result.message
 
 
 @pytest.mark.asyncio
@@ -808,3 +891,27 @@ async def test_git_commands_report_repository_state(tmp_path: Path, monkeypatch)
     commit_command, commit_args = registry.lookup("/commit initial commit")
     commit_result = await commit_command.handler(commit_args, context)
     assert "commit" in commit_result.message.lower()
+
+
+def test_quit_is_alias_for_exit():
+    """Regression for #183: /quit should resolve to the same handler as /exit."""
+    reg = create_default_command_registry()
+
+    exit_cmd, _ = reg.lookup("/exit")
+    quit_cmd, _ = reg.lookup("/quit")
+
+    assert exit_cmd is quit_cmd
+    assert quit_cmd.name == "exit"
+
+
+def test_help_and_list_do_not_duplicate_aliases():
+    """Aliases share a SlashCommand object; help/listing must not repeat it."""
+    reg = create_default_command_registry()
+
+    names = [cmd.name for cmd in reg.list_commands()]
+    assert names.count("exit") == 1
+    assert "quit" not in names  # alias is resolvable via lookup, not listed
+
+    help_text = reg.help_text()
+    assert help_text.count("/exit ") == 1
+    assert "/quit" not in help_text

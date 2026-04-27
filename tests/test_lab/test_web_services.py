@@ -71,13 +71,14 @@ def test_status_can_flags_consistent_with_state(monkeypatch: pytest.MonkeyPatch)
     # wrappers; the post-init computes can_start/can_stop/can_restart.
     monkeypatch.setattr(labsvc, "_systemctl", lambda: "/usr/bin/systemctl")
     monkeypatch.setattr(
-        labsvc, "_systemctl_show",
+        labsvc,
+        "_systemctl_show",
         lambda u: {
-            "LoadState":   "loaded",
+            "LoadState": "loaded",
             "ActiveState": "active",
-            "SubState":    "running",
+            "SubState": "running",
             "FragmentPath": "/some/path",
-            "MainPID":     "1234",
+            "MainPID": "1234",
             "ActiveEnterTimestamp": "Tue 2026-04-21 21:04:28 UTC",
         },
     )
@@ -127,8 +128,13 @@ def test_service_restart_unit_param_rejects_arbitrary_input() -> None:
     assert pat.fullmatch("openharness-lab")
     assert pat.fullmatch("openharness-daemon")
     # Anything else, including obvious injection attempts, refused.
-    for bad in ("ssh", "openharness-lab.service", "openharness-lab && rm -rf /",
-                "../../etc/passwd", ""):
+    for bad in (
+        "ssh",
+        "openharness-lab.service",
+        "openharness-lab && rm -rf /",
+        "../../etc/passwd",
+        "",
+    ):
         assert not pat.fullmatch(bad)
 
 
@@ -160,7 +166,9 @@ def test_run_command_builds_argv_from_prefix(monkeypatch: pytest.MonkeyPatch) ->
     # systemctl resolved (or echoed if absent); always followed by
     # --user + the literal restart args.
     assert argv[1:] == [
-        "--user", "restart", "openharness-daemon.service",
+        "--user",
+        "restart",
+        "openharness-daemon.service",
     ]
 
 
@@ -171,8 +179,9 @@ def test_run_command_substitutes_unit_param_in_template(monkeypatch: pytest.Monk
         returncode = 0
         stdout = stderr = ""
 
-    monkeypatch.setattr(labcmd.subprocess, "run",
-                        lambda argv, **_: (captured.update(argv=argv) or _CP()))
+    monkeypatch.setattr(
+        labcmd.subprocess, "run", lambda argv, **_: captured.update(argv=argv) or _CP()
+    )
     monkeypatch.setattr(labcmd, "_record", lambda r: None)
 
     labcmd.run_command(
@@ -181,7 +190,9 @@ def test_run_command_substitutes_unit_param_in_template(monkeypatch: pytest.Monk
         actor="test:webui",
     )
     assert captured["argv"][1:] == [
-        "--user", "restart", "openharness-lab.service",
+        "--user",
+        "restart",
+        "openharness-lab.service",
     ]
 
 
@@ -212,6 +223,7 @@ def test_empty_argv_prefix_is_rejected() -> None:
 
 def test_kill_precheck_refuses_self_pid() -> None:
     import os
+
     with pytest.raises(labcmd.CommandError, match="web UI's own"):
         labcmd._precheck_kill_process({"pid": str(os.getpid())})
 
@@ -355,10 +367,13 @@ def test_api_cmd_rejects_unknown_unit(client: TestClient, monkeypatch: pytest.Mo
     """A URL-encoded ``unit`` that doesn't match the regex must be
     rejected with 400 — never reach systemctl. This is the surface
     most operationally exposed to typo-driven foot-guns."""
-    r = client.post("/api/cmd", data={
-        "cmd_id": "service-restart",
-        "unit": "ssh",  # not in the allow-list
-    })
+    r = client.post(
+        "/api/cmd",
+        data={
+            "cmd_id": "service-restart",
+            "unit": "ssh",  # not in the allow-list
+        },
+    )
     assert r.status_code == 400
     assert "does not match" in r.text or "pattern" in r.text
 

@@ -114,9 +114,7 @@ def resolve_gcs_uri(uri: str | None = None) -> str:
             "for example gs://my-bucket/openharness/runs."
         )
     if not candidate.startswith("gs://"):
-        raise GCSRunsSyncError(
-            f"Invalid GCS mirror URI {candidate!r}; expected a gs://... path."
-        )
+        raise GCSRunsSyncError(f"Invalid GCS mirror URI {candidate!r}; expected a gs://... path.")
     return candidate.rstrip("/")
 
 
@@ -165,7 +163,8 @@ def sync_portable_runs(
     skipped: list[str] = []
 
     for target in portable_targets(
-        instance_id=instance_id, include_lab_wide=include_lab_wide,
+        instance_id=instance_id,
+        include_lab_wide=include_lab_wide,
     ):
         if direction == "push":
             if not target.local_path.exists():
@@ -204,7 +203,8 @@ def refresh_local_cache() -> CacheRefreshSummary:
     run_dirs = _experiment_run_dirs()
     ingest_summaries = labingest.ingest_runs(run_dirs) if run_dirs else []
     critic_counts = labingest.ingest_critiques(
-        run_dirs or None, include_lab_wide=True,
+        run_dirs or None,
+        include_lab_wide=True,
     )
     return CacheRefreshSummary(
         runs_ingested=len(ingest_summaries),
@@ -244,7 +244,8 @@ def maybe_auto_push(
     except GCSRunsSyncError:
         log.exception(
             "portable artifact auto-push failed for %s (include_lab_wide=%s)",
-            instance_id, include_lab_wide,
+            instance_id,
+            include_lab_wide,
         )
         return
     log.info(

@@ -61,7 +61,7 @@ UnitId = Literal["openharness-lab", "openharness-daemon"]
 UNITS: list[UnitId] = ["openharness-lab", "openharness-daemon"]
 
 _UNIT_DESC: dict[UnitId, str] = {
-    "openharness-lab":    "FastAPI web UI (this process)",
+    "openharness-lab": "FastAPI web UI (this process)",
     "openharness-daemon": "Orchestrator daemon (walks the roadmap)",
 }
 
@@ -111,8 +111,8 @@ class UnitStatus:
         # from the UI (the installer is a separate flow).
         installed = self.is_installed and self.load_state in {"loaded", None}
         running = self.is_active and self.active_state == "active"
-        self.can_start   = installed and not running
-        self.can_stop    = installed and running
+        self.can_start = installed and not running
+        self.can_stop = installed and running
         self.can_restart = installed  # restart is idempotent regardless
 
 
@@ -223,11 +223,15 @@ def journal(
     if bin_path is None:
         return "(journalctl not available on this host)"
     cmd = [
-        bin_path, "--user",
-        "-u", f"{unit}.service",
-        "-n", str(int(lines)),
+        bin_path,
+        "--user",
+        "-u",
+        f"{unit}.service",
+        "-n",
+        str(int(lines)),
         "--no-pager",
-        "--output", "short-iso",
+        "--output",
+        "short-iso",
     ]
     if since:
         cmd += ["--since", since]
@@ -242,10 +246,7 @@ def journal(
     except subprocess.TimeoutExpired:
         return "(journalctl timed out after 10s)"
     if completed.returncode != 0:
-        return (
-            f"(journalctl exit={completed.returncode})\n"
-            f"{completed.stderr.strip()}"
-        )
+        return f"(journalctl exit={completed.returncode})\n{completed.stderr.strip()}"
     return _compact_journal(completed.stdout) if compact else completed.stdout
 
 
@@ -260,11 +261,19 @@ def _systemctl_show(unit: str) -> dict[str, str]:
         return {}
     try:
         completed = subprocess.run(
-            [bin_, "--user", "show", "--no-pager",
-             "--property=LoadState,ActiveState,SubState,UnitFileState,"
-             "MainPID,ActiveEnterTimestamp,Description,FragmentPath",
-             unit + ".service"],
-            capture_output=True, text=True, timeout=5, check=False,
+            [
+                bin_,
+                "--user",
+                "show",
+                "--no-pager",
+                "--property=LoadState,ActiveState,SubState,UnitFileState,"
+                "MainPID,ActiveEnterTimestamp,Description,FragmentPath",
+                unit + ".service",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=5,
+            check=False,
         )
     except (FileNotFoundError, subprocess.TimeoutExpired):
         return {}
@@ -283,7 +292,10 @@ def _systemctl_is_active(unit: str) -> tuple[bool, int | None]:
     try:
         cp = subprocess.run(
             [bin_, "--user", "is-active", unit + ".service"],
-            capture_output=True, text=True, timeout=5, check=False,
+            capture_output=True,
+            text=True,
+            timeout=5,
+            check=False,
         )
     except (FileNotFoundError, subprocess.TimeoutExpired):
         return False, None
@@ -300,7 +312,10 @@ def _systemctl_is_enabled(unit: str) -> bool | None:
     try:
         cp = subprocess.run(
             [bin_, "--user", "is-enabled", unit + ".service"],
-            capture_output=True, text=True, timeout=5, check=False,
+            capture_output=True,
+            text=True,
+            timeout=5,
+            check=False,
         )
     except (FileNotFoundError, subprocess.TimeoutExpired):
         return None

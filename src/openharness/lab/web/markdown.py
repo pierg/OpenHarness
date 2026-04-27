@@ -51,9 +51,7 @@ _PAGE_MAP: dict[str, str] = {
     "configs.md": "/catalog?tab=configs",
 }
 
-_RUN_DIR_RE = re.compile(
-    r"^(?:\.\./)?runs/experiments/([A-Za-z0-9._-]+)(?:/.*)?$"
-)
+_RUN_DIR_RE = re.compile(r"^(?:\.\./)?runs/experiments/([A-Za-z0-9._-]+)(?:/.*)?$")
 _LAB_MD_RE = re.compile(r"^([A-Za-z_-]+\.md)(?:#(.+))?$")
 _HREF_RE = re.compile(r'href="([^"]*)"')
 

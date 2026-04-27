@@ -11,8 +11,9 @@ from openharness.lab.web.app import create_app
 log = logging.getLogger(__name__)
 
 
-def run(*, host: str = "127.0.0.1", port: int = 8765, reload: bool = False,
-        log_level: str = "info") -> None:
+def run(
+    *, host: str = "127.0.0.1", port: int = 8765, reload: bool = False, log_level: str = "info"
+) -> None:
     """Start the lab web UI on (host, port).
 
     ``reload=True`` is for development only — it makes uvicorn re-import

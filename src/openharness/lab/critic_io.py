@@ -252,9 +252,7 @@ def write_experiment_critique(
     path = experiment_critic_path(run_dir)
     body = _wrap(
         payload,
-        provenance=_provenance(
-            skill="experiment-critic", critic_model=critic_model
-        ),
+        provenance=_provenance(skill="experiment-critic", critic_model=critic_model),
         kind="experiment_critic_summary",
     )
     return _atomic_write_json(path, body)
@@ -270,9 +268,7 @@ def write_comparison(
     path = comparison_path(run_dir, task_name)
     body = _wrap(
         payload,
-        provenance=_provenance(
-            skill="experiment-critic", critic_model=critic_model
-        ),
+        provenance=_provenance(skill="experiment-critic", critic_model=critic_model),
         kind="comparison",
         task_name=task_name,
     )
@@ -305,9 +301,7 @@ def write_task_features(
     path = task_features_path(task_checksum)
     body = _wrap(
         payload,
-        provenance=_provenance(
-            skill="task-features", critic_model=extracted_by
-        ),
+        provenance=_provenance(skill="task-features", critic_model=extracted_by),
         kind="task_features",
         task_checksum=task_checksum,
     )
@@ -345,9 +339,7 @@ def write_cross_experiment(
     path = cross_experiment_path(spawn_id)
     body = _wrap(
         payload,
-        provenance=_provenance(
-            skill="cross-experiment-critic", critic_model=critic_model
-        ),
+        provenance=_provenance(skill="cross-experiment-critic", critic_model=critic_model),
         kind="cross_experiment_summary",
     )
     return _atomic_write_json(path, body)
@@ -450,8 +442,11 @@ def iter_all_trial_critiques() -> Iterator[tuple[Path, dict[str, Any]]]:
 def ensure_dirs() -> None:
     """Create the lab-wide critic dirs (no per-run ones)."""
     for d in (
-        TASK_FEATURES_DIR, CROSS_EXPERIMENT_DIR, COMPONENTS_PERF_DIR,
-        AUTO_PROPOSED_DIR, SPAWNS_DIR,
+        TASK_FEATURES_DIR,
+        CROSS_EXPERIMENT_DIR,
+        COMPONENTS_PERF_DIR,
+        AUTO_PROPOSED_DIR,
+        SPAWNS_DIR,
     ):
         d.mkdir(parents=True, exist_ok=True)
 
@@ -490,9 +485,7 @@ def _wrap(
     return body
 
 
-def run_dir_from_instance(
-    instance_id: str, *, db_conn: Any | None = None
-) -> Path | None:
+def run_dir_from_instance(instance_id: str, *, db_conn: Any | None = None) -> Path | None:
     """Look up a run directory from the experiments table."""
     from openharness.lab import db as labdb
 

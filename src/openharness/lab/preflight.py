@@ -143,8 +143,7 @@ def _git(
 
 def current_branch(repo_root: Path = REPO_ROOT) -> str:
     """Return the symbolic HEAD branch (or ``"HEAD"`` if detached)."""
-    proc = _git(["symbolic-ref", "--quiet", "--short", "HEAD"],
-                cwd=repo_root, check=False)
+    proc = _git(["symbolic-ref", "--quiet", "--short", "HEAD"], cwd=repo_root, check=False)
     if proc.returncode != 0:
         return "HEAD"
     return proc.stdout.strip()
@@ -202,7 +201,8 @@ def upstream_for(branch: str, repo_root: Path = REPO_ROOT) -> str | None:
     """Return ``origin/<branch>``-style upstream, or ``None`` if unset."""
     proc = _git(
         ["rev-parse", "--abbrev-ref", f"{branch}@{{upstream}}"],
-        cwd=repo_root, check=False,
+        cwd=repo_root,
+        check=False,
     )
     if proc.returncode != 0:
         return None
@@ -228,10 +228,13 @@ def assert_pushed(
             f"`git push -u origin {branch}` and retry."
         )
     # ``git rev-list --count <upstream>..HEAD`` = unpushed commits.
-    ahead = int(_git(
-        ["rev-list", "--count", f"{upstream}..HEAD"],
-        cwd=repo_root,
-    ).stdout.strip() or 0)
+    ahead = int(
+        _git(
+            ["rev-list", "--count", f"{upstream}..HEAD"],
+            cwd=repo_root,
+        ).stdout.strip()
+        or 0
+    )
     if ahead == 0:
         return
     if not auto_push:
@@ -304,7 +307,7 @@ def list_worktrees(repo_root: Path = REPO_ROOT) -> list[Path]:
     out: list[Path] = []
     for line in proc.stdout.splitlines():
         if line.startswith("worktree "):
-            out.append(Path(line[len("worktree "):]).resolve())
+            out.append(Path(line[len("worktree ") :]).resolve())
     return out
 
 
@@ -364,8 +367,11 @@ def create_worktree(
             logger.info("worktree %s already exists at %s; reusing", wt_path, base_sha[:8])
             _ensure_shared_runs_link(worktree=wt_path, repo_root=repo_root)
             return WorktreeInfo(
-                slug=slug, path=wt_path, branch=branch,
-                base_sha=base_sha, base_branch=base_branch,
+                slug=slug,
+                path=wt_path,
+                branch=branch,
+                base_sha=base_sha,
+                base_branch=base_branch,
             )
         raise WorktreeExistsError(
             f"Worktree {wt_path} already exists at {existing_sha[:8]} "
@@ -378,7 +384,8 @@ def create_worktree(
     # SHA; otherwise force-create a fresh ref.
     branch_check = _git(
         ["rev-parse", "--verify", "--quiet", f"refs/heads/{branch}"],
-        cwd=repo_root, check=False,
+        cwd=repo_root,
+        check=False,
     )
     branch_exists = branch_check.returncode == 0
     if branch_exists:
@@ -396,11 +403,16 @@ def create_worktree(
     _ensure_shared_runs_link(worktree=wt_path, repo_root=repo_root)
     logger.info(
         "created worktree %s on branch %s at %s",
-        wt_path, branch, base_sha[:8],
+        wt_path,
+        branch,
+        base_sha[:8],
     )
     return WorktreeInfo(
-        slug=slug, path=wt_path, branch=branch,
-        base_sha=base_sha, base_branch=base_branch,
+        slug=slug,
+        path=wt_path,
+        branch=branch,
+        base_sha=base_sha,
+        base_branch=base_branch,
     )
 
 
@@ -437,7 +449,8 @@ def remove_worktree(
     if delete_branch:
         proc = _git(
             ["rev-parse", "--verify", "--quiet", f"refs/heads/{branch}"],
-            cwd=repo_root, check=False,
+            cwd=repo_root,
+            check=False,
         )
         if proc.returncode == 0:
             _git(["branch", "-D", branch], cwd=repo_root)
@@ -508,6 +521,9 @@ def run_preflight(
 
     base_sha = head_sha(repo_root)
     info = create_worktree(
-        slug, base_sha=base_sha, base_branch=branch, repo_root=repo_root,
+        slug,
+        base_sha=base_sha,
+        base_branch=branch,
+        repo_root=repo_root,
     )
     return PreflightResult(info=info, base_sha=base_sha, base_branch=branch)

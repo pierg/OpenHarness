@@ -132,11 +132,7 @@ def test_render_leaves_unknown_relative_link_alone() -> None:
 
 
 def test_render_table_extension_enabled() -> None:
-    md = (
-        "| col1 | col2 |\n"
-        "| --- | --- |\n"
-        "| a | b |\n"
-    )
+    md = "| col1 | col2 |\n| --- | --- |\n| a | b |\n"
     out = render(md)
     assert "<table" in out
     assert "<th>col1</th>" in out

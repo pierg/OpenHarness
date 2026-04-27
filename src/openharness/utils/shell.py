@@ -104,13 +104,18 @@ async def create_shell_subprocess(
     return process
 
 
-def _wrap_command_with_script(argv: list[str], *, platform_name: PlatformName) -> list[str] | None:
+def _wrap_command_with_script(
+    argv: list[str],
+    *,
+    platform_name: PlatformName | None = None,
+) -> list[str] | None:
+    resolved_platform = platform_name or get_platform()
+    if resolved_platform == "macos":
+        return None
     script = shutil.which("script")
     if script is None:
         return None
     if len(argv) >= 3 and argv[1] == "-lc":
-        if platform_name == "macos":
-            return [script, "-q", "/dev/null", *argv]
         return [script, "-qefc", argv[2], "/dev/null"]
     return None
 

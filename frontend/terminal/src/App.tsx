@@ -297,7 +297,11 @@ function AppInner({config}: {config: FrontendConfig}): React.JSX.Element {
 			if (key.tab) {
 				const selected = commandHints[pickerIndex];
 				if (selected) {
-					setInput(selected + ' ');
+					// Complete to the selected command with no trailing space —
+					// the user can hit Enter immediately to run it, or keep
+					// typing to add args. The trailing space made it look like
+					// Tab was "committing" with a token, which broke the flow.
+					setInput(selected);
 				}
 				return;
 			}
@@ -455,6 +459,7 @@ function AppInner({config}: {config: FrontendConfig}): React.JSX.Element {
 			{session.ready && !session.modal && !selectModal ? (
 				<Box>
 					<Text dimColor>
+						<Text color={theme.colors.primary}>shift+enter</Text> newline{'  '}
 						<Text color={theme.colors.primary}>enter</Text> send{'  '}
 						<Text color={theme.colors.primary}>/</Text> commands{'  '}
 						<Text color={theme.colors.primary}>{'\u2191\u2193'}</Text> history{'  '}

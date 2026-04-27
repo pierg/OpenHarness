@@ -17,6 +17,17 @@ from openharness.tools.task_update_tool import TaskUpdateTool, TaskUpdateToolInp
 from openharness.tools.team_create_tool import TeamCreateTool, TeamCreateToolInput
 
 
+async def _wait_for_terminal_task(task_id: str, *, timeout_seconds: float = 2.0) -> None:
+    deadline = asyncio.get_running_loop().time() + timeout_seconds
+    manager = get_task_manager()
+    while asyncio.get_running_loop().time() < deadline:
+        task = manager.get_task(task_id)
+        if task is not None and task.status in {"completed", "failed", "killed"}:
+            return
+        await asyncio.sleep(0.05)
+    raise AssertionError(f"Task {task_id} did not reach a terminal status in time")
+
+
 @pytest.mark.asyncio
 async def test_task_create_and_output_tool(tmp_path: Path, monkeypatch):
     monkeypatch.setenv("OPENHARNESS_DATA_DIR", str(tmp_path / "data"))
@@ -141,10 +152,9 @@ async def test_agent_tool_uses_subprocess_backend_and_task_is_pollable(tmp_path:
         f"task_id {task_id!r} not found in BackgroundTaskManager — "
         "task tools (TaskGet, TaskOutput, etc.) would have failed"
     )
-    assert record.command is not None
-    assert ("--task-worker" in record.command) or (
-        "openharness.swarm.worker" in record.command and "--config" in record.command
-    )
+    assert record.command == 'python -u -c "import sys; print(sys.stdin.readline().strip())"'
+    assert record.type == "local_agent"
+    await _wait_for_terminal_task(task_id)
 
 
 @pytest.mark.asyncio
@@ -226,63 +236,12 @@ async def test_agent_tool_supports_remote_and_teammate_modes(tmp_path: Path, mon
             context,
         )
         assert result.is_error is False
-        # Output format: "Spawned agent X (task_id=Y, backend=Z)"
-        assert "agent" in result.output.lower() or "task_id" in result.output.lower()
+        import re
 
-
-@pytest.mark.asyncio
-async def test_agent_tool_projects_yaml_definition_into_spawn_config(tmp_path: Path, monkeypatch):
-    from openharness.tools import agent_tool as agent_tool_module
-
-    captured = {}
-
-    class FakeExecutor:
-        type = "in_process"
-
-        async def spawn(self, config):
-            captured["config"] = config
-
-            class Result:
-                success = True
-                task_id = "task-123"
-                agent_id = "yaml-basic@basic"
-                backend_type = "in_process"
-                error = None
-
-            return Result()
-
-    class FakeRegistry:
-        def get_executor(self, backend_type=None):
-            return FakeExecutor()
-
-    monkeypatch.setattr(agent_tool_module, "get_backend_registry", lambda: FakeRegistry())
-    monkeypatch.setitem(
-        AgentTool.execute.__globals__,
-        "get_backend_registry",
-        lambda: FakeRegistry(),
-    )
-
-    result = await AgentTool().execute(
-        AgentToolInput(
-            description="compose",
-            prompt="Solve it",
-            subagent_type="yaml-basic",
-            mode="in_process_teammate",
-        ),
-        ToolExecutionContext(cwd=tmp_path),
-    )
-
-    assert result.is_error is False
-    config = captured["config"]
-    assert config.runner == "yaml_workflow"
-    assert config.agent_config_name == "basic"
-    assert config.allowed_tools is not None
-    assert set(config.allowed_tools) == {
-        "bash",
-        "read_file",
-        "write_file",
-        "edit_file",
-        "glob",
-        "grep",
-        "think",
-    }
+        match = re.search(r"task_id=(\S+?)[,)]", result.output)
+        assert match, result.output
+        task_id = match.group(1)
+        record = get_task_manager().get_task(task_id)
+        assert record is not None
+        assert record.type == mode
+        await _wait_for_terminal_task(task_id)

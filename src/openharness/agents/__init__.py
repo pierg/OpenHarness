@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 from openharness.agents.architectures import (
     PlannerExecutorAgent,
     ReActAgent,
@@ -23,8 +25,16 @@ from openharness.agents.contracts import (
     TaskDefinition,
 )
 from openharness.agents.factory import AgentFactory
-from openharness.engine.conversation import Conversation
-from openharness.engine.query import TurnResult
+
+try:
+    from openharness.engine.conversation import Conversation
+except ImportError:  # pragma: no cover - compatibility fallback
+    Conversation = Any  # type: ignore[misc,assignment]
+
+try:
+    from openharness.engine.query import TurnResult
+except ImportError:  # pragma: no cover - compatibility fallback
+    TurnResult = Any  # type: ignore[misc,assignment]
 
 __all__ = [
     "Agent",
