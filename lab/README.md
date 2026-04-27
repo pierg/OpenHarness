@@ -1,8 +1,8 @@
 # Lab
 
 The lab is the repo's autonomous experiment surface. Its job is to find
-generalizable improvements to agentic harnesses, using Harbor,
-Terminal-Bench 2, and future benchmarks as measurement tools.
+generalizable improvements to agentic harnesses and preserve the
+evidence behind each decision.
 
 ## Files
 
@@ -66,9 +66,9 @@ Humans can use the same pipeline without bypassing it:
   contract (`lab-design-variant`, `lab-implement-variant`,
   `lab-replan-roadmap`, or `lab-finalize-pr`)
 
-Manual edits should preserve the same goal as the daemon: use benchmark
-evidence to learn, but prefer runtime policies and harness mechanisms
-that generalize beyond one benchmark identity.
+Manual edits should preserve the lab methodology: benchmark evidence
+may inform planning, while runtime policies and harness mechanisms
+should generalize beyond one benchmark identity.
 
 ## Where to read more
 

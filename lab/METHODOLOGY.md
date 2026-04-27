@@ -1,11 +1,9 @@
 # Methodology
 
 The lab exists to autonomously discover, implement, measure, and keep
-generalizable improvements to agentic harnesses. Harbor and
-Terminal-Bench 2 are useful measurement instruments, but they are not
-the thing being optimized. A good lab result should teach us something
-that can transfer to another agent system, another benchmark, or a real
-engineering task.
+generalizable improvements to agentic harnesses. Successful results
+identify mechanisms that can transfer across agent systems, benchmarks,
+or production engineering tasks.
 
 ## Mission
 
@@ -15,19 +13,19 @@ exploration/search, test-time inference, model-selection policies,
 runtime recovery, validation gates, tools, and evaluation
 infrastructure are all in scope.
 
-The lab should prefer simple ideas that answer a clear question. If an
-experiment needs many moving parts to make sense, split it until each
-run has one main hypothesis and one readable outcome.
+Prefer simple experiments that answer a clear question. If an
+experiment requires many moving parts, split it until each run has one
+main hypothesis and one interpretable outcome.
 
 ## Generalization
 
 Benchmark metadata is allowed for analysis and planning. The lab may
 use task names, clusters, prior failures, task features, and per-task
-results to decide what to test next or to build a cheap diagnostic
+results to decide what to test next or to build a targeted diagnostic
 slice.
 
-Runtime agent behavior should ideally use only information available on
-an unseen task: the instruction, workspace, tools, environment
+Runtime agent behavior should use information available on an unseen
+task: the instruction, workspace, tools, environment
 observations, and reasoning derived during the run. Exact benchmark
 identity (`task_name`, `task_id`, `task_checksum`, trial directory
 name, known benchmark task lists, or prior per-task outcomes) is not a
@@ -35,7 +33,7 @@ general agent policy. Offline `task_features` are analysis metadata;
 if a useful cluster pattern appears, re-derive the trigger from the
 task instruction/workspace before treating it as deployable behavior.
 
-This is guidance for judgment, not a hard-coded router. If a diagnostic
+These criteria guide design, critique, and replan. If a diagnostic
 experiment uses benchmark knowledge, keep the result as measurement and
 queue a follow-up that tests a runtime-observable mechanism.
 
@@ -51,8 +49,8 @@ Every experiment should declare:
 - what would count as a meaningful outcome
 
 Common slice shapes are full benchmark, cluster-focused, combined
-cluster, regression list, and near-miss. Small slices are fine for
-cheap signal, but they should not be over-described as broad evidence.
+cluster, regression list, and near-miss. Small slices can provide early
+signal, but they should not be over-described as broad evidence.
 Repeated attempts on the same tiny slice estimate noise; they do not
 create population coverage.
 
