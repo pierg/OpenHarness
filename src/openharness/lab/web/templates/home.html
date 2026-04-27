@@ -72,46 +72,20 @@
   </div>
 </section>
 
-<div class="grid grid-cols-1 xl:grid-cols-[minmax(360px,.8fr)_minmax(0,1.2fr)] gap-6">
-  <section id="you-owe" class="bg-white border border-slate-200 rounded-lg p-5">
-    <div class="flex items-baseline justify-between mb-3">
-      <h2 class="font-semibold">Operator inbox
-        {% if pending.total %}
-          <span class="ml-2 text-xs bg-amber-200 text-amber-900 rounded-full px-2 py-0.5">{{ pending.total }}</span>
-        {% endif %}
-      </h2>
-      <a href="/backlog?section=inbox" class="text-xs text-slate-500 hover:underline">review</a>
-    </div>
-    <div hx-get="/_hx/you-owe"
-         hx-trigger="load, every 30s, lab-pending-changed from:body, lab-configs-changed from:body"
-         hx-swap="innerHTML">
-      {% include "_you_owe.html" %}
-    </div>
-  </section>
-
-  <section class="bg-white border border-slate-200 rounded-lg p-5">
-    <div class="flex items-baseline justify-between mb-3">
-      <h2 class="font-semibold">Recent activity</h2>
-      <a href="/activity" class="text-xs text-slate-500 hover:underline">all activity</a>
-    </div>
-    {% if activity %}
-      <ol class="divide-y divide-slate-100 text-sm">
-        {% for item in activity %}
-          <li class="py-2 flex items-start gap-3">
-            <span class="mt-0.5 shrink-0 rounded border border-slate-200 bg-slate-50 px-1.5 py-0.5 text-[11px] font-mono text-slate-600">{{ item.kind }}</span>
-            <div class="min-w-0">
-              <div class="truncate">
-                {% if item.href %}<a href="{{ item.href }}" class="text-blue-600 hover:underline">{{ item.title }}</a>{% else %}{{ item.title }}{% endif %}
-              </div>
-              <div class="text-xs text-slate-500">{{ fmt_dt(item.at_ts) }} · {{ item.actor }}{% if item.detail %} · {{ item.detail }}{% endif %}</div>
-            </div>
-          </li>
-        {% endfor %}
-      </ol>
-    {% else %}
-      <p class="text-sm text-slate-500">No activity yet.</p>
-    {% endif %}
-  </section>
-</div>
+<section id="you-owe" class="bg-white border border-slate-200 rounded-lg p-5">
+  <div class="flex items-baseline justify-between mb-3">
+    <h2 class="font-semibold">Operator inbox
+      {% if pending.total %}
+        <span class="ml-2 text-xs bg-amber-200 text-amber-900 rounded-full px-2 py-0.5">{{ pending.total }}</span>
+      {% endif %}
+    </h2>
+    <a href="/backlog?section=inbox" class="text-xs text-slate-500 hover:underline">review</a>
+  </div>
+  <div hx-get="/_hx/you-owe"
+       hx-trigger="load, every 30s, lab-pending-changed from:body, lab-configs-changed from:body"
+       hx-swap="innerHTML">
+    {% include "_you_owe.html" %}
+  </div>
+</section>
 
 {% endblock %}

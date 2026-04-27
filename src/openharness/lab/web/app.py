@@ -120,7 +120,6 @@ def create_app() -> FastAPI:
                 suggested=suggested,
                 done=done,
                 experiments=reader.experiments(limit=50),
-                activity=reader.activity_log(limit=5),
             )
         except Exception:
             _close_reader(request, reader)

@@ -337,6 +337,7 @@ def test_home_page_renders_leaderboard_and_work_zones() -> None:
     assert "Daemon status" in body
     assert "Queue" in body
     assert "Operator inbox" in body
+    assert "Recent activity" not in body
     assert 'id="daemon-status"' in body
     assert 'id="roadmap-queue"' in body
     assert 'id="you-owe"' in body
