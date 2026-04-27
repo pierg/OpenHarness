@@ -1,4 +1,4 @@
-{# Body of /components. Loaded standalone via /_hx/components-body when
+{# Body of /catalog?tab=components. Loaded standalone via /_hx/components-body when
    a command emits ``lab-components-changed``. #}
 {% set status_options = [
   "proposed", "experimental", "validated", "rejected", "superseded"
@@ -24,7 +24,7 @@
           {% set perfs = perf_by_id.get(e.component_id, []) %}
           <tr class="border-b border-slate-100 align-top">
             <td class="py-2 font-mono text-xs">
-              <a href="/components/{{ e.component_id }}" class="text-blue-600 hover:underline">{{ e.component_id }}</a>
+              <a href="/catalog/components/{{ e.component_id }}" class="text-blue-600 hover:underline">{{ e.component_id }}</a>
             </td>
             <td><span class="px-1.5 py-0.5 rounded text-xs {{ status_color(e.status) }}">{{ e.status }}</span></td>
             <td>{{ e.description }}</td>

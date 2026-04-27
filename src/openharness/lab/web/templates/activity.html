@@ -1,31 +1,40 @@
 {% extends "base.html" %}
-{% block title %}Activity log · OpenHarness lab{% endblock %}
-{% block crumbs %}<a href="/" class="hover:underline">Home</a> / Activity log{% endblock %}
+{% block title %}Activity · OpenHarness lab{% endblock %}
+{% block crumbs %}<a href="/" class="hover:underline">Home</a> / Activity{% endblock %}
 {% block content %}
-{# Unified activity timeline. Rows come from five sources merged in
-   ``LabReader.activity_log()``:
+{% set p = namespace(calls=0, tokens=0, cost=0.0) %}
+{% set a = namespace(calls=0, tokens=0, cost=0.0) %}
+{% for r in usage_rows %}
+  {% if r.source == "pipeline" %}
+    {% set p.calls = p.calls + r.calls %}
+    {% set p.tokens = p.tokens + (r.total_tokens or 0) %}
+    {% set p.cost = p.cost + (r.cost_usd or 0) %}
+  {% else %}
+    {% set a.calls = a.calls + r.calls %}
+    {% set a.tokens = a.tokens + (r.total_tokens or 0) %}
+    {% set a.cost = a.cost + (r.cost_usd or 0) %}
+  {% endif %}
+{% endfor %}
 
-      cmd        — POST /api/cmd execution (web_commands.jsonl)
-      tick       — daemon tick finished
-      spawn      — model skill spawn finished
-      verdict    — decision row appeared
-      current-best — current-best history row appeared
-#}
-
-<header class="flex flex-wrap items-baseline gap-3 mb-4">
-  <h1 class="text-xl font-semibold">Activity log</h1>
+<header class="mb-5 flex flex-wrap items-baseline gap-3">
+  <h1 class="text-xl font-semibold">Activity</h1>
   <span class="text-xs text-slate-500">{{ rows|length }} rows · newest first</span>
-  {# Cross-links to the deeper, source-specific surfaces. The log
-     consolidates them, but operators sometimes need the un-merged
-     view (e.g. raw model CLI stdout from /spawns/log/<name>). #}
-  <nav class="ml-auto text-xs text-slate-500 flex flex-wrap gap-x-4">
-    <a href="/spawns" class="hover:underline">spawn detail ›</a>
-    <a href="/audit" class="hover:underline">audit detail ›</a>
-  </nav>
 </header>
 
+<section class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-5">
+  <div class="bg-white border border-slate-200 rounded-lg p-4">
+    <div class="text-xs uppercase tracking-wide text-slate-500">Pipeline usage</div>
+    <div class="mt-1 text-lg font-mono">{{ fmt_int(p.tokens) }} tokens</div>
+    <div class="text-sm text-slate-600">{{ fmt_int(p.calls) }} calls · {{ fmt_money(p.cost) }}</div>
+  </div>
+  <div class="bg-white border border-slate-200 rounded-lg p-4">
+    <div class="text-xs uppercase tracking-wide text-slate-500">Trial usage</div>
+    <div class="mt-1 text-lg font-mono">{{ fmt_int(a.tokens) }} tokens</div>
+    <div class="text-sm text-slate-600">{{ fmt_int(a.calls) }} trials · {{ fmt_money(a.cost) }}</div>
+  </div>
+</section>
+
 <form method="get" class="flex flex-wrap items-center gap-3 mb-4 text-sm bg-white border border-slate-200 rounded-md px-4 py-3">
-  <span class="text-xs uppercase text-slate-500 mr-2">Filter</span>
   <label>
     <span class="text-xs text-slate-500">kind</span>
     <select name="kind" class="border border-slate-200 rounded px-2 py-1 text-sm ml-1">
@@ -51,7 +60,7 @@
            class="border border-slate-200 rounded px-2 py-1 text-sm font-mono ml-1 w-20">
   </label>
   <button class="ml-auto px-3 py-1 rounded-md bg-slate-800 text-white text-xs hover:bg-slate-900">Apply</button>
-  <a href="/log" class="text-xs text-slate-500 hover:underline">clear</a>
+  <a href="/activity" class="text-xs text-slate-500 hover:underline">clear</a>
 </form>
 
 {% set kind_palette = {
@@ -81,30 +90,13 @@
           {% set palette = kind_palette.get(r.kind, ("border-slate-300", "bg-slate-50", "text-slate-700")) %}
           <tr class="border-t border-slate-100 hover:bg-slate-50">
             <td class="px-3 py-2 font-mono text-xs text-slate-500 whitespace-nowrap">{{ fmt_dt(r.at_ts) }}</td>
-            <td>
-              <span class="inline-block px-2 py-0.5 rounded text-xs border {{ palette[0] }} {{ palette[1] }} {{ palette[2] }}">{{ r.kind }}</span>
-            </td>
+            <td><span class="inline-block px-2 py-0.5 rounded text-xs border {{ palette[0] }} {{ palette[1] }} {{ palette[2] }}">{{ r.kind }}</span></td>
             <td class="text-xs font-mono text-slate-700">{{ r.actor }}</td>
             <td>
-              {% if r.href %}
-                <a href="{{ r.href }}" class="text-blue-700 hover:underline">{{ r.title }}</a>
-              {% else %}
-                <span class="text-slate-700">{{ r.title }}</span>
-              {% endif %}
-              {% if r.detail %}
-                <span class="text-xs text-slate-500 ml-2">{{ r.detail }}</span>
-              {% endif %}
-              {% if r.success is not none %}
-                {% if r.success %}
-                  <span class="text-xs text-emerald-600 ml-2">✓</span>
-                {% else %}
-                  <span class="text-xs text-rose-600 ml-2">✕</span>
-                {% endif %}
-              {% endif %}
+              {% if r.href %}<a href="{{ r.href }}" class="text-blue-700 hover:underline">{{ r.title }}</a>{% else %}<span class="text-slate-700">{{ r.title }}</span>{% endif %}
+              {% if r.detail %}<span class="text-xs text-slate-500 ml-2">{{ r.detail }}</span>{% endif %}
             </td>
-            <td class="text-xs font-mono text-slate-600">
-              {% if r.slug %}<a href="/log?slug={{ r.slug }}" class="hover:underline">{{ r.slug }}</a>{% endif %}
-            </td>
+            <td class="text-xs font-mono text-slate-600">{% if r.slug %}<a href="/activity?slug={{ r.slug }}" class="hover:underline">{{ r.slug }}</a>{% endif %}</td>
           </tr>
         {% endfor %}
       </tbody>

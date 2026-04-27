@@ -12,8 +12,8 @@ Covers four contracts:
 3. The free-text validators reject leading hyphens (which Click could
    otherwise misinterpret as flags) and ASCII control characters,
    while still allowing newlines / tabs in long-text fields.
-4. The /audit page surfaces the summary tally + filter form so the
-   operator can narrow by command, actor, or status.
+4. The /activity page surfaces the unified timeline + usage summary so
+   the operator can narrow by kind, actor, or slug.
 
 Doesn't actually run the underlying CLI — the existing
 test_web_tree_apply suite covers a real subprocess round-trip; these
@@ -201,39 +201,36 @@ def _client():  # type: ignore[no-untyped-def]
     return TestClient(create_app())
 
 
-def test_ideas_page_no_longer_renders_raw_input_form() -> None:
+def test_backlog_ideas_no_longer_renders_raw_input_form() -> None:
     # IA redesign: raw user input forms removed. Ideas land via CLI/skill
-    # path (`uv run lab idea-append`); the UI shows a read-only catalog
-    # plus a "where to add ideas" notice.
-    r = _client().get("/ideas")
+    # path (`uv run lab idea-append`); the UI shows a read-only backlog
+    # section with one-click lifecycle actions.
+    r = _client().get("/backlog?section=ideas")
     assert r.status_code == 200
     assert 'cmd_id" value="idea-append"' not in r.text
     # Per-card actions (move) survive — they're one-click confirmations,
     # not free-form input.
     assert 'cmd_id" value="idea-move"' in r.text
-    # The replacement notice is present.
-    assert "lab-propose-idea" in r.text or "idea-append" in r.text
 
 
-def test_roadmap_page_no_longer_renders_raw_input_forms() -> None:
+def test_backlog_queue_no_longer_renders_raw_input_forms() -> None:
     # IA redesign: roadmap-add / roadmap-suggest forms removed. Operators
-    # use the CLI / `lab-plan-next` skill, or one-click promote/discard
-    # on the home-page "You owe" zone.
-    r = _client().get("/roadmap")
+    # use the CLI / `lab-plan-next` skill, or one-click backlog actions.
+    r = _client().get("/backlog?section=queue")
     assert r.status_code == 200
     assert 'cmd_id" value="roadmap-add"' not in r.text
     assert 'cmd_id" value="roadmap-suggest"' not in r.text
-    assert "lab-plan-next" in r.text or "roadmap-add" in r.text
+    assert "Up next" in r.text
 
 
-def test_components_page_no_longer_renders_upsert_or_inline_status() -> None:
+def test_catalog_components_no_longer_renders_upsert_or_inline_status() -> None:
     # IA redesign: component-upsert and the inline per-row
     # component-set-status select were removed. The catalog is read-only.
-    r = _client().get("/components")
+    r = _client().get("/catalog?tab=components")
     assert r.status_code == 200
     assert 'cmd_id" value="component-upsert"' not in r.text
     assert 'cmd_id" value="component-set-status"' not in r.text
-    assert "lab-implement-variant" in r.text or "components" in r.text
+    assert "Components" in r.text
 
 
 def test_components_body_partial_used_for_autorefresh() -> None:
@@ -245,31 +242,30 @@ def test_components_body_partial_used_for_autorefresh() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Audit page polish
+# Activity page polish
 # ---------------------------------------------------------------------------
 
 
-def test_audit_page_summary_and_filters() -> None:
+def test_activity_page_summary_and_filters() -> None:
     c = _client()
-    r = c.get("/audit")
+    r = c.get("/activity")
     assert r.status_code == 200
-    # Summary tally surface.
-    assert "commands in recent window" in r.text
+    # Usage summary surface.
+    assert "Pipeline usage" in r.text
+    assert "Trial usage" in r.text
     # Filter form.
-    for snippet in ['<select name="cmd"', '<select name="actor"', '<select name="ok"']:
+    for snippet in ['<select name="kind"', 'name="actor"', 'name="slug"']:
         assert snippet in r.text
     # Filter values are echoed back into selectors.
-    r2 = c.get("/audit?ok=no")
+    r2 = c.get("/activity?kind=cmd&actor=zzz-not-a-real-actor&limit=50")
     assert r2.status_code == 200
-    # Empty matches still render a usable page (rather than 500).
-    assert ("No matching rows" in r2.text) or ("non-zero exit" in r2.text)
+    assert "zzz-not-a-real-actor" in r2.text
 
 
-def test_audit_filter_with_unknown_cmd_yields_empty_state() -> None:
-    r = _client().get("/audit?cmd=this-cmd-does-not-exist")
+def test_activity_filter_with_unknown_actor_yields_empty_state() -> None:
+    r = _client().get("/activity?kind=cmd&actor=this-actor-does-not-exist")
     assert r.status_code == 200
-    # The empty-state copy includes a reset link.
-    assert "No matching rows" in r.text or "Reset filters" in r.text
+    assert "No activity matches these filters." in r.text
 
 
 # ---------------------------------------------------------------------------
@@ -325,38 +321,42 @@ def test_api_cmd_rejects_unknown_extras() -> None:
 # refactor) and protect the navigation contract.
 
 
-def test_home_page_renders_three_zones_and_pr_aware_idle_reason() -> None:
+def test_home_page_renders_leaderboard_and_work_zones() -> None:
     r = _client().get("/")
     assert r.status_code == 200
     body = r.text
-    # The three zones the operator sees first.
+    # Leaderboard-first home.
+    assert "Current best" in body
+    assert "Improvement trajectory" in body
+    assert "Agent ladder" in body
+    assert "Experiment delta board" in body
+    # Operator work zones remain on the first page.
     assert "Now" in body
-    assert "Roadmap" in body
+    assert "Queue" in body
     assert 'id="roadmap-queue"' in body
-    # Zone anchors used by the "You owe" pill in the header.
-    assert 'id="you-owe"' in body or "You owe" in body
+    assert 'id="you-owe"' in body or "Inbox" in body
     # HTMX partials mounted on first render.
-    assert "/_hx/idle-reason" in body
+    assert "/_hx/leaderboard-hero" in body
+    assert "/_hx/leaderboard-trajectory" in body
+    assert "/_hx/leaderboard-ladder" in body
+    assert "/_hx/leaderboard-delta" in body
     assert "/_hx/status-roadmap-queue" in body
     assert "/_hx/you-owe" in body
 
 
-def test_idle_reason_partial_renders_a_palette() -> None:
-    r = _client().get("/_hx/idle-reason")
-    assert r.status_code == 200
-    # One of the operational states should be reflected somewhere.
-    body = r.text.lower()
-    assert any(
-        token in body
-        for token in (
-            "idle",
-            "running",
-            "paused",
-            "stopped",
-            "blocked",
-            "queue",
-        )
-    )
+def test_leaderboard_partials_render() -> None:
+    c = _client()
+    expected = {
+        "/_hx/leaderboard-hero": "Current best",
+        "/_hx/leaderboard-trajectory": ("No accepted", "<svg"),
+        "/_hx/leaderboard-ladder": ("No current-best", "<table"),
+        "/_hx/leaderboard-delta": ("No experiment decisions", "<table"),
+    }
+    for path, markers in expected.items():
+        r = c.get(path)
+        assert r.status_code == 200, f"{path} -> {r.status_code}"
+        choices = markers if isinstance(markers, tuple) else (markers,)
+        assert any(marker in r.text for marker in choices), path
 
 
 def test_you_owe_partial_renders_or_is_empty_state() -> None:
@@ -401,8 +401,8 @@ def test_status_roadmap_queue_partial_renders_queue_or_empty_state() -> None:
     )
 
 
-def test_log_page_renders_filter_form_and_kind_pills() -> None:
-    r = _client().get("/log")
+def test_activity_page_renders_filter_form_and_kind_pills() -> None:
+    r = _client().get("/activity")
     assert r.status_code == 200
     body = r.text
     # Filter form controls.
@@ -410,42 +410,56 @@ def test_log_page_renders_filter_form_and_kind_pills() -> None:
     assert 'name="actor"' in body
     # The five activity kinds the unified log merges.
     for kind in ("cmd", "tick", "spawn", "verdict", "current-best"):
-        assert kind in body, f"kind '{kind}' missing from /log"
+        assert kind in body, f"kind '{kind}' missing from /activity"
 
 
-def test_log_page_filter_query_round_trips() -> None:
-    # /log accepts `kind`, `actor`, `slug`, `limit` GET params and
+def test_activity_page_filter_query_round_trips() -> None:
+    # /activity accepts `kind`, `actor`, `slug`, `limit` GET params and
     # echoes them back into the form. Pick something obviously absent
     # so the table renders as empty.
-    r = _client().get("/log?kind=cmd&actor=zzz-not-a-real-actor&limit=50")
+    r = _client().get("/activity?kind=cmd&actor=zzz-not-a-real-actor&limit=50")
     assert r.status_code == 200
     body = r.text
     assert "zzz-not-a-real-actor" in body
 
 
-def test_runs_index_aliases_experiments_list() -> None:
-    # /runs is the new IA name; /experiments is kept for backward
-    # compatibility. Both should return 200 and render the same table.
+def test_runs_index_is_canonical_and_experiments_route_is_removed() -> None:
+    # /runs is canonical. The old /experiments alias is intentionally
+    # gone so stale routes do not survive the IA collapse.
     c = _client()
     r1 = c.get("/runs")
     r2 = c.get("/experiments")
     assert r1.status_code == 200
-    assert r2.status_code == 200
-    # Both surfaces use the same template, so a stable identifier
-    # ("Experiments" or "Runs" header) should appear in both bodies.
-    for body in (r1.text, r2.text):
-        assert "Runs" in body or "Experiments" in body
+    assert r2.status_code == 404
+    assert "Runs" in r1.text
 
 
-def test_tree_page_renders_with_pr_badge_template_available() -> None:
-    # The tree page now embeds the _pr_badge.html partial. With no
+def test_existing_run_detail_pages_render_when_db_has_runs() -> None:
+    from openharness.lab.web import data as labdata
+
+    with labdata.LabReader() as reader:
+        if not reader.db_available:
+            return
+        experiments = reader.experiments(limit=3)
+    if not experiments:
+        return
+
+    c = _client()
+    for exp in experiments:
+        r = c.get(f"/runs/{exp.instance_id}")
+        assert r.status_code == 200, f"{exp.instance_id} -> {r.status_code}"
+        assert "Paired" not in r.text or "Undefined" not in r.text
+
+
+def test_catalog_configs_renders_with_pr_badge_template_available() -> None:
+    # The configs tab embeds the _pr_badge.html partial. With no
     # PRs in the local DB the include is a no-op, but the page must
     # still render (no UndefinedError on `pr_by_slug` / `pr_by_instance`).
-    r = _client().get("/tree")
+    r = _client().get("/catalog?tab=configs")
     assert r.status_code == 200
     body = r.text
-    assert "Configuration state" in body
-    # Verdict workflow surface is part of the redesigned tree page.
+    assert "Current best" in body
+    # Verdict workflow surface is part of the configs tab.
     assert "Verdicts" in body
 
 
@@ -458,26 +472,24 @@ def test_phase_reset_command_accepts_replan() -> None:
 
 def test_sidebar_reflects_new_six_page_ia() -> None:
     # The sidebar shipped with the redesign exposes exactly the six
-    # IA endpoints in the primary nav. The audit power-user surface
-    # remains as a primary entry.
+    # IA endpoints in the primary nav.
     r = _client().get("/")
     assert r.status_code == 200
     body = r.text
     for href in (
         'href="/"',
-        'href="/tree"',
+        'href="/pipeline"',
         'href="/runs"',
-        'href="/tasks"',
-        'href="/log"',
-        'href="/audit"',
+        'href="/catalog"',
+        'href="/backlog"',
+        'href="/activity"',
     ):
         assert href in body, f"sidebar link {href} missing"
 
 
-def test_sidebar_more_views_reaches_every_secondary_page() -> None:
-    # Regression for "/roadmap is not visible from the side bar" — the
-    # 'More views' disclosure underneath the primary IA must include
-    # every secondary surface so each is reachable in one click.
+def test_sidebar_omits_legacy_secondary_pages() -> None:
+    # The collapsed IA has no "More views" compatibility menu. Old
+    # public page paths should not appear as sidebar links.
     r = _client().get("/")
     assert r.status_code == 200
     body = r.text
@@ -491,43 +503,42 @@ def test_sidebar_more_views_reaches_every_secondary_page() -> None:
         'href="/spawns"',
         'href="/usage"',
         'href="/experiments"',
+        'href="/tree"',
+        'href="/tasks"',
+        'href="/log"',
+        'href="/audit"',
     ):
-        assert href in body, f"'More views' link {href} missing from sidebar"
+        assert href not in body, f"legacy sidebar link {href} should be gone"
 
 
-def test_usage_page_renders() -> None:
-    r = _client().get("/usage")
+def test_activity_page_includes_usage_summary() -> None:
+    r = _client().get("/activity")
     assert r.status_code == 200
-    assert "Token usage" in r.text
-    assert "Pipeline model calls" in r.text
+    assert "Pipeline usage" in r.text
+    assert "Trial usage" in r.text
 
 
-def test_more_views_is_open_when_active_page_is_secondary() -> None:
-    # The disclosure should auto-open when the operator lands on a
-    # secondary page so they immediately see where they are. We test
-    # this by hitting /roadmap and looking for the ``open`` attribute
-    # on the <details> element.
-    r = _client().get("/roadmap")
+def test_backlog_sections_are_reachable_as_tabs() -> None:
+    r = _client().get("/backlog?section=suggested")
     assert r.status_code == 200
     body = r.text
-    # Pick a window around the disclosure summary text.
-    needle = "More views"
-    idx = body.find(needle)
-    assert idx > 0, "'More views' summary missing"
-    # The <details ... open> tag opens before the summary text. Look
-    # for it in the 200-char window before the needle.
-    window = body[max(0, idx - 200) : idx]
-    assert "<details" in window
-    assert "open" in window, "details element should be open on secondary page"
+    for href in (
+        'href="/backlog?section=queue"',
+        'href="/backlog?section=suggested"',
+        'href="/backlog?section=ideas"',
+        'href="/backlog?section=done"',
+        'href="/backlog?section=inbox"',
+    ):
+        assert href in body
 
 
 def test_every_get_route_returns_200_on_a_fresh_db() -> None:
     # End-to-end reachability sweep. Walk every non-parameterised GET
     # route registered on the app and assert it renders cleanly.
-    # Parameterised routes (``/runs/{id}``, ``/components/{id}``,
-    # ``/tasks/{checksum}``, etc.) and the JSON ``/api/*`` /  ``/_hx/*``
-    # endpoints are skipped — they're exercised by their own targeted
-    # tests.
+    # Parameterised routes (``/runs/{id}``, ``/catalog/components/{id}``,
+    # ``/catalog/tasks/{checksum}``, etc.) and the JSON ``/api/*`` /
+    # ``/_hx/*`` endpoints are skipped — they're exercised by their
+    # own targeted tests.
     from openharness.lab.web.app import create_app
 
     app = create_app()

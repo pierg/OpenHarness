@@ -1,20 +1,14 @@
 """FastAPI app for the lab web UI.
 
-Read-only Phase 1. Routes mirror the IA in the design doc:
+Routes mirror the six-page lab IA:
 
-    /                    operator console (home)
-    /pending             focused inbox (drawer's full view)
-    /tree                configuration tree
-    /components          catalog of atoms
-    /experiments         journal index (from DB + lab/experiments.md)
-    /experiments/{id}    one run (legs, per-task heatmap, journal entry)
-    /ideas               themed backlog
-    /roadmap             priority queue
-    /spawns              model skill spawn audit log
-    /usage               token / cost usage summary
-    /spawns/{name}       one log file (text/plain)
-    /daemon              daemon status + log tail
-    /api/pending         JSON for the right-rail HTMX poll
+    /                    leaderboard home
+    /pipeline            daemon cockpit
+    /runs                experiment runs and journal index
+    /runs/{id}           one run (legs, heatmap, journal entry)
+    /catalog             components, tasks, and config state
+    /backlog             roadmap, ideas, and operator inbox
+    /activity            command, tick, spawn, verdict, current-best timeline
     /healthz             liveness
 
 All HTML is rendered with Jinja2 + HTMX + Tailwind (CDN). No build
@@ -33,11 +27,10 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse
+from fastapi.responses import HTMLResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
-from openharness.lab.paths import LAB_LOGS_DIR
 from openharness.lab.web import auth as labauth
 from openharness.lab.web import commands as labcmd
 from openharness.lab.web import data as labdata
@@ -74,6 +67,7 @@ def create_app() -> FastAPI:
     templates.env.globals["pct_color"] = _pct_color
     templates.env.globals["status_color"] = _status_color
     templates.env.globals["verdict_color"] = _verdict_color
+    templates.env.globals["trajectory_chart"] = _trajectory_chart
     templates.env.globals["cmd_specs"] = labcmd.COMMANDS
     # Auth posture exposed to templates so the header badge can render
     # the active mode without re-importing the auth module per page.
@@ -110,23 +104,15 @@ def create_app() -> FastAPI:
 
     @app.get("/", response_class=HTMLResponse)
     def home(request: Request) -> HTMLResponse:
-        # New /-as-status-room. The "Now / Waiting on / You owe" zones
-        # are HTMX-mounted partials so each refreshes independently
-        # without re-rendering the whole control room. We still
-        # populate them on the first render so the page is meaningful
-        # before the first HTMX swap completes.
         reader = _reader_ctx(request)
         try:
-            recent_exp = reader.experiments(limit=8)
             up_next, suggested, done = reader.roadmap()
             return _render(
                 request,
                 "home.html",
                 _reader=reader,
-                nav_active="status",
-                recent_experiments=recent_exp,
-                db_info=reader.db_info(),
-                db_path=str(reader.db_path),
+                nav_active="home",
+                leaderboard=reader.leaderboard(),
                 status=reader.daemon_status(),
                 daemon_state=reader.daemon_state(),
                 pipeline=reader.pipeline_view(),
@@ -134,28 +120,100 @@ def create_app() -> FastAPI:
                 up_next=up_next,
                 suggested=suggested,
                 done=done,
+                activity=reader.activity_log(limit=5),
             )
         except Exception:
             _close_reader(request, reader)
             raise
 
-    @app.get("/pending", response_class=HTMLResponse)
-    def pending(request: Request) -> HTMLResponse:
+    @app.get("/_hx/leaderboard-hero", response_class=HTMLResponse)
+    def hx_leaderboard_hero(request: Request) -> HTMLResponse:
         reader = _reader_ctx(request)
-        return _render(request, "pending.html", _reader=reader, nav_active="pending")
+        return _render(
+            request,
+            "_leaderboard_hero.html",
+            _reader=reader,
+            leaderboard=reader.leaderboard(),
+        )
 
-    @app.get("/tree", response_class=HTMLResponse)
-    def tree(request: Request) -> HTMLResponse:
+    @app.get("/_hx/leaderboard-trajectory", response_class=HTMLResponse)
+    def hx_leaderboard_trajectory(request: Request) -> HTMLResponse:
+        reader = _reader_ctx(request)
+        return _render(
+            request,
+            "_leaderboard_trajectory.html",
+            _reader=reader,
+            trajectory=reader.improvement_trajectory(),
+        )
+
+    @app.get("/_hx/leaderboard-ladder", response_class=HTMLResponse)
+    def hx_leaderboard_ladder(request: Request) -> HTMLResponse:
+        reader = _reader_ctx(request)
+        return _render(
+            request,
+            "_leaderboard_ladder.html",
+            _reader=reader,
+            ladder=reader.agent_ladder(),
+        )
+
+    @app.get("/_hx/leaderboard-delta", response_class=HTMLResponse)
+    def hx_leaderboard_delta(request: Request) -> HTMLResponse:
+        reader = _reader_ctx(request)
+        return _render(
+            request,
+            "_leaderboard_delta.html",
+            _reader=reader,
+            deltas=reader.experiment_delta_board(limit=50),
+        )
+
+    @app.get("/pipeline", response_class=HTMLResponse)
+    def pipeline(request: Request) -> HTMLResponse:
         reader = _reader_ctx(request)
         try:
+            return _render(
+                request,
+                "pipeline.html",
+                _reader=reader,
+                nav_active="pipeline",
+                status=reader.daemon_status(),
+                daemon_state=reader.daemon_state(),
+                pipeline=reader.pipeline_view(),
+                services=labsvc.all_status(),
+                process_tree=reader.process_tree(),
+            )
+        except Exception:
+            _close_reader(request, reader)
+            raise
+
+    @app.get("/catalog", response_class=HTMLResponse)
+    def catalog(
+        request: Request,
+        tab: str = "components",
+        view: str | None = None,
+    ) -> HTMLResponse:
+        if tab not in {"components", "tasks", "configs"}:
+            tab = "components"
+        reader = _reader_ctx(request)
+        try:
+            cat = reader.components()
+            perf = reader.components_perf()
+            perf_by_id: dict[str, list[Any]] = {}
+            for row in perf:
+                perf_by_id.setdefault(row.component_id, []).append(row)
             pr_rows = reader.pr_states()
             pr_by_slug = {pr.slug: pr for pr in pr_rows}
             pr_by_instance = {pr.instance_id: pr for pr in pr_rows}
             return _render(
                 request,
-                "tree.html",
+                "catalog.html",
                 _reader=reader,
-                nav_active="tree",
+                nav_active="catalog",
+                tab=tab,
+                view=view or "",
+                catalog=cat,
+                perf_by_id=perf_by_id,
+                component_perf=perf,
+                tasks=reader.tasks_index(),
                 snapshot=reader.tree(),
                 current_best_history=reader.current_best_history(limit=20),
                 pending_merge=reader.decisions(applied=False, limit=20),
@@ -168,185 +226,20 @@ def create_app() -> FastAPI:
             _close_reader(request, reader)
             raise
 
-    @app.get("/components", response_class=HTMLResponse)
-    def components(request: Request) -> HTMLResponse:
+    @app.get("/catalog/components/{component_id}", response_class=HTMLResponse)
+    def catalog_component_detail(request: Request, component_id: str) -> HTMLResponse:
         reader = _reader_ctx(request)
         try:
-            cat = reader.components()
-            perf = reader.components_perf()
-            perf_by_id: dict[str, list[Any]] = {}
-            for row in perf:
-                perf_by_id.setdefault(row.component_id, []).append(row)
-            return _render(
-                request,
-                "components.html",
-                _reader=reader,
-                nav_active="components",
-                catalog=cat,
-                perf_by_id=perf_by_id,
-            )
-        except Exception:
-            _close_reader(request, reader)
-            raise
-
-    @app.get("/experiments", response_class=HTMLResponse)
-    def experiments(request: Request) -> HTMLResponse:
-        reader = _reader_ctx(request)
-        try:
-            return _render(
-                request,
-                "experiments_list.html",
-                _reader=reader,
-                nav_active="experiments",
-                experiments=reader.experiments(limit=200),
-                journal=reader.journal(),
-            )
-        except Exception:
-            _close_reader(request, reader)
-            raise
-
-    @app.get("/experiments/{instance_id}", response_class=HTMLResponse)
-    def experiment_detail(request: Request, instance_id: str) -> HTMLResponse:
-        reader = _reader_ctx(request)
-        try:
-            exp = reader.experiment(instance_id)
-            if exp is None:
-                # If the run dir exists but never got ingested, we still want
-                # to surface what we can.
-                if labdata.run_dir_for(instance_id) is None:
-                    _close_reader(request, reader)
-                    raise HTTPException(404, f"unknown instance {instance_id}")
-            legs = reader.legs(instance_id)
-            tasks, leg_ids, cells = reader.task_pass_matrix(instance_id)
-            verdict = next((d for d in reader.decisions() if d.instance_id == instance_id), None)
-            journal = reader.journal_entry_for_instance(instance_id)
-            clusters = reader.task_clusters_for_instance(instance_id)
-            comparisons = reader.comparisons_for_instance(instance_id)
-            critic_md = labdata.critic_summary_md(instance_id)
-            sum_md = labdata.summary_md(instance_id)
-            pr_for_run = next(
-                (pr for pr in reader.pr_states() if pr.instance_id == instance_id),
-                None,
-            )
-            return _render(
-                request,
-                "experiment_detail.html",
-                _reader=reader,
-                nav_active="experiments",
-                instance_id=instance_id,
-                experiment=exp,
-                legs=legs,
-                tasks=tasks,
-                leg_ids=leg_ids,
-                cells=cells,
-                verdict=verdict,
-                journal=journal,
-                clusters=clusters,
-                comparisons=comparisons,
-                critic_md=critic_md,
-                summary_md=sum_md,
-                pr_for_run=pr_for_run,
-            )
-        except HTTPException:
-            raise
-        except Exception:
-            _close_reader(request, reader)
-            raise
-
-    @app.get("/ideas", response_class=HTMLResponse)
-    def ideas(request: Request) -> HTMLResponse:
-        reader = _reader_ctx(request)
-        try:
-            ideas_list = reader.ideas()
-            grouped: dict[str, dict[str | None, list[Any]]] = {}
-            for i in ideas_list:
-                grouped.setdefault(i.section, {}).setdefault(i.theme, []).append(i)
-            return _render(
-                request,
-                "ideas.html",
-                _reader=reader,
-                nav_active="ideas",
-                grouped=grouped,
-            )
-        except Exception:
-            _close_reader(request, reader)
-            raise
-
-    @app.get("/roadmap", response_class=HTMLResponse)
-    def roadmap(request: Request) -> HTMLResponse:
-        reader = _reader_ctx(request)
-        try:
-            up_next, suggested, done = reader.roadmap()
-            return _render(
-                request,
-                "roadmap.html",
-                _reader=reader,
-                nav_active="roadmap",
-                up_next=up_next,
-                suggested=suggested,
-                done=done,
-                # daemon_state powers the per-row "queued / running"
-                # badges and the Approve/Revoke buttons. Cheap to
-                # load; pulled here so the body partial can render
-                # the same affordances on its standalone refresh.
-                daemon_state=reader.daemon_state(),
-            )
-        except Exception:
-            _close_reader(request, reader)
-            raise
-
-    @app.get("/spawns", response_class=HTMLResponse)
-    def spawns(request: Request, limit: int = 100) -> HTMLResponse:
-        reader = _reader_ctx(request)
-        try:
-            return _render(
-                request,
-                "spawns.html",
-                _reader=reader,
-                nav_active="spawns",
-                spawns=reader.recent_spawns(limit=limit),
-                logs=list(labdata.list_log_files(limit=50)),
-                limit=limit,
-            )
-        except Exception:
-            _close_reader(request, reader)
-            raise
-
-    @app.get("/usage", response_class=HTMLResponse)
-    def usage(request: Request) -> HTMLResponse:
-        reader = _reader_ctx(request)
-        try:
-            rows = reader.usage_summary()
-            pipeline_rows = [r for r in rows if r.source == "pipeline"]
-            trial_rows = [r for r in rows if r.source == "agent trials"]
-            return _render(
-                request,
-                "usage.html",
-                _reader=reader,
-                nav_active="usage",
-                rows=rows,
-                pipeline_rows=pipeline_rows,
-                trial_rows=trial_rows,
-            )
-        except Exception:
-            _close_reader(request, reader)
-            raise
-
-    @app.get("/experiments/{instance_id}/trials/{trial_id}", response_class=HTMLResponse)
-    def trial_detail(request: Request, instance_id: str, trial_id: str) -> HTMLResponse:
-        reader = _reader_ctx(request)
-        try:
-            trial = reader.trial(instance_id, trial_id)
-            if trial is None:
+            detail = reader.component_detail(component_id)
+            if detail is None:
                 _close_reader(request, reader)
-                raise HTTPException(404, f"unknown trial {trial_id} in {instance_id}")
+                raise HTTPException(404, f"unknown component {component_id}")
             return _render(
                 request,
-                "trial_detail.html",
+                "catalog_component_detail.html",
                 _reader=reader,
-                nav_active="experiments",
-                instance_id=instance_id,
-                trial=trial,
+                nav_active="catalog",
+                detail=detail,
             )
         except HTTPException:
             raise
@@ -354,23 +247,8 @@ def create_app() -> FastAPI:
             _close_reader(request, reader)
             raise
 
-    @app.get("/tasks", response_class=HTMLResponse)
-    def tasks(request: Request) -> HTMLResponse:
-        reader = _reader_ctx(request)
-        try:
-            return _render(
-                request,
-                "tasks_list.html",
-                _reader=reader,
-                nav_active="tasks",
-                tasks=reader.tasks_index(),
-            )
-        except Exception:
-            _close_reader(request, reader)
-            raise
-
-    @app.get("/tasks/{checksum}", response_class=HTMLResponse)
-    def task_detail(request: Request, checksum: str) -> HTMLResponse:
+    @app.get("/catalog/tasks/{checksum}", response_class=HTMLResponse)
+    def catalog_task_detail(request: Request, checksum: str) -> HTMLResponse:
         reader = _reader_ctx(request)
         try:
             features = reader.task_features(checksum)
@@ -379,7 +257,6 @@ def create_app() -> FastAPI:
                 features.task_name if features else (board[0].leg_id if board else checksum[:16])
             )
             if board:
-                # Pull the canonical task name from any trial row.
                 trials_with_checksum = [
                     t for t in reader.trials(board[0].instance_id) if t.task_checksum == checksum
                 ]
@@ -388,9 +265,9 @@ def create_app() -> FastAPI:
             comparisons = reader.comparisons_for_task(task_name) if task_name else []
             return _render(
                 request,
-                "task_detail.html",
+                "catalog_task_detail.html",
                 _reader=reader,
-                nav_active="tasks",
+                nav_active="catalog",
                 checksum=checksum,
                 task_name=task_name,
                 features=features,
@@ -401,119 +278,66 @@ def create_app() -> FastAPI:
             _close_reader(request, reader)
             raise
 
-    @app.get("/components-perf", response_class=HTMLResponse)
-    def components_perf(request: Request) -> HTMLResponse:
+    @app.get("/backlog", response_class=HTMLResponse)
+    def backlog(request: Request, section: str = "queue") -> HTMLResponse:
+        if section not in {"queue", "suggested", "ideas", "done", "inbox"}:
+            section = "queue"
         reader = _reader_ctx(request)
         try:
-            rows = reader.components_perf()
-            components_set = sorted({r.component_id for r in rows})
-            clusters_set = sorted({r.task_cluster for r in rows})
-            cell_lookup: dict[tuple[str, str], Any] = {
-                (r.component_id, r.task_cluster): r for r in rows
-            }
+            up_next, suggested, done = reader.roadmap()
+            ideas_list = reader.ideas()
+            grouped: dict[str, dict[str | None, list[Any]]] = {}
+            for idea in ideas_list:
+                grouped.setdefault(idea.section, {}).setdefault(idea.theme, []).append(idea)
             return _render(
                 request,
-                "components_perf.html",
+                "backlog.html",
                 _reader=reader,
-                nav_active="components-perf",
-                rows=rows,
-                components_axis=components_set,
-                clusters_axis=clusters_set,
-                cells=cell_lookup,
-            )
-        except Exception:
-            _close_reader(request, reader)
-            raise
-
-    @app.get("/components/{component_id}", response_class=HTMLResponse)
-    def component_detail(request: Request, component_id: str) -> HTMLResponse:
-        reader = _reader_ctx(request)
-        try:
-            detail = reader.component_detail(component_id)
-            if detail is None:
-                _close_reader(request, reader)
-                raise HTTPException(404, f"unknown component {component_id}")
-            return _render(
-                request,
-                "component_detail.html",
-                _reader=reader,
-                nav_active="components",
-                detail=detail,
-            )
-        except HTTPException:
-            raise
-        except Exception:
-            _close_reader(request, reader)
-            raise
-
-    @app.get("/spawns/log/{name}", response_class=PlainTextResponse)
-    def spawn_log(name: str) -> PlainTextResponse:
-        # Only allow filenames inside LAB_LOGS_DIR.
-        path = (LAB_LOGS_DIR / name).resolve()
-        if not path.is_file() or LAB_LOGS_DIR.resolve() not in path.parents:
-            raise HTTPException(404, "log not found")
-        return PlainTextResponse(path.read_text(encoding="utf-8", errors="replace"))
-
-    @app.get("/daemon", response_class=HTMLResponse)
-    def daemon(request: Request) -> HTMLResponse:
-        reader = _reader_ctx(request)
-        try:
-            status = reader.daemon_status()
-            tail: list[str] = []
-            if status.log_path:
-                tail = reader.tail_log(Path(status.log_path), n=300)
-            return _render(
-                request,
-                "daemon.html",
-                _reader=reader,
-                nav_active="daemon",
-                status=status,
-                tail=tail,
-                services=labsvc.all_status(),
-                services_available=labsvc.available(),
-                process_tree=reader.process_tree(),
+                nav_active="backlog",
+                section=section,
+                up_next=up_next,
+                suggested=suggested,
+                done=done,
+                grouped=grouped,
                 daemon_state=reader.daemon_state(),
-                pipeline=reader.pipeline_view(),
+            )
+        except Exception:
+            _close_reader(request, reader)
+            raise
+
+    @app.get("/activity", response_class=HTMLResponse)
+    def activity(
+        request: Request,
+        kind: str | None = None,
+        actor: str | None = None,
+        slug: str | None = None,
+        limit: int = 200,
+    ) -> HTMLResponse:
+        reader = _reader_ctx(request)
+        try:
+            kinds: tuple[str, ...] | None = (kind,) if kind else None
+            rows = reader.activity_log(limit=max(50, min(limit, 1000)), kinds=kinds)
+            if actor:
+                rows = [r for r in rows if r.actor == actor]
+            if slug:
+                rows = [r for r in rows if r.slug == slug]
+            return _render(
+                request,
+                "activity.html",
+                _reader=reader,
+                nav_active="activity",
+                rows=rows,
+                usage_rows=reader.usage_summary(),
+                filter_kind=kind or "",
+                filter_actor=actor or "",
+                filter_slug=slug or "",
+                limit=limit,
             )
         except Exception:
             _close_reader(request, reader)
             raise
 
     # ---- HTMX partials --------------------------------------------------
-
-    @app.get("/_hx/pending", response_class=HTMLResponse)
-    def hx_pending(request: Request) -> HTMLResponse:
-        reader = _reader_ctx(request)
-        try:
-            return _render(
-                request,
-                "_drawer.html",
-                _reader=reader,
-                # Suppress drawer->drawer recursion.
-                pending=reader.pending_actions(),
-            )
-        except Exception:
-            _close_reader(request, reader)
-            raise
-
-    @app.get("/_hx/daemon-tail", response_class=HTMLResponse)
-    def hx_daemon_tail(request: Request) -> HTMLResponse:
-        reader = _reader_ctx(request)
-        try:
-            status = reader.daemon_status()
-            tail: list[str] = []
-            if status.log_path:
-                tail = reader.tail_log(Path(status.log_path), n=300)
-            return _render(
-                request,
-                "_log_tail.html",
-                _reader=reader,
-                status=status,
-                tail=tail,
-            )
-        except Exception:
-            _close_reader(request, reader)
-            raise
 
     @app.get("/_hx/daemon-active-spawn", response_class=HTMLResponse)
     def hx_daemon_active_spawn(request: Request) -> HTMLResponse:
@@ -590,8 +414,7 @@ def create_app() -> FastAPI:
         This is the operator's "what is the daemon doing right now"
         feed — orchestrator loop iterations, signal wake-ups, exit-gate
         decisions, ingest summaries, anything the runner logs at INFO
-        or above. Distinct from `_hx/daemon-tail`, which reads
-        `runs/lab/orchestrator.out` for direct tmux/nohup runs.
+        or above.
 
         The `lines` query param is bounded to a sensible range so a
         rogue caller can't request 10 M lines and OOM the page render.
@@ -616,20 +439,6 @@ def create_app() -> FastAPI:
                 "_daemon_status.html",
                 _reader=reader,
                 status=reader.daemon_status(),
-            )
-        except Exception:
-            _close_reader(request, reader)
-            raise
-
-    @app.get("/_hx/home-daemon", response_class=HTMLResponse)
-    def hx_home_daemon(request: Request) -> HTMLResponse:
-        reader = _reader_ctx(request)
-        try:
-            return _render(
-                request,
-                "_home_daemon.html",
-                _reader=reader,
-                daemon=reader.daemon_status(),
             )
         except Exception:
             _close_reader(request, reader)
@@ -671,7 +480,7 @@ def create_app() -> FastAPI:
 
     # ---- daemon cockpit partials --------------------------------
     #
-    # Each one renders a single panel of /daemon by re-loading the
+    # Each one renders a single panel of /pipeline by re-loading the
     # daemon-state.json snapshot. Reads are cheap (one JSON read +
     # tiny parse), so we don't bother caching. All four take exactly
     # the same context shape: a single `daemon_state` keyword.
@@ -917,7 +726,7 @@ def create_app() -> FastAPI:
     @app.get("/_hx/decision-preview", response_class=HTMLResponse)
     def hx_decision_preview(request: Request, slug: str) -> HTMLResponse:
         # Load the experiment decision for ``slug`` without applying it.
-        # Used by the "Preview decision" buttons on /tree and the experiment
+        # Used by the "Preview decision" buttons on /catalog and the run
         # detail page so an operator can see exactly what `decision apply`
         # is about to do before clicking through.
         reader = _reader_ctx(request)
@@ -946,37 +755,6 @@ def create_app() -> FastAPI:
         except Exception:
             _close_reader(request, reader)
             raise
-
-    # ---- JSON endpoints (handy for ad-hoc tooling) ---------------------
-
-    @app.get("/api/pending", response_class=JSONResponse)
-    def api_pending() -> dict[str, object]:
-        with labdata.LabReader() as r:
-            p = r.pending_actions()
-            return {
-                "total": p.total,
-                "suggested": [{"slug": s.slug, "hypothesis": s.hypothesis} for s in p.suggested],
-                "auto_proposed": [
-                    {"id": i.idea_id, "motivation": i.motivation} for i in p.auto_proposed
-                ],
-                "misconfig_recent": p.misconfig_recent,
-                "failed_spawns_recent": p.failed_spawns_recent,
-            }
-
-    @app.get("/api/tree", response_class=JSONResponse)
-    def api_tree() -> dict[str, object]:
-        from dataclasses import asdict
-
-        with labdata.LabReader() as r:
-            t = r.tree()
-            return {
-                "current_best": {
-                    "id": t.current_best_id,
-                    "anchor": t.current_best_anchor,
-                },
-                "rejected": [asdict(b) for b in t.rejected],
-                "proposed": [asdict(b) for b in t.proposed],
-            }
 
     # ---- Command runner (Phase 3) --------------------------------------
 
@@ -1053,13 +831,7 @@ def create_app() -> FastAPI:
     def hx_cmd_clear() -> HTMLResponse:
         return HTMLResponse("")
 
-    # ---- New IA routes (Phase 4 redesign) -------------------------------
-    #
-    # /runs and /log are the two new top-level surfaces. The /runs/...
-    # detail and trial-detail routes proxy to the existing
-    # experiment_detail templates so we don't duplicate rendering
-    # logic; the route just sets ``nav_active="runs"`` for the
-    # highlighted sidebar item.
+    # ---- Run routes ------------------------------------------------------
 
     @app.get("/runs", response_class=HTMLResponse)
     def runs(request: Request) -> HTMLResponse:
@@ -1067,7 +839,7 @@ def create_app() -> FastAPI:
         try:
             return _render(
                 request,
-                "experiments_list.html",
+                "runs.html",
                 _reader=reader,
                 nav_active="runs",
                 experiments=reader.experiments(limit=200),
@@ -1080,10 +852,6 @@ def create_app() -> FastAPI:
 
     @app.get("/runs/{instance_id}", response_class=HTMLResponse)
     def runs_detail(request: Request, instance_id: str) -> HTMLResponse:
-        # Same render path as /experiments/<id>, but with a nav_active
-        # of "runs" so the sidebar reflects the new IA. We deliberately
-        # do *not* redirect /experiments/<id> → /runs/<id> so external
-        # bookmarks keep working.
         reader = _reader_ctx(request)
         try:
             exp = reader.experiment(instance_id)
@@ -1110,7 +878,7 @@ def create_app() -> FastAPI:
             )
             return _render(
                 request,
-                "experiment_detail.html",
+                "run_detail.html",
                 _reader=reader,
                 nav_active="runs",
                 instance_id=instance_id,
@@ -1157,57 +925,7 @@ def create_app() -> FastAPI:
             _close_reader(request, reader)
             raise
 
-    @app.get("/log", response_class=HTMLResponse)
-    def log_page(
-        request: Request,
-        kind: str | None = None,
-        actor: str | None = None,
-        slug: str | None = None,
-        limit: int = 200,
-    ) -> HTMLResponse:
-        # Unified activity log: web_commands.jsonl + tick history +
-        # spawn finishes + verdicts + current-best changes. Filters narrow by
-        # row kind, actor, or slug; the fields the operator clicks on
-        # are pre-computed into ``ActivityLogEntry.href``.
-        reader = _reader_ctx(request)
-        try:
-            kinds: tuple[str, ...] | None
-            kinds = (kind,) if kind else None
-            rows = reader.activity_log(limit=max(50, min(limit, 1000)), kinds=kinds)
-            if actor:
-                rows = [r for r in rows if r.actor == actor]
-            if slug:
-                rows = [r for r in rows if r.slug == slug]
-            return _render(
-                request,
-                "log.html",
-                _reader=reader,
-                nav_active="log",
-                rows=rows,
-                filter_kind=kind or "",
-                filter_actor=actor or "",
-                filter_slug=slug or "",
-                limit=limit,
-            )
-        except Exception:
-            _close_reader(request, reader)
-            raise
-
-    # ---- HTMX partials for the new home page ---------------------------
-
-    @app.get("/_hx/idle-reason", response_class=HTMLResponse)
-    def hx_idle_reason(request: Request) -> HTMLResponse:
-        reader = _reader_ctx(request)
-        try:
-            return _render(
-                request,
-                "_idle_reason.html",
-                _reader=reader,
-                idle_reason=reader.idle_reason(),
-            )
-        except Exception:
-            _close_reader(request, reader)
-            raise
+    # ---- HTMX partials for the home page -------------------------------
 
     @app.get("/_hx/you-owe", response_class=HTMLResponse)
     def hx_you_owe(request: Request) -> HTMLResponse:
@@ -1236,65 +954,6 @@ def create_app() -> FastAPI:
                 suggested=suggested,
                 done=done,
                 daemon_state=reader.daemon_state(),
-            )
-        except Exception:
-            _close_reader(request, reader)
-            raise
-
-    @app.get("/audit", response_class=HTMLResponse)
-    def audit_page(
-        request: Request,
-        cmd: str | None = None,
-        actor: str | None = None,
-        ok: str | None = None,
-        limit: int = 200,
-    ) -> HTMLResponse:
-        reader = _reader_ctx(request)
-        try:
-            # Pull a wider window than we'll render so the summary tally
-            # at the top reflects the recent history regardless of which
-            # filters are applied.
-            sample = labcmd.audit_tail(n=max(limit * 3, 500))
-            # Filter for the rendered list.
-            rows = sample
-            if cmd:
-                rows = [r for r in rows if r.get("cmd_id") == cmd]
-            if actor:
-                rows = [r for r in rows if r.get("actor") == actor]
-            if ok in {"yes", "no"}:
-                want_ok = ok == "yes"
-                rows = [r for r in rows if (r.get("exit_code") == 0) == want_ok]
-            rows = rows[:limit]
-            # Summary across the unfiltered sample so operators see the
-            # rate of failure even when narrowing the view.
-            cmd_counts: dict[str, int] = {}
-            actor_counts: dict[str, int] = {}
-            ok_count = fail_count = 0
-            for r in sample:
-                cid = str(r.get("cmd_id", "?"))
-                act = str(r.get("actor", "?"))
-                cmd_counts[cid] = cmd_counts.get(cid, 0) + 1
-                actor_counts[act] = actor_counts.get(act, 0) + 1
-                if r.get("exit_code") == 0:
-                    ok_count += 1
-                else:
-                    fail_count += 1
-            return _render(
-                request,
-                "audit.html",
-                _reader=reader,
-                nav_active="audit",
-                rows=rows,
-                log_path=str(labcmd.audit_log_path()),
-                total_in_sample=len(sample),
-                ok_count=ok_count,
-                fail_count=fail_count,
-                cmd_counts=sorted(cmd_counts.items(), key=lambda kv: -kv[1]),
-                actor_counts=sorted(actor_counts.items(), key=lambda kv: -kv[1]),
-                filter_cmd=cmd or "",
-                filter_actor=actor or "",
-                filter_ok=ok or "",
-                limit=limit,
             )
         except Exception:
             _close_reader(request, reader)
@@ -1372,6 +1031,53 @@ def _fmt_int(v: object) -> str:
         return "—"
 
 
+def _trajectory_chart(points: object) -> dict[str, object]:
+    """Convert leaderboard points into fixed SVG coordinates."""
+    items = [p for p in points if getattr(p, "pass_rate_pct", None) is not None]  # type: ignore[union-attr]
+    width = 640
+    height = 180
+    left = 40
+    right = 18
+    top = 18
+    bottom = 34
+    inner_w = width - left - right
+    inner_h = height - top - bottom
+    if not items:
+        return {"width": width, "height": height, "path": "", "points": []}
+    denom = max(len(items) - 1, 1)
+    coords: list[dict[str, object]] = []
+    path_parts: list[str] = []
+    prev_x: float | None = None
+    prev_y: float | None = None
+    for idx, item in enumerate(items):
+        pct = max(0.0, min(100.0, float(getattr(item, "pass_rate_pct"))))
+        x = left + (idx / denom) * inner_w
+        y = top + ((100.0 - pct) / 100.0) * inner_h
+        if idx == 0:
+            path_parts.append(f"M {x:.1f} {y:.1f}")
+        elif prev_x is not None and prev_y is not None:
+            path_parts.append(f"L {x:.1f} {prev_y:.1f} L {x:.1f} {y:.1f}")
+        coords.append(
+            {
+                "x": x,
+                "y": y,
+                "pct": pct,
+                "agent_id": getattr(item, "agent_id", ""),
+                "instance_id": getattr(item, "instance_id", None),
+                "delta_pp": getattr(item, "delta_pp", None),
+                "at_ts": getattr(item, "at_ts", None),
+            }
+        )
+        prev_x = x
+        prev_y = y
+    return {
+        "width": width,
+        "height": height,
+        "path": " ".join(path_parts),
+        "points": coords,
+    }
+
+
 def _pct_color(pct: float | None) -> str:
     if pct is None:
         return "bg-slate-200 text-slate-700"
@@ -1386,8 +1092,6 @@ def _status_color(status: str | None) -> str:
     s = (status or "").lower()
     if s in ("validated",):
         return "bg-emerald-100 text-emerald-800"
-    if s in ("branch",):
-        return "bg-sky-100 text-sky-800"
     if s in ("experimental",):
         return "bg-amber-100 text-amber-800"
     if s in ("proposed",):

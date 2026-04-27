@@ -6,7 +6,7 @@
      done         - DoneEntryView list
      daemon_state - runtime DaemonState
 
-   The full edit/action surface remains /roadmap; this panel is for quick
+   The full edit/action surface lives in /backlog; this panel is for quick
    orientation: what is running, what the daemon can pick up next, and what is
    waiting behind it.
 #}
@@ -25,7 +25,7 @@
             <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-70"></span>
             <span class="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500"></span>
           </span>
-          <a href="/roadmap#{{ active_tick.slug }}" class="font-mono text-sm font-semibold text-blue-700 hover:underline">{{ active_tick.slug }}</a>
+          <a href="/backlog?section=queue#{{ active_tick.slug }}" class="font-mono text-sm font-semibold text-blue-700 hover:underline">{{ active_tick.slug }}</a>
         </div>
         <div class="mt-1 text-xs text-slate-600">
           phase <span class="font-mono">{{ active_tick.phase }}</span>
@@ -42,13 +42,13 @@
     <div class="border border-slate-200 rounded-md p-3">
       <div class="flex items-baseline justify-between mb-2">
         <div class="text-xs uppercase tracking-wide text-slate-500 font-semibold">Done</div>
-        <a href="/roadmap#done" class="text-xs text-slate-500 hover:underline">{{ done|length }} total</a>
+        <a href="/backlog?section=done#done" class="text-xs text-slate-500 hover:underline">{{ done|length }} total</a>
       </div>
       {% if done %}
         <ul class="divide-y divide-slate-100">
           {% for d in done[:5] %}
             <li class="py-2">
-              <a href="/roadmap#{{ d.slug }}" class="font-mono text-xs font-semibold text-slate-900 hover:underline">{{ d.slug }}</a>
+              <a href="/backlog?section=done#{{ d.slug }}" class="font-mono text-xs font-semibold text-slate-900 hover:underline">{{ d.slug }}</a>
               {% if d.outcome %}
                 <p class="text-xs text-slate-600 mt-0.5 truncate">{{ d.outcome }}</p>
               {% endif %}
@@ -91,9 +91,9 @@
             <div class="min-w-0">
               <div class="flex flex-wrap items-baseline gap-2">
                 <span class="text-xs text-slate-400 font-mono w-5">{{ loop.index }}.</span>
-                <a href="/roadmap#{{ r.slug }}" class="font-mono text-sm font-semibold text-slate-900 hover:underline">{{ r.slug }}</a>
+                <a href="/backlog?section=queue#{{ r.slug }}" class="font-mono text-sm font-semibold text-slate-900 hover:underline">{{ r.slug }}</a>
                 {% if r.idea_id %}
-                  <a href="/ideas#{{ r.idea_id }}" class="text-xs font-mono text-blue-600 hover:underline">{{ r.idea_id }}</a>
+                  <a href="/backlog?section=ideas#{{ r.idea_id }}" class="text-xs font-mono text-blue-600 hover:underline">{{ r.idea_id }}</a>
                 {% endif %}
               </div>
               {% if r.hypothesis %}

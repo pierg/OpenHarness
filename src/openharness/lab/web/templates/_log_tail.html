@@ -1,9 +1,0 @@
-{% if not status.log_path %}
-  <div class="text-slate-400 text-sm py-6 text-center">No log file detected.</div>
-{% else %}
-  <div class="text-xs text-slate-500 mb-2 flex justify-between">
-    <span class="font-mono">{{ status.log_path }}</span>
-    <span>{% if status.running %}<span class="text-emerald-600">● live</span>{% else %}<span class="text-slate-400">○ idle</span>{% endif %}</span>
-  </div>
-  <pre class="text-xs bg-slate-900 text-slate-100 rounded-md p-3 overflow-auto max-h-[60vh] font-mono whitespace-pre">{% for line in tail %}{{ line }}{% endfor %}</pre>
-{% endif %}

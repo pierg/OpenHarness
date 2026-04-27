@@ -36,35 +36,38 @@ from openharness.lab.web.markdown import render, rewrite_href
         ("mailto:lab@example.com", "mailto:lab@example.com"),
         ("tel:+1234567890", "tel:+1234567890"),
         # Cross-file refs to lab pages we render in the UI.
-        ("ideas.md", "/ideas"),
-        ("ideas.md#loop-guard", "/ideas#loop-guard"),
-        ("roadmap.md", "/roadmap"),
-        ("roadmap.md#tb2-baseline-full-sweep", "/roadmap#tb2-baseline-full-sweep"),
-        ("experiments.md", "/experiments"),
+        ("ideas.md", "/backlog?section=ideas"),
+        ("ideas.md#loop-guard", "/backlog?section=ideas#loop-guard"),
+        ("roadmap.md", "/backlog?section=queue"),
+        (
+            "roadmap.md#tb2-baseline-full-sweep",
+            "/backlog?section=queue#tb2-baseline-full-sweep",
+        ),
+        ("experiments.md", "/runs"),
         (
             "experiments.md#2026-04-17--tb2-baseline-full-sweep",
-            "/experiments#2026-04-17--tb2-baseline-full-sweep",
+            "/runs#2026-04-17--tb2-baseline-full-sweep",
         ),
-        ("components.md", "/components"),
-        ("components.md#loop-guard", "/components#loop-guard"),
-        ("configs.md", "/tree"),
-        ("configs.md#current-best", "/tree#current-best"),
+        ("components.md", "/catalog?tab=components"),
+        ("components.md#loop-guard", "/catalog?tab=components#loop-guard"),
+        ("configs.md", "/catalog?tab=configs"),
+        ("configs.md#current-best", "/catalog?tab=configs#current-best"),
         # ``./`` prefix is stripped before matching.
-        ("./ideas.md#loop-guard", "/ideas#loop-guard"),
+        ("./ideas.md#loop-guard", "/backlog?section=ideas#loop-guard"),
         # Run-dir shortcut (with and without ``../`` prefix, and
         # tolerating a deeper path that is collapsed onto the experiment
         # detail page).
         (
             "../runs/experiments/tb2-baseline-20260417-234913",
-            "/experiments/tb2-baseline-20260417-234913",
+            "/runs/tb2-baseline-20260417-234913",
         ),
         (
             "runs/experiments/tb2-baseline-20260417-234913",
-            "/experiments/tb2-baseline-20260417-234913",
+            "/runs/tb2-baseline-20260417-234913",
         ),
         (
             "../runs/experiments/tb2-baseline-20260417-234913/critic/critic_summary.md",
-            "/experiments/tb2-baseline-20260417-234913",
+            "/runs/tb2-baseline-20260417-234913",
         ),
         # Unknown lab markdown files (README, OPERATIONS, etc.) are left
         # alone — we deliberately don't invent a URL for them.
@@ -101,7 +104,7 @@ def test_render_passes_through_html_features() -> None:
 
 def test_render_rewrites_inline_link() -> None:
     out = render("See [loop-guard](ideas.md#loop-guard) for context.")
-    assert 'href="/ideas#loop-guard"' in out
+    assert 'href="/backlog?section=ideas#loop-guard"' in out
     # Original ``ideas.md`` substring should be gone from the href; it
     # may still appear in link text but never in href=.
     assert 'href="ideas.md' not in out
@@ -113,7 +116,7 @@ def test_render_rewrites_run_dir_link() -> None:
         "(../runs/experiments/tb2-baseline-20260417-234913)"
     )
     out = render(md)
-    assert 'href="/experiments/tb2-baseline-20260417-234913"' in out
+    assert 'href="/runs/tb2-baseline-20260417-234913"' in out
 
 
 def test_render_leaves_external_links_alone() -> None:

@@ -1,4 +1,4 @@
-{# Body of /pending. Loaded standalone via /_hx/pending-body when a
+{# Body of the Backlog inbox section. Loaded standalone via /_hx/pending-body when a
    command emits ``lab-pending-changed``. #}
 <div class="space-y-6">
   <section>
@@ -90,7 +90,7 @@
     <h2 class="font-semibold mb-2">Recent failures (24 h)</h2>
     <ul class="space-y-2 text-sm">
       <li>{{ pending.misconfig_recent }} misconfigurations recorded.</li>
-      <li>{{ pending.failed_spawns_recent }} skill spawns exited non-zero — <a href="/spawns" class="text-blue-600 hover:underline">open spawn log</a>.</li>
+      <li>{{ pending.failed_spawns_recent }} skill spawns exited non-zero — <a href="/activity?kind=spawn" class="text-blue-600 hover:underline">open activity</a>.</li>
     </ul>
   </section>
 </div>

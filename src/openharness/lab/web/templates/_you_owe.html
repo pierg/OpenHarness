@@ -4,7 +4,7 @@
 
      - Suggested experiments (one-click promote or remove).
      - Auto-proposed ideas (move to Trying / Rejected).
-     - Recent misconfigurations + failed spawns (jump to /log).
+     - Recent misconfigurations + failed spawns (jump to /activity).
 
    No raw user input lives here — every action is one click.
 #}
@@ -88,10 +88,10 @@
   {% if pending.misconfig_recent or pending.failed_spawns_recent %}
     <div class="text-xs text-slate-600 flex flex-wrap gap-3 pt-3 border-t border-slate-100">
       {% if pending.misconfig_recent %}
-        <a href="/log?kind=tick" class="px-2 py-0.5 rounded bg-rose-100 text-rose-800">{{ pending.misconfig_recent }} misconfiguration{{ '' if pending.misconfig_recent == 1 else 's' }} in last 24 h</a>
+        <a href="/activity?kind=tick" class="px-2 py-0.5 rounded bg-rose-100 text-rose-800">{{ pending.misconfig_recent }} misconfiguration{{ '' if pending.misconfig_recent == 1 else 's' }} in last 24 h</a>
       {% endif %}
       {% if pending.failed_spawns_recent %}
-        <a href="/log?kind=spawn" class="px-2 py-0.5 rounded bg-rose-100 text-rose-800">{{ pending.failed_spawns_recent }} failed spawn{{ '' if pending.failed_spawns_recent == 1 else 's' }} in last 24 h</a>
+        <a href="/activity?kind=spawn" class="px-2 py-0.5 rounded bg-rose-100 text-rose-800">{{ pending.failed_spawns_recent }} failed spawn{{ '' if pending.failed_spawns_recent == 1 else 's' }} in last 24 h</a>
       {% endif %}
     </div>
   {% endif %}

@@ -48,7 +48,7 @@
       <p class="text-sm text-slate-500 mt-1">
         The daemon hasn't processed any roadmap entries on this host.
         {% if daemon_state.mode == "manual" %}
-          Visit <a href="/roadmap" class="text-blue-600 hover:underline">/roadmap</a>
+          Visit <a href="/backlog?section=queue" class="text-blue-600 hover:underline">Backlog</a>
           and click <em>Approve &amp; run</em> on an Up-next entry to kick off the first tick.
         {% else %}
           Promote an entry to <code class="font-mono">## Up next</code> in
@@ -72,7 +72,7 @@
         <span class="text-xs uppercase tracking-wide text-slate-500 font-semibold">last seen</span>
       {% endif %}
     </div>
-    <a href="/roadmap#{{ pipeline.slug }}"
+    <a href="/backlog?section=queue#{{ pipeline.slug }}"
        class="text-lg font-semibold font-mono text-slate-900 hover:underline">{{ pipeline.slug }}</a>
     {% if pipeline.is_active and pipeline.started_at %}
       <span class="text-xs text-slate-500">started {{ fmt_dt(pipeline.started_at) }} · {{ fmt_elapsed(pipeline.started_at) }} ago</span>

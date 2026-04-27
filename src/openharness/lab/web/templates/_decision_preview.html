@@ -31,7 +31,7 @@
         slug: <strong>{{ decision.slug }}</strong>
         {% if decision.resolved_instance_id and decision.resolved_instance_id != decision.slug %}
           · instance:
-          <a href="/experiments/{{ decision.resolved_instance_id }}" class="underline">{{ decision.resolved_instance_id }}</a>
+          <a href="/runs/{{ decision.resolved_instance_id }}" class="underline">{{ decision.resolved_instance_id }}</a>
         {% endif %}
       </div>
     </header>

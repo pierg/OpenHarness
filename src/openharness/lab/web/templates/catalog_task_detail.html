@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 {% block title %}{{ task_name }} · OpenHarness lab{% endblock %}
-{% block crumbs %}<a href="/" class="hover:underline">Home</a> / <a href="/tasks" class="hover:underline">Tasks</a> / <span class="font-mono text-xs">{{ task_name }}</span>{% endblock %}
+{% block crumbs %}<a href="/" class="hover:underline">Home</a> / <a href="/catalog?tab=tasks" class="hover:underline">Catalog</a> / <span class="font-mono text-xs">{{ task_name }}</span>{% endblock %}
 {% block content %}
 
 <header class="mb-5">
@@ -58,7 +58,7 @@
         {% for r in board %}
           <tr class="border-b border-slate-100">
             <td class="py-1.5">
-              <a href="/experiments/{{ r.instance_id }}" class="font-mono text-xs text-blue-600 hover:underline">{{ r.instance_id[:18] }}…</a>
+              <a href="/runs/{{ r.instance_id }}" class="font-mono text-xs text-blue-600 hover:underline">{{ r.instance_id[:18] }}…</a>
               {% if r.created_at %}<div class="text-[11px] text-slate-400">{{ fmt_dt(r.created_at) }}</div>{% endif %}
             </td>
             <td class="font-mono text-xs">{{ r.leg_id }}</td>
@@ -67,10 +67,10 @@
               {% if r.model %}<div class="font-mono text-slate-500">{{ r.model }}</div>{% endif %}
             </td>
             <td class="text-xs">
-              {% for c in r.components_active %}<a href="/components/{{ c }}" class="font-mono bg-slate-100 hover:bg-slate-200 px-1 rounded mr-1">{{ c }}</a>{% else %}—{% endfor %}
+              {% for c in r.components_active %}<a href="/catalog/components/{{ c }}" class="font-mono bg-slate-100 hover:bg-slate-200 px-1 rounded mr-1">{{ c }}</a>{% else %}—{% endfor %}
             </td>
             <td class="text-right">
-              <a href="/experiments/{{ r.instance_id }}/trials/{{ r.trial_id }}"
+              <a href="/runs/{{ r.instance_id }}/trials/{{ r.trial_id }}"
                  class="px-1.5 py-0.5 rounded text-xs hover:underline
                         {% if r.passed %}bg-emerald-100 text-emerald-800{% elif r.passed == false %}bg-rose-100 text-rose-800{% else %}bg-amber-100 text-amber-800{% endif %}">
                 {% if r.passed %}PASS{% elif r.passed == false %}FAIL{% else %}?{% endif %}
@@ -97,7 +97,7 @@
     {% for c in comparisons %}
       <li class="border border-slate-100 rounded-md p-3">
         <div class="flex items-baseline gap-2 mb-1 flex-wrap">
-          <a href="/experiments/{{ c.instance_id }}" class="text-xs font-mono text-blue-600 hover:underline">{{ c.instance_id[:18] }}…</a>
+          <a href="/runs/{{ c.instance_id }}" class="text-xs font-mono text-blue-600 hover:underline">{{ c.instance_id[:18] }}…</a>
           <span class="text-xs text-slate-500">· winner <span class="font-mono bg-emerald-100 text-emerald-900 px-1.5 py-0.5 rounded">{{ c.winning_leg }}</span></span>
           {% if c.runner_up_leg %}<span class="text-xs text-slate-500">vs <span class="font-mono bg-slate-100 px-1.5 py-0.5 rounded">{{ c.runner_up_leg }}</span></span>{% endif %}
           {% if c.delta_score is not none %}<span class="ml-auto text-xs font-mono {% if c.delta_score > 0 %}text-emerald-700{% else %}text-rose-700{% endif %}">Δ {{ fmt_delta(c.delta_score) }}</span>{% endif %}

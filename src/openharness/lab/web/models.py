@@ -178,6 +178,59 @@ class CurrentBestChangeRow:
 
 
 @dataclass(eq=False, slots=True)
+class AgentLadderRow:
+    agent_id: str
+    status: str  # current best | superseded
+    accepted_at: datetime | None
+    accepting_instance_id: str | None
+    pass_rate_pct: float | None
+    cost_per_task_usd: float | None
+    n_trials: int
+    n_passed: int
+    reason: str | None
+
+
+@dataclass(eq=False, slots=True)
+class ExperimentDeltaRow:
+    instance_id: str
+    slug: str
+    verdict: str
+    target_id: str
+    decided_at: datetime | None
+    baseline_leg: str | None
+    candidate_leg: str | None
+    baseline_pass_rate_pct: float | None
+    candidate_pass_rate_pct: float | None
+    delta_pp: float | None
+    cost_per_task_delta_usd: float | None
+    n_trials: int
+    rationale: str | None
+    confidence: float | None
+
+
+@dataclass(eq=False, slots=True)
+class ImprovementPoint:
+    at_ts: datetime
+    agent_id: str
+    instance_id: str | None
+    pass_rate_pct: float | None
+    delta_pp: float | None
+    rationale: str | None
+
+
+@dataclass(eq=False, slots=True)
+class LeaderboardView:
+    current_best_id: str
+    current_best_anchor: str | None
+    current_best_pass_rate_pct: float | None
+    current_best_cost_per_task_usd: float | None
+    current_best_last_accepted_at: datetime | None
+    ladder: list[AgentLadderRow]
+    deltas: list[ExperimentDeltaRow]
+    trajectory: list[ImprovementPoint]
+
+
+@dataclass(eq=False, slots=True)
 class ExperimentSummary:
     instance_id: str
     experiment_id: str
@@ -434,7 +487,7 @@ class TaskLeaderboardRow:
 
 @dataclass(eq=False, slots=True)
 class TaskAggregateRow:
-    """One row on the /tasks index — one task across the whole lab."""
+    """One row on the /catalog tasks tab — one task across the whole lab."""
 
     task_checksum: str
     task_name: str
@@ -543,7 +596,7 @@ class DaemonIdleReason:
 
 @dataclass(eq=False, slots=True)
 class ActivityLogEntry:
-    """One row in the unified ``/log`` activity timeline.
+    """One row in the unified ``/activity`` timeline.
 
     Fold-in of audit-log entries (``runs/lab/web_commands.jsonl``),
     tick history (from daemon_state.history), spawn finishes (from

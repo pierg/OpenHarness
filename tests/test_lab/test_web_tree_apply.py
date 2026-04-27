@@ -56,8 +56,8 @@ def test_decision_apply_param_specs() -> None:
 
 def test_decision_apply_emits_refresh_events() -> None:
     events = labcmd.trigger_events("decision-apply")
-    # Tree panel + drawer + roadmap suggested-list all refresh.
-    assert "lab-tree-changed" in events
+    # Config verdict panel + backlog suggested-list refresh.
+    assert "lab-configs-changed" in events
     assert "lab-pending-changed" in events
     assert "lab-roadmap-changed" in events
     # And the cross-cutting tag is always appended last.
@@ -138,15 +138,15 @@ def test_decision_preview_partial_renders_unknown_slug() -> None:
     assert re.search(r"<code[^>]*>totally-bogus-slug-xx", body)
 
 
-def test_tree_page_includes_verdict_panel() -> None:
+def test_catalog_configs_page_includes_verdict_panel() -> None:
     from fastapi.testclient import TestClient
 
     from openharness.lab.web.app import create_app
 
     client = TestClient(create_app())
-    r = client.get("/tree")
+    r = client.get("/catalog?tab=configs")
     assert r.status_code == 200
     # The whole verdict surface lives inside this id so HTMX can target
-    # it for in-place refresh on lab-tree-changed.
-    assert 'id="tree-verdict-panel"' in r.text
+    # it for in-place refresh on lab-configs-changed.
+    assert 'id="config-verdict-panel"' in r.text
     assert 'id="decision-preview"' in r.text

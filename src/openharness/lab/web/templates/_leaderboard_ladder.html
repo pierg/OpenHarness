@@ -1,0 +1,41 @@
+{% if not ladder %}
+  <p class="text-sm text-slate-500">No current-best history yet.</p>
+{% else %}
+  <div class="overflow-x-auto">
+    <table class="w-full text-sm">
+      <thead>
+        <tr class="text-left text-xs uppercase text-slate-500 border-b border-slate-200">
+          <th class="py-2">Agent</th>
+          <th>Status</th>
+          <th class="text-right">Pass</th>
+          <th class="text-right">Cost / task</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in ladder %}
+          <tr class="border-b border-slate-100 hover:bg-slate-50">
+            <td class="py-2">
+              {% if row.accepting_instance_id %}
+                <a href="/runs/{{ row.accepting_instance_id }}" class="font-mono text-blue-600 hover:underline">{{ row.agent_id }}</a>
+              {% else %}
+                <span class="font-mono">{{ row.agent_id }}</span>
+              {% endif %}
+              {% if row.reason %}<div class="text-xs text-slate-500 line-clamp-2">{{ row.reason }}</div>{% endif %}
+            </td>
+            <td>
+              <span class="rounded border px-1.5 py-0.5 text-xs {% if row.status == 'current best' %}border-emerald-300 bg-emerald-50 text-emerald-800{% else %}border-slate-200 bg-slate-50 text-slate-600{% endif %}">
+                {{ row.status }}
+              </span>
+            </td>
+            <td class="text-right">
+              <span class="px-1.5 py-0.5 rounded {{ pct_color(row.pass_rate_pct) }} text-xs">
+                {{ '{:.0f}%'.format(row.pass_rate_pct) if row.pass_rate_pct is not none else '—' }}
+              </span>
+            </td>
+            <td class="text-right font-mono text-xs">{{ fmt_money(row.cost_per_task_usd) }}</td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+{% endif %}

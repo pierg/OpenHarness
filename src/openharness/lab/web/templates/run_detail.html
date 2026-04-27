@@ -40,7 +40,7 @@
    applied decisions and no-ops) so an operator can re-compute the verdict
    after editing the journal / critic and decide whether to re-apply. #}
 <section id="experiment-verdict-panel" class="bg-white border border-slate-200 rounded-lg p-5 mb-6"
-         hx-get="/experiments/{{ instance_id }}" hx-trigger="lab-tree-changed from:body"
+         hx-get="/runs/{{ instance_id }}" hx-trigger="lab-configs-changed from:body"
          hx-select="#experiment-verdict-panel" hx-swap="outerHTML">
   <div class="flex items-baseline justify-between gap-3 flex-wrap mb-2">
     <h2 class="font-semibold">Verdict workflow</h2>
@@ -168,7 +168,7 @@
                   {% if cell is none %}
                     <span class="inline-block w-6 h-6 bg-slate-100 rounded text-center leading-6">·</span>
                   {% else %}
-                    <a href="/experiments/{{ instance_id }}/trials/{{ cell.trial_id }}"
+                    <a href="/runs/{{ instance_id }}/trials/{{ cell.trial_id }}"
                        class="inline-block w-6 h-6 rounded text-center leading-6 font-semibold
                               {% if cell.passed %}bg-emerald-200 text-emerald-900 hover:bg-emerald-300
                               {% elif cell.passed == false %}bg-rose-200 text-rose-900 hover:bg-rose-300
@@ -258,28 +258,28 @@
   <h2 class="font-semibold mb-1">Paired Δ by cluster</h2>
   <p class="text-xs text-slate-500 mb-3">
     Each row compares two legs on the <em>same</em> tasks within a
-    cluster. Δ = treated pass-rate − control pass-rate (positive =
-    treatment wins). N is the number of paired tasks per cluster.
+    cluster. Δ = leg A pass-rate − leg B pass-rate. Rows with a small
+    task count are suggestive rather than decision-grade evidence.
   </p>
   <div class="-mx-5 px-5 overflow-x-auto">
   <table class="w-full text-sm min-w-[640px]">
     <thead>
       <tr class="text-xs uppercase text-slate-500 border-b border-slate-200 text-left">
         <th class="py-2">Cluster</th>
-        <th>Treatment</th>
-        <th>Control</th>
-        <th class="text-right">N</th>
+        <th>Leg A</th>
+        <th>Leg B</th>
+        <th class="text-right">Tasks</th>
         <th class="text-right">Δ pass-rate</th>
-        <th class="text-right">Treat / Ctrl</th>
+        <th class="text-right">Power</th>
       </tr>
     </thead>
     <tbody>
       {% for d in cluster_deltas %}
         <tr class="border-b border-slate-100">
           <td class="py-1.5">{{ d.cluster }}</td>
-          <td class="font-mono text-xs">{{ d.treated_leg }}</td>
-          <td class="font-mono text-xs">{{ d.control_leg }}</td>
-          <td class="text-right text-xs">{{ d.n_paired }}</td>
+          <td class="font-mono text-xs">{{ d.leg_a }}</td>
+          <td class="font-mono text-xs">{{ d.leg_b }}</td>
+          <td class="text-right text-xs">{{ d.n_tasks }}</td>
           <td class="text-right">
             <span class="font-mono text-xs px-1.5 py-0.5 rounded
                   {% if d.delta_pp is none %}bg-slate-100 text-slate-500
@@ -292,9 +292,7 @@
             </span>
           </td>
           <td class="text-right text-xs font-mono text-slate-600">
-            {% if d.treated_pass_pct is not none and d.control_pass_pct is not none -%}
-              {{ '{:.0f}%'.format(d.treated_pass_pct) }} / {{ '{:.0f}%'.format(d.control_pass_pct) }}
-            {%- else -%}—{%- endif %}
+            {% if d.warning %}<span class="text-amber-700">low n</span>{% else %}<span class="text-emerald-700">ok</span>{% endif %}
           </td>
         </tr>
       {% endfor %}

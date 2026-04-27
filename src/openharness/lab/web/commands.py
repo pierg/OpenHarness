@@ -378,7 +378,7 @@ COMMANDS: dict[str, CommandSpec] = {
         ),
         events=[
             "lab-pending-changed",
-            "lab-tree-changed",
+            "lab-configs-changed",
             "lab-roadmap-changed",
         ],
     ),
@@ -652,7 +652,7 @@ COMMANDS: dict[str, CommandSpec] = {
     # -- daemon control surface --------------------------------------------
     #
     # These mutate `runs/lab/daemon-state.json`, not markdown. They're
-    # the buttons behind the /daemon page's mode toggle, the
+    # the buttons behind the /pipeline page's mode toggle, the
     # per-roadmap-entry "Approve & run" affordance, and the cancel /
     # reset-failures actions on the active-tick panel. Identical to
     # the `lab daemon …` Typer commands by construction (we shell out

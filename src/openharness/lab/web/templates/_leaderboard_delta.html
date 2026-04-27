@@ -1,0 +1,45 @@
+{% if not deltas %}
+  <p class="text-sm text-slate-500">No experiment decisions yet.</p>
+{% else %}
+  <div class="overflow-x-auto">
+    <table class="w-full text-sm">
+      <thead>
+        <tr class="text-left text-xs uppercase text-slate-500 border-b border-slate-200">
+          <th class="py-2">Experiment</th>
+          <th>Verdict</th>
+          <th>Target</th>
+          <th class="text-right">Δ pp</th>
+          <th class="text-right">Candidate</th>
+          <th class="text-right">Baseline</th>
+          <th class="text-right">Cost Δ</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in deltas %}
+          <tr class="border-b border-slate-100 hover:bg-slate-50">
+            <td class="py-2">
+              <a href="/runs/{{ row.instance_id }}" class="font-mono text-xs text-blue-600 hover:underline">{{ row.slug }}</a>
+              {% if row.rationale %}<div class="text-xs text-slate-500 line-clamp-2">{{ row.rationale }}</div>{% endif %}
+            </td>
+            <td><span class="px-1.5 py-0.5 border rounded {{ verdict_color(row.verdict, True) }}">{{ row.verdict }}</span></td>
+            <td class="font-mono text-xs">{{ row.target_id }}</td>
+            <td class="text-right font-mono {% if row.delta_pp is not none and row.delta_pp > 0 %}text-emerald-700{% elif row.delta_pp is not none and row.delta_pp < 0 %}text-rose-700{% else %}text-slate-500{% endif %}">
+              {% if row.delta_pp is none %}—{% else %}{{ fmt_delta(row.delta_pp) }}{% endif %}
+            </td>
+            <td class="text-right text-xs">
+              <div class="font-mono">{{ row.candidate_leg or '—' }}</div>
+              <div class="text-slate-500">{{ '{:.0f}%'.format(row.candidate_pass_rate_pct) if row.candidate_pass_rate_pct is not none else '—' }}</div>
+            </td>
+            <td class="text-right text-xs">
+              <div class="font-mono">{{ row.baseline_leg or '—' }}</div>
+              <div class="text-slate-500">{{ '{:.0f}%'.format(row.baseline_pass_rate_pct) if row.baseline_pass_rate_pct is not none else '—' }}</div>
+            </td>
+            <td class="text-right font-mono text-xs">
+              {% if row.cost_per_task_delta_usd is none %}—{% else %}{{ fmt_money(row.cost_per_task_delta_usd) }}{% endif %}
+            </td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+{% endif %}

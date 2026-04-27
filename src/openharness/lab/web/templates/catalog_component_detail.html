@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 {% block title %}{{ detail.component_id }} · OpenHarness lab{% endblock %}
-{% block crumbs %}<a href="/" class="hover:underline">Home</a> / <a href="/components" class="hover:underline">Components</a> / <span class="font-mono text-xs">{{ detail.component_id }}</span>{% endblock %}
+{% block crumbs %}<a href="/" class="hover:underline">Home</a> / <a href="/catalog?tab=components" class="hover:underline">Catalog</a> / <span class="font-mono text-xs">{{ detail.component_id }}</span>{% endblock %}
 {% block content %}
 
 <div id="cmd-result" class="mb-4"></div>
@@ -9,7 +9,7 @@
   <h1 class="text-xl font-semibold font-mono">{{ detail.component_id }}</h1>
   {% if detail.kind %}<span class="text-xs bg-slate-100 px-2 py-0.5 rounded">{{ detail.kind }}</span>{% endif %}
   {% if detail.status %}<span class="text-xs px-2 py-0.5 rounded {{ status_color(detail.status) }}">{{ detail.status }}</span>{% endif %}
-  <a href="/components-perf" class="ml-auto text-xs text-blue-600 hover:underline">perf matrix ›</a>
+  <a href="/catalog?tab=components&view=perf" class="ml-auto text-xs text-blue-600 hover:underline">perf matrix</a>
 </header>
 
 {# Component editing forms removed in the IA redesign. Use the CLI:
@@ -134,7 +134,7 @@
             <td class="text-right text-xs font-mono">{{ '{:.0%}'.format(p.win_rate) if p.win_rate is not none else '—' }}</td>
             <td class="text-right text-xs font-mono">{{ fmt_delta(p.cost_delta_pct) }}%</td>
             <td class="text-xs">
-              {% for e in p.supporting_experiments[:4] %}<a href="/experiments/{{ e }}" class="font-mono bg-slate-100 hover:bg-slate-200 px-1 rounded mr-1">{{ e[:14] }}…</a>{% endfor %}
+              {% for e in p.supporting_experiments[:4] %}<a href="/runs/{{ e }}" class="font-mono bg-slate-100 hover:bg-slate-200 px-1 rounded mr-1">{{ e[:14] }}…</a>{% endfor %}
               {% if p.supporting_experiments|length > 4 %}<span class="text-slate-400">+{{ p.supporting_experiments|length - 4 }}</span>{% endif %}
             </td>
             <td class="text-xs text-slate-600">{{ p.notes or "—" }}</td>
@@ -153,7 +153,7 @@
   {% if detail.experiments_active_in %}
     <ul class="text-xs space-y-1">
       {% for e in detail.experiments_active_in %}
-        <li><a href="/experiments/{{ e }}" class="font-mono text-blue-600 hover:underline">{{ e }}</a></li>
+        <li><a href="/runs/{{ e }}" class="font-mono text-blue-600 hover:underline">{{ e }}</a></li>
       {% endfor %}
     </ul>
   {% else %}

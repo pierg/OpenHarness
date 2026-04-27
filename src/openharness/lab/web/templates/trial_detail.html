@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 {% block title %}{{ trial.task_name }} · {{ trial.leg_id }}{% endblock %}
-{% block crumbs %}<a href="/" class="hover:underline">Home</a> / <a href="/experiments" class="hover:underline">Experiments</a> / <a href="/experiments/{{ instance_id }}" class="hover:underline font-mono text-xs">{{ instance_id }}</a> / <span class="font-mono text-xs">{{ trial.task_name }}</span>{% endblock %}
+{% block crumbs %}<a href="/" class="hover:underline">Home</a> / <a href="/runs" class="hover:underline">Runs</a> / <a href="/runs/{{ instance_id }}" class="hover:underline font-mono text-xs">{{ instance_id }}</a> / <span class="font-mono text-xs">{{ trial.task_name }}</span>{% endblock %}
 {% block content %}
 
 <header class="mb-5 flex flex-wrap items-baseline gap-3">
@@ -14,7 +14,7 @@
     <span class="px-2 py-0.5 rounded bg-amber-100 text-amber-800 text-xs font-semibold">{{ trial.status or "?" }}</span>
   {% endif %}
   {% if trial.task_checksum %}
-    <a href="/tasks/{{ trial.task_checksum }}" class="ml-auto text-xs text-blue-600 hover:underline">cross-experiment view ›</a>
+    <a href="/catalog/tasks/{{ trial.task_checksum }}" class="ml-auto text-xs text-blue-600 hover:underline">cross-experiment view</a>
   {% endif %}
 </header>
 
@@ -58,7 +58,7 @@
 <section class="mb-6 text-sm">
   <span class="text-xs uppercase text-slate-500 mr-2">Components active:</span>
   {% for c in trial.components_active %}
-    <a href="/components/{{ c }}" class="font-mono bg-slate-100 hover:bg-slate-200 px-1.5 py-0.5 rounded mr-1 text-xs">{{ c }}</a>
+    <a href="/catalog/components/{{ c }}" class="font-mono bg-slate-100 hover:bg-slate-200 px-1.5 py-0.5 rounded mr-1 text-xs">{{ c }}</a>
   {% endfor %}
 </section>
 {% endif %}

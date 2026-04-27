@@ -29,6 +29,7 @@ from openharness.lab.paths import (
 )
 from openharness.lab.web.models import (
     ActivityLogEntry,
+    AgentLadderRow,
     CellRow,
     ClusterDeltaRow,
     ComparisonRow,
@@ -38,9 +39,12 @@ from openharness.lab.web.models import (
     DaemonStatus,
     DoneEntryView,
     ExperimentSummary,
+    ExperimentDeltaRow,
     IdeaEntryView,
     JournalEntryView,
     LegSummary,
+    LeaderboardView,
+    ImprovementPoint,
     PendingActions,
     PhaseView,
     PipelineView,
@@ -67,6 +71,22 @@ from openharness.lab.web.models import (
 from openharness.lab.web import services as labsvc
 
 log = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True, slots=True)
+class _LegMetric:
+    leg_id: str
+    agent_id: str | None
+    n_trials: int
+    n_passed: int
+    pass_rate_pct: float | None
+    cost_usd: float | None
+
+    @property
+    def cost_per_task_usd(self) -> float | None:
+        if not self.n_trials or self.cost_usd is None:
+            return None
+        return self.cost_usd / self.n_trials
 
 
 # ---------------------------------------------------------------------------
@@ -809,6 +829,219 @@ class LabReader:
             for r in rows
         ]
 
+    def leaderboard(self) -> LeaderboardView:
+        snapshot = self.tree()
+        trajectory = self.improvement_trajectory()
+        ladder = self.agent_ladder()
+        current_row = next((r for r in ladder if r.agent_id == snapshot.current_best_id), None)
+        return LeaderboardView(
+            current_best_id=snapshot.current_best_id,
+            current_best_anchor=snapshot.current_best_anchor,
+            current_best_pass_rate_pct=(
+                current_row.pass_rate_pct if current_row is not None else None
+            ),
+            current_best_cost_per_task_usd=(
+                current_row.cost_per_task_usd if current_row is not None else None
+            ),
+            current_best_last_accepted_at=(
+                current_row.accepted_at if current_row is not None else None
+            ),
+            ladder=ladder,
+            deltas=self.experiment_delta_board(limit=50),
+            trajectory=trajectory,
+        )
+
+    def agent_ladder(self) -> list[AgentLadderRow]:
+        if not self._db_available:
+            return []
+        snapshot = self.tree()
+        changes = list(reversed(self.current_best_history(limit=500)))
+        by_agent: dict[str, AgentLadderRow] = {}
+        for change in changes:
+            metric = (
+                self._metric_for_agent(change.instance_id, change.to_id)
+                if change.instance_id
+                else None
+            )
+            row = AgentLadderRow(
+                agent_id=change.to_id,
+                status=(
+                    "current best"
+                    if change.to_id == snapshot.current_best_id
+                    else "superseded"
+                ),
+                accepted_at=change.at_ts,
+                accepting_instance_id=change.instance_id,
+                pass_rate_pct=metric.pass_rate_pct if metric is not None else None,
+                cost_per_task_usd=(
+                    metric.cost_per_task_usd if metric is not None else None
+                ),
+                n_trials=metric.n_trials if metric is not None else 0,
+                n_passed=metric.n_passed if metric is not None else 0,
+                reason=change.reason,
+            )
+            prior = by_agent.get(change.to_id)
+            if prior is None or _metric_sort_key(row) > _metric_sort_key(prior):
+                by_agent[change.to_id] = row
+
+        if snapshot.current_best_id not in by_agent:
+            by_agent[snapshot.current_best_id] = AgentLadderRow(
+                agent_id=snapshot.current_best_id,
+                status="current best",
+                accepted_at=None,
+                accepting_instance_id=None,
+                pass_rate_pct=None,
+                cost_per_task_usd=None,
+                n_trials=0,
+                n_passed=0,
+                reason=snapshot.current_best_anchor,
+            )
+
+        return sorted(
+            by_agent.values(),
+            key=lambda r: (
+                r.status != "current best",
+                -(r.pass_rate_pct if r.pass_rate_pct is not None else -1),
+                r.agent_id,
+            ),
+        )
+
+    def improvement_trajectory(self) -> list[ImprovementPoint]:
+        if not self._db_available:
+            return []
+        out: list[ImprovementPoint] = []
+        last_pct: float | None = None
+        for change in reversed(self.current_best_history(limit=500)):
+            metric = (
+                self._metric_for_agent(change.instance_id, change.to_id)
+                if change.instance_id
+                else None
+            )
+            pct = metric.pass_rate_pct if metric is not None else None
+            delta_pp = (pct - last_pct) if pct is not None and last_pct is not None else None
+            if pct is not None:
+                last_pct = pct
+            out.append(
+                ImprovementPoint(
+                    at_ts=change.at_ts,
+                    agent_id=change.to_id,
+                    instance_id=change.instance_id,
+                    pass_rate_pct=pct,
+                    delta_pp=delta_pp,
+                    rationale=change.reason,
+                )
+            )
+        return out
+
+    def experiment_delta_board(self, limit: int = 50) -> list[ExperimentDeltaRow]:
+        if not self._db_available:
+            return []
+        journals = {
+            j.instance_id: j
+            for j in self.journal()
+            if j.instance_id is not None
+        }
+        rows = self._qd(
+            """
+            SELECT instance_id, slug, verdict, target_id, rationale,
+                   confidence, applied_at
+            FROM decisions
+            ORDER BY applied_at DESC NULLS LAST, instance_id DESC
+            LIMIT ?
+            """,
+            [limit],
+        )
+        out: list[ExperimentDeltaRow] = []
+        for r in rows:
+            instance_id = str(r["instance_id"])
+            target_id = str(r.get("target_id") or "")
+            metrics = self._leg_metrics(instance_id)
+            candidate = _select_metric(metrics, target_id)
+            journal = journals.get(instance_id)
+            baseline_hint = _extract_agent_id(
+                journal.current_best_at_runtime if journal is not None else None
+            )
+            baseline = _select_metric(metrics, baseline_hint, exclude=candidate)
+            if baseline is None and candidate is not None:
+                baseline = next((m for m in metrics if m.leg_id != candidate.leg_id), None)
+
+            candidate_pct = candidate.pass_rate_pct if candidate is not None else None
+            baseline_pct = baseline.pass_rate_pct if baseline is not None else None
+            delta_pp = (
+                candidate_pct - baseline_pct
+                if candidate_pct is not None and baseline_pct is not None
+                else None
+            )
+            candidate_cost = candidate.cost_per_task_usd if candidate is not None else None
+            baseline_cost = baseline.cost_per_task_usd if baseline is not None else None
+            cost_delta = (
+                candidate_cost - baseline_cost
+                if candidate_cost is not None and baseline_cost is not None
+                else None
+            )
+            out.append(
+                ExperimentDeltaRow(
+                    instance_id=instance_id,
+                    slug=str(r.get("slug") or instance_id),
+                    verdict=str(r.get("verdict") or ""),
+                    target_id=target_id,
+                    decided_at=_to_dt(r.get("applied_at")),
+                    baseline_leg=baseline.leg_id if baseline is not None else None,
+                    candidate_leg=candidate.leg_id if candidate is not None else None,
+                    baseline_pass_rate_pct=baseline_pct,
+                    candidate_pass_rate_pct=candidate_pct,
+                    delta_pp=delta_pp,
+                    cost_per_task_delta_usd=cost_delta,
+                    n_trials=candidate.n_trials if candidate is not None else 0,
+                    rationale=_opt_str(r.get("rationale")),
+                    confidence=_opt_float(r.get("confidence")),
+                )
+            )
+        return sorted(
+            out,
+            key=lambda row: (
+                row.delta_pp is None,
+                -(row.delta_pp or 0.0),
+                row.decided_at or datetime.min.replace(tzinfo=timezone.utc),
+            ),
+        )
+
+    def _metric_for_agent(self, instance_id: str | None, agent_id: str) -> _LegMetric | None:
+        if not instance_id:
+            return None
+        return _select_metric(self._leg_metrics(instance_id), agent_id)
+
+    def _leg_metrics(self, instance_id: str) -> list[_LegMetric]:
+        if not self._db_available:
+            return []
+        rows = self._qd(
+            """
+            SELECT t.leg_id,
+                   MAX(l.agent_id) AS agent_id,
+                   COUNT(t.trial_id) AS n_trials,
+                   SUM(CAST(t.passed AS INT)) AS n_passed,
+                   ROUND(100.0 * AVG(CAST(t.passed AS DOUBLE)), 2) AS pass_rate_pct,
+                   ROUND(SUM(t.cost_usd), 4) AS cost_usd
+            FROM trials t
+            LEFT JOIN legs l USING (instance_id, leg_id)
+            WHERE t.instance_id = ?
+            GROUP BY t.leg_id
+            ORDER BY t.leg_id
+            """,
+            [instance_id],
+        )
+        return [
+            _LegMetric(
+                leg_id=str(r["leg_id"]),
+                agent_id=_opt_str(r.get("agent_id")),
+                n_trials=int(r.get("n_trials") or 0),
+                n_passed=int(r.get("n_passed") or 0),
+                pass_rate_pct=_opt_float(r.get("pass_rate_pct")),
+                cost_usd=_opt_float(r.get("cost_usd")),
+            )
+            for r in rows
+        ]
+
     # ---- slug → instance_id resolution + verdict preview --------------
 
     def resolve_slug(self, slug: str) -> str | None:
@@ -1448,7 +1681,7 @@ class LabReader:
             slug=ready_slugs[0],
         )
 
-    # ---- /log activity timeline -----------------------------------------
+    # ---- /activity timeline ---------------------------------------------
 
     def activity_log(
         self,
@@ -2062,6 +2295,44 @@ def _parse_journal(text: str) -> list[JournalEntryView]:
 # ---------------------------------------------------------------------------
 # Misc helpers
 # ---------------------------------------------------------------------------
+
+
+def _metric_sort_key(row: AgentLadderRow) -> tuple[float, int]:
+    return (
+        row.pass_rate_pct if row.pass_rate_pct is not None else -1.0,
+        row.n_trials,
+    )
+
+
+def _select_metric(
+    metrics: list[_LegMetric],
+    identifier: str | None,
+    *,
+    exclude: _LegMetric | None = None,
+) -> _LegMetric | None:
+    if not identifier:
+        return None
+    needle = identifier.strip().strip("`")
+    if not needle:
+        return None
+    for metric in metrics:
+        if exclude is not None and metric.leg_id == exclude.leg_id:
+            continue
+        if metric.leg_id == needle or metric.agent_id == needle:
+            return metric
+    return None
+
+
+def _extract_agent_id(value: str | None) -> str | None:
+    if not value:
+        return None
+    tick = re.search(r"`([^`]+)`", value)
+    if tick:
+        return tick.group(1)
+    bracket = re.search(r"\[([^\]]+)\]", value)
+    if bracket:
+        return bracket.group(1).strip("`")
+    return value.strip() or None
 
 
 def _row_to_spawn(r: dict[str, object]) -> SpawnRow:

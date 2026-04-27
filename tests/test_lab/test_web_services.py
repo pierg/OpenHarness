@@ -312,10 +312,10 @@ def _sample_unit_rows() -> list[labsvc.UnitStatus]:
     ]
 
 
-def test_daemon_page_renders_services_and_process_tree(
+def test_pipeline_page_renders_services_and_process_tree(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """The redesigned daemon cockpit still surfaces services + process tree.
+    """The pipeline cockpit still surfaces services + process tree.
 
     After the redesign these panels live inside the collapsed
     ``Diagnostics`` <details>, so we assert against the section
@@ -328,7 +328,7 @@ def test_daemon_page_renders_services_and_process_tree(
     # assert full table content using a fixed snapshot.
     monkeypatch.setattr(labsvc, "available", lambda: True)
     monkeypatch.setattr(labsvc, "all_status", _sample_unit_rows)
-    r = client.get("/daemon")
+    r = client.get("/pipeline")
     assert r.status_code == 200
     body = r.text
     assert "Services" in body

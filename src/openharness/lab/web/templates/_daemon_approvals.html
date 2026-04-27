@@ -16,7 +16,7 @@
       {% for slug in daemon_state.approved_slugs %}
         <li class="flex items-center gap-3 border border-slate-100 rounded px-3 py-2">
           <span class="font-mono text-sm">{{ loop.index }}.</span>
-          <a href="/roadmap#{{ slug }}" class="font-mono text-sm font-semibold hover:underline">{{ slug }}</a>
+          <a href="/backlog?section=queue#{{ slug }}" class="font-mono text-sm font-semibold hover:underline">{{ slug }}</a>
           {% set fr = daemon_state.entry_failures.get(slug) %}
           {% if fr and fr.count %}
             <span class="text-xs px-2 py-0.5 rounded bg-amber-100 text-amber-800"
@@ -42,7 +42,7 @@
     </p>
   {% else %}
     <p class="text-sm text-slate-500">
-      No approvals queued. Visit <a href="/roadmap" class="text-blue-600 hover:underline">/roadmap</a> and click <em>Approve &amp; run</em> on an Up-next entry.
+      No approvals queued. Visit <a href="/backlog?section=queue" class="text-blue-600 hover:underline">Backlog</a> and click <em>Approve &amp; run</em> on an Up-next entry.
     </p>
   {% endif %}
 {% elif daemon_state.mode == "paused" %}

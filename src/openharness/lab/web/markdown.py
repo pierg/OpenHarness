@@ -9,13 +9,13 @@ critic body resolves to a 404 in the browser.
 
 Rewrite policy (conservative — only known patterns):
 
-- ``experiments.md[#anchor]``    → ``/experiments[#anchor]``
-- ``roadmap.md[#slug]``          → ``/roadmap[#slug]``
-- ``ideas.md[#slug]``            → ``/ideas[#slug]``
-- ``components.md[#id]``         → ``/components[#id]``
-- ``configs.md[#anchor]``        → ``/tree[#anchor]``
-- ``../runs/experiments/<id>(/…)``  → ``/experiments/<id>``
-- ``runs/experiments/<id>(/…)``     → ``/experiments/<id>``
+- ``experiments.md[#anchor]``    → ``/runs[#anchor]``
+- ``roadmap.md[#slug]``          → ``/backlog?section=queue[#slug]``
+- ``ideas.md[#slug]``            → ``/backlog?section=ideas[#slug]``
+- ``components.md[#id]``         → ``/catalog?tab=components[#id]``
+- ``configs.md[#anchor]``        → ``/catalog?tab=configs[#anchor]``
+- ``../runs/experiments/<id>(/…)``  → ``/runs/<id>``
+- ``runs/experiments/<id>(/…)``     → ``/runs/<id>``
 
 Anything else is left untouched (absolute URLs, fragment-only links,
 ``../src/…`` source references, agent skill paths, …). This means an
@@ -24,12 +24,12 @@ known cross-page references and run-dir links work.
 
 Anchors:
 
-- ``/ideas`` and ``/roadmap`` emit ``id="<slug>"`` on each entry so
+- ``/backlog`` emits ``id="<slug>"`` on each entry so
   cross-page anchors land on the right item.
-- ``/experiments`` does not yet emit per-entry anchors, so the anchor
+- ``/runs`` does not yet emit per-entry anchors, so the anchor
   in ``experiments.md#<date>--<slug>`` is preserved but won't scroll
   to anything. The journal entry itself still resolves to the
-  ``/experiments/{instance_id}`` page via the ``run_link`` parsing in
+  ``/runs/{instance_id}`` page via the ``run_link`` parsing in
   ``data.py`` — clicking the slug in the index list goes there.
 """
 
@@ -44,11 +44,11 @@ __all__ = ["render", "rewrite_href"]
 
 
 _PAGE_MAP: dict[str, str] = {
-    "experiments.md": "/experiments",
-    "roadmap.md": "/roadmap",
-    "ideas.md": "/ideas",
-    "components.md": "/components",
-    "configs.md": "/tree",
+    "experiments.md": "/runs",
+    "roadmap.md": "/backlog?section=queue",
+    "ideas.md": "/backlog?section=ideas",
+    "components.md": "/catalog?tab=components",
+    "configs.md": "/catalog?tab=configs",
 }
 
 _RUN_DIR_RE = re.compile(
@@ -73,7 +73,7 @@ def rewrite_href(href: str) -> str:
 
     m = _RUN_DIR_RE.match(h)
     if m:
-        return f"/experiments/{m.group(1)}"
+        return f"/runs/{m.group(1)}"
 
     m = _LAB_MD_RE.match(h)
     if m:

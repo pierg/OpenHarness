@@ -531,19 +531,19 @@ def client(isolated_lab: Path):
     return TestClient(app)
 
 
-def test_daemon_page_renders_cockpit_panels(client) -> None:
-    """`/daemon` renders the redesigned pipeline-centric cockpit.
+def test_pipeline_page_renders_cockpit_panels(client) -> None:
+    """`/pipeline` renders the pipeline-centric cockpit.
 
     After the redesign, the page is built around three top-level
     panels (control bar, pipeline strip, recent ticks) plus an
     Approval queue card and a collapsed Diagnostics section. We
     smoke-test for one anchor in each of the still-visible panels.
     """
-    resp = client.get("/daemon")
+    resp = client.get("/pipeline")
     assert resp.status_code == 200
     body = resp.text
     for marker in ("Mode", "Approval queue", "Recent ticks", "Diagnostics"):
-        assert marker in body, f"missing {marker!r} on /daemon"
+        assert marker in body, f"missing {marker!r} on /pipeline"
 
 
 def test_daemon_partials_round_trip(client) -> None:
@@ -1049,9 +1049,9 @@ def test_active_tick_renders_when_present(client, isolated_lab: Path) -> None:
     assert "ago" in body
     assert "datetime.datetime" not in body
 
-    # And the full /daemon page must also render (this is what the
+    # And the full /pipeline page must also render (this is what the
     # user actually hits in the browser).
-    resp_full = client.get("/daemon")
+    resp_full = client.get("/pipeline")
     assert resp_full.status_code == 200, resp_full.text
 
 

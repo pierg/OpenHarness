@@ -1,0 +1,41 @@
+{% extends "base.html" %}
+{% block title %}Backlog · OpenHarness lab{% endblock %}
+{% block crumbs %}<a href="/" class="hover:underline">Home</a> / Backlog{% endblock %}
+{% block content %}
+<div id="cmd-result" class="mb-4"></div>
+
+<header class="mb-5 flex flex-wrap items-baseline gap-3">
+  <h1 class="text-xl font-semibold">Backlog</h1>
+  <nav class="ml-auto flex flex-wrap gap-2 text-sm" aria-label="Backlog sections">
+    {% for key, label in [("queue", "Queue"), ("suggested", "Suggested"), ("ideas", "Ideas"), ("done", "Done"), ("inbox", "Inbox")] %}
+      <a href="/backlog?section={{ key }}"
+         class="rounded-md border px-3 py-1 {% if section == key %}border-emerald-500 bg-emerald-50 text-emerald-800{% else %}border-slate-200 bg-white hover:bg-slate-50{% endif %}">
+        {{ label }}
+      </a>
+    {% endfor %}
+  </nav>
+</header>
+
+{% if section == "ideas" %}
+  <div id="ideas-body"
+       hx-get="/_hx/ideas-body"
+       hx-trigger="lab-ideas-changed from:body"
+       hx-swap="innerHTML">
+    {% include "_ideas_body.html" %}
+  </div>
+{% elif section == "inbox" %}
+  <div id="pending-body"
+       hx-get="/_hx/pending-body"
+       hx-trigger="lab-pending-changed from:body"
+       hx-swap="innerHTML">
+    {% include "_pending_body.html" %}
+  </div>
+{% else %}
+  <div id="roadmap-body"
+       hx-get="/_hx/roadmap-body"
+       hx-trigger="lab-roadmap-changed from:body, lab-daemon-state-changed from:body, every 15s"
+       hx-swap="innerHTML">
+    {% include "_roadmap_body.html" %}
+  </div>
+{% endif %}
+{% endblock %}

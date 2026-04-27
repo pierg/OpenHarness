@@ -1,4 +1,4 @@
-{# Body of /roadmap. Loaded standalone via /_hx/roadmap-body when a
+{# Body of the Backlog roadmap section. Loaded standalone via /_hx/roadmap-body when a
    command emits ``lab-roadmap-changed`` or
    ``lab-daemon-state-changed``.
 
@@ -21,11 +21,11 @@
 
 {% if daemon_mode == "paused" %}
   <div class="mb-4 px-3 py-2 rounded bg-slate-100 border border-slate-200 text-sm">
-    <strong>Daemon is paused.</strong> Approvals queued here will sit waiting until you switch to <em>manual</em> on the <a href="/daemon" class="text-blue-700 hover:underline">/daemon</a> page.
+    <strong>Daemon is paused.</strong> Approvals queued here will sit waiting until you switch to <em>manual</em> on the <a href="/pipeline" class="text-blue-700 hover:underline">Pipeline</a> page.
   </div>
 {% elif daemon_mode == "autonomous" %}
   <div class="mb-4 px-3 py-2 rounded bg-amber-50 border border-amber-200 text-sm">
-    <strong>Daemon is on autopilot.</strong> It will pick the top of Up next on its next tick. Approvals are ignored in this mode — switch to <em>manual</em> on <a href="/daemon" class="text-blue-700 hover:underline">/daemon</a> if you want to gate each pickup.
+    <strong>Daemon is on autopilot.</strong> It will pick the top of Up next on its next tick. Approvals are ignored in this mode — switch to <em>manual</em> on <a href="/pipeline" class="text-blue-700 hover:underline">Pipeline</a> if you want to gate each pickup.
   </div>
 {% endif %}
 
@@ -44,7 +44,7 @@
           <div class="flex flex-wrap items-baseline gap-2">
             <span class="font-mono text-sm font-semibold">{{ loop.index }}. {{ r.slug }}</span>
             {% if r.idea_id %}<span class="text-xs text-slate-500">·</span>
-            <a href="/ideas#{{ r.idea_id }}" class="text-xs font-mono text-blue-600 hover:underline">{{ r.idea_id }}</a>{% endif %}
+            <a href="/backlog?section=ideas#{{ r.idea_id }}" class="text-xs font-mono text-blue-600 hover:underline">{{ r.idea_id }}</a>{% endif %}
             {% if is_active %}
               <span class="text-xs text-emerald-800 bg-emerald-200 px-2 py-0.5 rounded font-mono">running now</span>
             {% elif is_approved %}

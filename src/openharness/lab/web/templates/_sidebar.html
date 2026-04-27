@@ -1,27 +1,3 @@
-{# Sidebar — six-page IA after the holistic redesign.
-
-   Primary navigation is the six "rooms" the operator should normally
-   stay inside (Status / Tree / Runs / Tasks / Activity log / Audit).
-
-   The "More views" disclosure underneath exposes the secondary
-   surfaces that survive from the pre-redesign IA so every page is
-   reachable from a single click. They're grouped by topic:
-
-     Catalogs    /components, /components-perf, /ideas, /roadmap
-     Operations  /daemon, /pending, /spawns, /usage
-     Records     /experiments
-
-   The disclosure stays open whenever the active page lives inside
-   it (so users land on a non-primary page and immediately see where
-   they are in the nav).
-
-   Mobile: same slide-in drawer pattern as before; the controller
-   checkbox in base.html toggles the ``peer-checked:`` modifier. #}
-{% set _more_keys = (
-  "components", "components-perf", "ideas", "roadmap",
-  "daemon", "pending", "spawns", "usage", "experiments",
-) %}
-{% set _more_open = nav_active in _more_keys %}
 <nav class="w-56 border-r border-slate-200 bg-white shrink-0 flex flex-col
             fixed inset-y-0 left-0 z-30 -translate-x-full transition-transform
             peer-checked:translate-x-0
@@ -33,12 +9,12 @@
 
   <ul class="py-3 text-sm">
     {% set items = [
-      ("status", "/",       "Status"),
-      ("tree",   "/tree",   "Tree"),
-      ("runs",   "/runs",   "Runs"),
-      ("tasks",  "/tasks",  "Tasks"),
-      ("log",    "/log",    "Activity log"),
-      ("audit",  "/audit",  "Audit"),
+      ("home",     "/",         "Home"),
+      ("pipeline", "/pipeline", "Pipeline"),
+      ("runs",     "/runs",     "Runs"),
+      ("catalog",  "/catalog",  "Catalog"),
+      ("backlog",  "/backlog",  "Backlog"),
+      ("activity", "/activity", "Activity"),
     ] %}
     {% for key, href, label in items %}
       <li>
@@ -52,56 +28,7 @@
     {% endfor %}
   </ul>
 
-  <details class="border-t border-slate-200 text-sm" {% if _more_open %}open{% endif %}>
-    <summary class="px-4 py-2 cursor-pointer text-xs uppercase tracking-wide text-slate-500 hover:text-slate-700 select-none">
-      More views
-    </summary>
-
-    <div class="px-2 pb-3">
-      <div class="px-2 pt-2 pb-1 text-[10px] uppercase tracking-wider text-slate-400">Catalogs</div>
-      {% set catalogs = [
-        ("components",      "/components",       "Components"),
-        ("components-perf", "/components-perf",  "Components perf"),
-        ("ideas",           "/ideas",            "Ideas inbox"),
-        ("roadmap",         "/roadmap",          "Roadmap queue"),
-      ] %}
-      {% for key, href, label in catalogs %}
-        <a href="{{ href }}"
-           onclick="var t=document.getElementById('nav-toggle'); if(t)t.checked=false;"
-           class="block px-3 py-1 rounded hover:bg-slate-100
-                  {% if nav_active == key %}bg-slate-100 font-medium border-l-2 border-emerald-500{% endif %}">
-          {{ label }}
-        </a>
-      {% endfor %}
-
-      <div class="px-2 pt-3 pb-1 text-[10px] uppercase tracking-wider text-slate-400">Operations</div>
-      {% set ops = [
-        ("daemon",  "/daemon",  "Daemon detail"),
-        ("pending", "/pending", "Pending actions"),
-        ("spawns",  "/spawns",  "Spawn logs"),
-        ("usage",   "/usage",   "Token usage"),
-      ] %}
-      {% for key, href, label in ops %}
-        <a href="{{ href }}"
-           onclick="var t=document.getElementById('nav-toggle'); if(t)t.checked=false;"
-           class="block px-3 py-1 rounded hover:bg-slate-100
-                  {% if nav_active == key %}bg-slate-100 font-medium border-l-2 border-emerald-500{% endif %}">
-          {{ label }}
-        </a>
-      {% endfor %}
-
-      <div class="px-2 pt-3 pb-1 text-[10px] uppercase tracking-wider text-slate-400">Records</div>
-      <a href="/experiments"
-         onclick="var t=document.getElementById('nav-toggle'); if(t)t.checked=false;"
-         class="block px-3 py-1 rounded hover:bg-slate-100 text-slate-500
-                {% if nav_active == 'experiments' %}bg-slate-100 font-medium border-l-2 border-emerald-500{% endif %}"
-         title="Experiment journal and run summaries.">
-        Experiments
-      </a>
-    </div>
-  </details>
-
   <div class="mt-auto px-4 py-3 text-xs text-slate-400 border-t border-slate-200">
-    Phase 4 · PR-aware redesign
+    Lab IA · six views
   </div>
 </nav>

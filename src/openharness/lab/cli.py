@@ -33,6 +33,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import subprocess
 import sys
 from dataclasses import asdict
@@ -1013,9 +1014,18 @@ def _webui_preflight_check(*, host: str, port: int) -> None:
                 f"[red]ERROR:[/red] something else is already bound to "
                 f"{host}:{port}. Find it with:"
             )
+            if shutil.which("ss"):
+                err_console.print(
+                    f"  [cyan]ss -tlnp 'sport = :{port}'[/cyan]   "
+                    f"# (then kill / reconfigure / pick a different --port)"
+                )
+            else:
+                err_console.print(
+                    f"  [cyan]lsof -nP -iTCP:{port} -sTCP:LISTEN[/cyan]   "
+                    f"# macOS / BSD (then kill / reconfigure / pick a different --port)"
+                )
             err_console.print(
-                f"  [cyan]ss -tlnp 'sport = :{port}'[/cyan]   "
-                f"# (then kill / reconfigure / pick a different --port)"
+                f"  Or bind elsewhere:  [cyan]uv run lab webui --port {port + 1}[/cyan]"
             )
         raise typer.Exit(1)
     finally:
