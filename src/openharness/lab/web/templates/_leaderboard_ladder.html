@@ -1,43 +1,56 @@
-{% if not ladder %}
-  <p class="text-sm text-slate-500">No ranked experiment results yet.</p>
+{% if not rows %}
+  <p class="text-sm text-slate-500">No full-suite benchmark results yet.</p>
 {% else %}
   <div class="overflow-x-auto">
-    <table class="w-full text-sm">
+    <table class="w-full min-w-[900px] text-sm">
       <thead>
         <tr class="text-left text-xs uppercase text-slate-500 border-b border-slate-200">
-          <th class="py-2">Ranked Result</th>
-          <th>Group</th>
+          <th class="py-2">Model ID</th>
+          <th>Best Configuration</th>
+          <th>Experiment</th>
+          <th>Benchmark</th>
           <th class="text-right">Pass</th>
+          <th class="text-right">Tasks</th>
           <th class="text-right">Cost / task</th>
           <th class="text-right">Tokens / task</th>
+          <th class="text-right">Median time</th>
+          <th class="text-right">Evaluated</th>
         </tr>
       </thead>
       <tbody>
-        {% for row in ladder %}
+        {% for row in rows %}
           <tr class="border-b border-slate-100 hover:bg-slate-50">
-            <td class="py-2">
-              {% if row.accepting_instance_id %}
-                <a href="/runs/{{ row.accepting_instance_id }}" class="font-mono text-blue-600 hover:underline">#{{ row.rank }} {{ row.agent_id }}</a>
-              {% else %}
-                <span class="font-mono">#{{ row.rank }} {{ row.agent_id }}</span>
-              {% endif %}
-              {% if row.reason %}<div class="text-xs text-slate-500 line-clamp-2">{{ row.reason }}</div>{% endif %}
-            </td>
-            <td>
+            <td class="py-2 align-top">
               <div class="font-mono text-xs">{{ row.model_id }}</div>
-              <div class="text-xs text-slate-500">{{ row.dataset }} · {{ row.evidence_scope }}</div>
-              <span class="rounded border px-1.5 py-0.5 text-xs {% if row.status == 'top ranked' %}border-emerald-300 bg-emerald-50 text-emerald-800{% elif row.status == 'ineligible' %}border-rose-200 bg-rose-50 text-rose-700{% else %}border-slate-200 bg-slate-50 text-slate-600{% endif %}">
-                {{ row.status }}
-              </span>
-              {% if not row.eligible %}<div class="text-xs text-rose-600">{{ row.eligibility_reason }}</div>{% endif %}
             </td>
-            <td class="text-right">
+            <td class="align-top">
+              <div class="font-mono text-xs text-slate-900">{{ row.agent_id }}</div>
+              {% if row.reason %}<div class="mt-1 text-xs text-slate-500 line-clamp-2">{{ row.reason }}</div>{% endif %}
+            </td>
+            <td class="align-top">
+              {% if row.accepting_instance_id %}
+                <a href="/runs/{{ row.accepting_instance_id }}" class="font-mono text-xs text-blue-600 hover:underline">{{ row.experiment_id or row.accepting_instance_id }}</a>
+                <div class="font-mono text-[11px] text-slate-500">{{ row.accepting_instance_id }}</div>
+              {% else %}
+                <span class="font-mono text-xs">{{ row.experiment_id or '—' }}</span>
+              {% endif %}
+            </td>
+            <td class="align-top">
+              <div class="font-mono text-xs">{{ row.dataset }}</div>
+              <div class="text-xs text-slate-500">{{ row.evidence_scope }}</div>
+            </td>
+            <td class="text-right align-top">
               <span class="px-1.5 py-0.5 rounded {{ pct_color(row.pass_rate_pct) }} text-xs">
                 {{ '{:.0f}%'.format(row.pass_rate_pct) if row.pass_rate_pct is not none else '—' }}
               </span>
             </td>
-            <td class="text-right font-mono text-xs">{{ fmt_money(row.cost_per_task_usd) }}</td>
-            <td class="text-right font-mono text-xs">{{ fmt_int(row.tokens_per_task) }}</td>
+            <td class="text-right align-top text-xs">{{ row.n_passed }}/{{ row.n_trials }}</td>
+            <td class="text-right align-top font-mono text-xs">{{ fmt_money(row.cost_per_task_usd) }}</td>
+            <td class="text-right align-top font-mono text-xs">{{ fmt_int(row.tokens_per_task) }}</td>
+            <td class="text-right align-top font-mono text-xs">
+              {% if row.median_duration_sec is none %}—{% else %}{{ '%.0f'|format(row.median_duration_sec) }}s{% endif %}
+            </td>
+            <td class="text-right align-top text-xs text-slate-500">{{ fmt_dt(row.evaluated_at) }}</td>
           </tr>
         {% endfor %}
       </tbody>

@@ -67,7 +67,6 @@ def create_app() -> FastAPI:
     templates.env.globals["pct_color"] = _pct_color
     templates.env.globals["status_color"] = _status_color
     templates.env.globals["verdict_color"] = _verdict_color
-    templates.env.globals["trajectory_chart"] = _trajectory_chart
     templates.env.globals["cmd_specs"] = labcmd.COMMANDS
     # Auth posture exposed to templates so the header badge can render
     # the active mode without re-importing the auth module per page.
@@ -120,50 +119,32 @@ def create_app() -> FastAPI:
                 up_next=up_next,
                 suggested=suggested,
                 done=done,
+                experiments=reader.experiments(limit=50),
                 activity=reader.activity_log(limit=5),
             )
         except Exception:
             _close_reader(request, reader)
             raise
 
-    @app.get("/_hx/leaderboard-hero", response_class=HTMLResponse)
-    def hx_leaderboard_hero(request: Request) -> HTMLResponse:
+    @app.get("/_hx/leaderboard", response_class=HTMLResponse)
+    def hx_leaderboard(request: Request) -> HTMLResponse:
         reader = _reader_ctx(request)
-        return _render(
-            request,
-            "_leaderboard_hero.html",
-            _reader=reader,
-            leaderboard=reader.leaderboard(),
-        )
-
-    @app.get("/_hx/leaderboard-trajectory", response_class=HTMLResponse)
-    def hx_leaderboard_trajectory(request: Request) -> HTMLResponse:
-        reader = _reader_ctx(request)
-        return _render(
-            request,
-            "_leaderboard_trajectory.html",
-            _reader=reader,
-            trajectory=reader.improvement_trajectory(),
-        )
-
-    @app.get("/_hx/leaderboard-ladder", response_class=HTMLResponse)
-    def hx_leaderboard_ladder(request: Request) -> HTMLResponse:
-        reader = _reader_ctx(request)
+        leaderboard = reader.leaderboard()
         return _render(
             request,
             "_leaderboard_ladder.html",
             _reader=reader,
-            ladder=reader.agent_ladder(),
+            rows=leaderboard.rows,
         )
 
-    @app.get("/_hx/leaderboard-delta", response_class=HTMLResponse)
-    def hx_leaderboard_delta(request: Request) -> HTMLResponse:
+    @app.get("/_hx/experiment-history", response_class=HTMLResponse)
+    def hx_experiment_history(request: Request) -> HTMLResponse:
         reader = _reader_ctx(request)
         return _render(
             request,
-            "_leaderboard_delta.html",
+            "_experiment_history.html",
             _reader=reader,
-            deltas=reader.experiment_delta_board(limit=50),
+            experiments=reader.experiments(limit=50),
         )
 
     @app.get("/pipeline", response_class=HTMLResponse)
@@ -1028,53 +1009,6 @@ def _fmt_int(v: object) -> str:
         return f"{int(v):,}"  # type: ignore[arg-type]
     except (TypeError, ValueError):
         return "—"
-
-
-def _trajectory_chart(points: object) -> dict[str, object]:
-    """Convert leaderboard points into fixed SVG coordinates."""
-    items = [p for p in points if getattr(p, "pass_rate_pct", None) is not None]  # type: ignore[union-attr]
-    width = 640
-    height = 180
-    left = 40
-    right = 18
-    top = 18
-    bottom = 34
-    inner_w = width - left - right
-    inner_h = height - top - bottom
-    if not items:
-        return {"width": width, "height": height, "path": "", "points": []}
-    denom = max(len(items) - 1, 1)
-    coords: list[dict[str, object]] = []
-    path_parts: list[str] = []
-    prev_x: float | None = None
-    prev_y: float | None = None
-    for idx, item in enumerate(items):
-        pct = max(0.0, min(100.0, float(getattr(item, "pass_rate_pct"))))
-        x = left + (idx / denom) * inner_w
-        y = top + ((100.0 - pct) / 100.0) * inner_h
-        if idx == 0:
-            path_parts.append(f"M {x:.1f} {y:.1f}")
-        elif prev_x is not None and prev_y is not None:
-            path_parts.append(f"L {x:.1f} {prev_y:.1f} L {x:.1f} {y:.1f}")
-        coords.append(
-            {
-                "x": x,
-                "y": y,
-                "pct": pct,
-                "agent_id": getattr(item, "agent_id", ""),
-                "instance_id": getattr(item, "instance_id", None),
-                "delta_pp": getattr(item, "delta_pp", None),
-                "at_ts": getattr(item, "at_ts", None),
-            }
-        )
-        prev_x = x
-        prev_y = y
-    return {
-        "width": width,
-        "height": height,
-        "path": " ".join(path_parts),
-        "points": coords,
-    }
 
 
 def _pct_color(pct: float | None) -> str:

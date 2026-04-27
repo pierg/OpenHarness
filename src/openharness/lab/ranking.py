@@ -155,17 +155,15 @@ def best_by_model(
     dataset: str | None = None,
     evidence_scope: str = "full_suite",
 ) -> list[RankingRow]:
-    """Return the top eligible row per model for one evidence scope."""
-    out: list[RankingRow] = []
-    seen: set[str] = set()
+    """Return the best eligible row per model for one evidence scope."""
+    best: dict[str, RankingRow] = {}
     for row in rankings(conn, dataset=dataset):
         if row.evidence_scope != evidence_scope or not row.eligible:
             continue
-        if row.model_id in seen:
-            continue
-        seen.add(row.model_id)
-        out.append(row)
-    return out
+        current = best.get(row.model_id)
+        if current is None or _sort_key(row) < _sort_key(current):
+            best[row.model_id] = row
+    return sorted(best.values(), key=_sort_key)
 
 
 def _row_from_db(row: tuple[object, ...]) -> RankingRow:

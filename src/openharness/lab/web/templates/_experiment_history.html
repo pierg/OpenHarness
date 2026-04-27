@@ -1,0 +1,46 @@
+{% if not experiments %}
+  <p class="text-sm text-slate-500">No experiments yet.</p>
+{% else %}
+  <div class="overflow-x-auto">
+    <table class="w-full min-w-[760px] text-sm">
+      <thead>
+        <tr class="text-left text-xs uppercase text-slate-500 border-b border-slate-200">
+          <th class="py-2">Date</th>
+          <th>Experiment</th>
+          <th>Instance</th>
+          <th class="text-right">Legs</th>
+          <th class="text-right">Trials</th>
+          <th class="text-right">Pass</th>
+          <th class="text-right">Cost</th>
+          <th>Verdict</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for e in experiments %}
+          <tr class="border-b border-slate-100 hover:bg-slate-50">
+            <td class="py-2 text-xs text-slate-500">{{ fmt_dt(e.created_at) }}</td>
+            <td class="font-mono text-xs">{{ e.experiment_id or '—' }}</td>
+            <td class="font-mono text-xs">
+              <a href="/runs/{{ e.instance_id }}" class="text-blue-600 hover:underline">{{ e.instance_id }}</a>
+            </td>
+            <td class="text-right">{{ e.n_legs }}</td>
+            <td class="text-right">{{ e.n_trials }}</td>
+            <td class="text-right">
+              <span class="px-1.5 py-0.5 rounded {{ pct_color(e.pass_rate_pct) }} text-xs">
+                {{ '{:.0f}%'.format(e.pass_rate_pct) if e.pass_rate_pct is not none else '—' }}
+              </span>
+            </td>
+            <td class="text-right text-xs font-mono">{{ fmt_money(e.cost_usd) }}</td>
+            <td class="text-xs">
+              {% if e.verdict %}
+                <span class="px-1.5 py-0.5 border rounded {{ verdict_color(e.verdict.verdict, e.verdict.applied) }}">
+                  {{ e.verdict.verdict }}{% if not e.verdict.applied %} · pending merge{% endif %}
+                </span>
+              {% else %}—{% endif %}
+            </td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+{% endif %}

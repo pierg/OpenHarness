@@ -106,6 +106,7 @@ def test_rankings_group_by_model_dataset_and_scope() -> None:
     assert [r.rank for r in full_rows] == [1, 2]
     assert slice_rows[0].rank == 1
     assert slice_rows[0].agent_id == "agent-c"
+    assert [r.agent_id for r in ranking.best_by_model(conn)] == ["agent-b"]
 
 
 def test_rejected_target_is_visible_but_ineligible() -> None:
@@ -241,3 +242,91 @@ def test_rejected_conceptual_target_uses_candidate_leg_for_eligibility() -> None
     assert rows["basic_30_8192"].eligible is True
     assert rows["basic_60_16384"].eligible is False
     assert rows["basic_120_32768"].eligible is False
+
+
+def test_best_by_model_picks_best_full_suite_across_datasets() -> None:
+    conn = duckdb.connect(":memory:")
+    conn.execute(
+        """
+        CREATE TABLE experiments (
+            instance_id TEXT,
+            experiment_id TEXT,
+            dataset TEXT,
+            created_at TIMESTAMPTZ
+        );
+        CREATE TABLE legs (
+            instance_id TEXT,
+            leg_id TEXT,
+            agent_id TEXT,
+            model TEXT
+        );
+        CREATE TABLE trials (
+            trial_id TEXT,
+            instance_id TEXT,
+            leg_id TEXT,
+            passed BOOLEAN,
+            model TEXT,
+            cost_usd DOUBLE,
+            total_tokens BIGINT,
+            duration_sec DOUBLE
+        );
+        CREATE TABLE experiment_evaluations (
+            instance_id TEXT,
+            verdict TEXT,
+            target_id TEXT,
+            baseline_leg TEXT,
+            candidate_leg TEXT,
+            rationale TEXT
+        );
+        """
+    )
+    conn.execute(
+        "INSERT INTO experiments VALUES (?, ?, ?, ?), (?, ?, ?, ?)",
+        [
+            "full-a",
+            "tb2-a",
+            "benchmark-a",
+            datetime(2026, 4, 1, tzinfo=timezone.utc),
+            "full-b",
+            "tb2-b",
+            "benchmark-b",
+            datetime(2026, 4, 2, tzinfo=timezone.utc),
+        ],
+    )
+    conn.execute(
+        "INSERT INTO legs VALUES (?, ?, ?, ?), (?, ?, ?, ?)",
+        [
+            "full-a",
+            "candidate",
+            "agent-low",
+            "model-x",
+            "full-b",
+            "candidate",
+            "agent-high",
+            "model-x",
+        ],
+    )
+    trials = []
+    for idx in range(80):
+        trials.append((f"a-{idx}", "full-a", "candidate", idx < 40, "model-x", 1.0, 100, 10.0))
+        trials.append((f"b-{idx}", "full-b", "candidate", idx < 60, "model-x", 1.0, 100, 10.0))
+    conn.executemany("INSERT INTO trials VALUES (?, ?, ?, ?, ?, ?, ?, ?)", trials)
+    conn.execute(
+        "INSERT INTO experiment_evaluations VALUES (?, ?, ?, ?, ?, ?), (?, ?, ?, ?, ?, ?)",
+        [
+            "full-a",
+            "accept",
+            "agent-low",
+            None,
+            "candidate",
+            "accepted",
+            "full-b",
+            "accept",
+            "agent-high",
+            None,
+            "candidate",
+            "accepted",
+        ],
+    )
+
+    assert [r.agent_id for r in ranking.best_by_model(conn)] == ["agent-high"]

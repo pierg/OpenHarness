@@ -23,8 +23,6 @@ stays fast.
 
 from __future__ import annotations
 
-import pytest
-
 from openharness.lab.web import commands as labcmd
 
 
@@ -328,20 +326,23 @@ def test_home_page_renders_leaderboard_and_work_zones() -> None:
     assert r.status_code == 200
     body = r.text
     # Leaderboard-first home.
-    assert "Top ranked" in body
-    assert "Ranked full-suite trajectory" in body
-    assert "Model-group leaderboard" in body
-    assert "Experiment evaluation deltas" in body
+    assert "Leaderboard" in body
+    assert "full-suite only" in body
+    assert "Experiment history" in body
+    assert "Top ranked" not in body
+    assert "Ranked full-suite trajectory" not in body
+    assert "Experiment evaluation deltas" not in body
     # Operator work zones remain on the first page.
     assert "Now" in body
     assert "Queue" in body
     assert 'id="roadmap-queue"' in body
     assert 'id="you-owe"' in body or "Inbox" in body
     # HTMX partials mounted on first render.
-    assert "/_hx/leaderboard-hero" in body
-    assert "/_hx/leaderboard-trajectory" in body
-    assert "/_hx/leaderboard-ladder" in body
-    assert "/_hx/leaderboard-delta" in body
+    assert "/_hx/leaderboard" in body
+    assert "/_hx/experiment-history" in body
+    assert "/_hx/leaderboard-hero" not in body
+    assert "/_hx/leaderboard-trajectory" not in body
+    assert "/_hx/leaderboard-delta" not in body
     assert "/_hx/status-roadmap-queue" in body
     assert "/_hx/you-owe" in body
 
@@ -349,46 +350,21 @@ def test_home_page_renders_leaderboard_and_work_zones() -> None:
 def test_leaderboard_partials_render() -> None:
     c = _client()
     expected = {
-        "/_hx/leaderboard-hero": "Top ranked",
-        "/_hx/leaderboard-trajectory": ("No full-suite", "<svg"),
-        "/_hx/leaderboard-ladder": ("No ranked", "<table"),
-        "/_hx/leaderboard-delta": ("No experiment evaluations", "<table"),
+        "/_hx/leaderboard": ("No full-suite", "<table"),
+        "/_hx/experiment-history": ("No experiments", "<table"),
     }
     for path, markers in expected.items():
         r = c.get(path)
         assert r.status_code == 200, f"{path} -> {r.status_code}"
         choices = markers if isinstance(markers, tuple) else (markers,)
         assert any(marker in r.text for marker in choices), path
-
-
-def test_leaderboard_trajectory_shows_experiment_ids(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    from datetime import datetime, timezone
-
-    from openharness.lab.web import data as labdata
-    from openharness.lab.web.models import ImprovementPoint
-
-    instance_id = "exp-20260427-unique-pr-audit"
-    monkeypatch.setattr(
-        labdata.LabReader,
-        "improvement_trajectory",
-        lambda _self: [
-            ImprovementPoint(
-                at_ts=datetime(2026, 4, 27, tzinfo=timezone.utc),
-                agent_id="candidate-agent",
-                instance_id=instance_id,
-                pass_rate_pct=42.0,
-                delta_pp=None,
-                rationale="accepted",
-            )
-        ],
-    )
-
-    r = _client().get("/_hx/leaderboard-trajectory")
-    assert r.status_code == 200
-    assert instance_id in r.text
-    assert "candidate-agent" in r.text
+    for old_path in (
+        "/_hx/leaderboard-hero",
+        "/_hx/leaderboard-trajectory",
+        "/_hx/leaderboard-ladder",
+        "/_hx/leaderboard-delta",
+    ):
+        assert c.get(old_path).status_code == 404, old_path
 
 
 def test_you_owe_partial_renders_or_is_empty_state() -> None:

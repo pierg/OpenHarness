@@ -4,52 +4,32 @@
 {% block content %}
 <div id="cmd-result" class="mb-4"></div>
 
-<section class="mb-6">
-  <div hx-get="/_hx/leaderboard-hero"
+<section class="bg-white border border-slate-200 rounded-lg p-5 mb-6">
+  <div class="flex flex-col gap-2 md:flex-row md:items-start md:justify-between mb-4">
+    <div>
+      <h1 class="text-xl font-semibold">Leaderboard</h1>
+      <p class="mt-1 text-sm text-slate-600">{{ leaderboard.policy_label }}</p>
+    </div>
+    <a href="/catalog?tab=configs" class="text-xs text-slate-500 hover:underline">configuration catalog</a>
+  </div>
+  <div hx-get="/_hx/leaderboard"
        hx-trigger="load, every 60s, lab-configs-changed from:body"
        hx-swap="innerHTML">
-    {% include "_leaderboard_hero.html" %}
+    {% set rows = leaderboard.rows %}
+    {% set policy_label = leaderboard.policy_label %}
+    {% include "_leaderboard_ladder.html" %}
   </div>
 </section>
 
-<div class="grid grid-cols-1 2xl:grid-cols-[minmax(0,1.15fr)_minmax(420px,.85fr)] gap-6 mb-6">
-  <section class="bg-white border border-slate-200 rounded-lg p-5">
-    <div class="flex items-baseline justify-between mb-4">
-      <h2 class="font-semibold">Ranked full-suite trajectory</h2>
-      <a href="/catalog?tab=configs" class="text-xs text-slate-500 hover:underline">evaluations</a>
-    </div>
-    <div hx-get="/_hx/leaderboard-trajectory"
-         hx-trigger="load, every 60s, lab-configs-changed from:body"
-         hx-swap="innerHTML">
-      {% set trajectory = leaderboard.trajectory %}
-      {% include "_leaderboard_trajectory.html" %}
-    </div>
-  </section>
-
-  <section class="bg-white border border-slate-200 rounded-lg p-5">
-    <div class="flex items-baseline justify-between mb-4">
-      <h2 class="font-semibold">Model-group leaderboard</h2>
-      <a href="/runs" class="text-xs text-slate-500 hover:underline">runs</a>
-    </div>
-    <div hx-get="/_hx/leaderboard-ladder"
-         hx-trigger="load, every 60s, lab-configs-changed from:body"
-         hx-swap="innerHTML">
-      {% set ladder = leaderboard.ladder %}
-      {% include "_leaderboard_ladder.html" %}
-    </div>
-  </section>
-</div>
-
 <section class="bg-white border border-slate-200 rounded-lg p-5 mb-6">
-  <div class="flex items-baseline justify-between mb-4">
-    <h2 class="font-semibold">Experiment evaluation deltas</h2>
-    <a href="/activity?kind=verdict" class="text-xs text-slate-500 hover:underline">verdict timeline</a>
+  <div class="flex flex-col gap-2 md:flex-row md:items-baseline md:justify-between mb-4">
+    <h2 class="font-semibold">Experiment history</h2>
+    <a href="/runs" class="text-xs text-slate-500 hover:underline">all runs</a>
   </div>
-  <div hx-get="/_hx/leaderboard-delta"
+  <div hx-get="/_hx/experiment-history"
        hx-trigger="load, every 60s, lab-configs-changed from:body"
        hx-swap="innerHTML">
-    {% set deltas = leaderboard.deltas %}
-    {% include "_leaderboard_delta.html" %}
+    {% include "_experiment_history.html" %}
   </div>
 </section>
 

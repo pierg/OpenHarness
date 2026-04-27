@@ -177,6 +177,7 @@ class AgentLadderRow:
     status: str  # top ranked | ranked | ineligible
     evaluated_at: datetime | None
     accepting_instance_id: str | None
+    experiment_id: str | None
     pass_rate_pct: float | None
     cost_per_task_usd: float | None
     cost_per_pass_usd: float | None
@@ -190,45 +191,9 @@ class AgentLadderRow:
 
 
 @dataclass(eq=False, slots=True)
-class ExperimentDeltaRow:
-    instance_id: str
-    slug: str
-    verdict: str
-    target_id: str
-    decided_at: datetime | None
-    baseline_leg: str | None
-    candidate_leg: str | None
-    baseline_pass_rate_pct: float | None
-    candidate_pass_rate_pct: float | None
-    delta_pp: float | None
-    cost_per_task_delta_usd: float | None
-    n_trials: int
-    rationale: str | None
-    confidence: float | None
-
-
-@dataclass(eq=False, slots=True)
-class ImprovementPoint:
-    at_ts: datetime
-    agent_id: str
-    instance_id: str | None
-    pass_rate_pct: float | None
-    delta_pp: float | None
-    rationale: str | None
-
-
-@dataclass(eq=False, slots=True)
 class LeaderboardView:
-    top_agent_id: str
-    top_model_id: str | None
-    top_dataset: str | None
-    top_pass_rate_pct: float | None
-    top_cost_per_task_usd: float | None
-    top_evaluated_at: datetime | None
     policy_label: str
-    ladder: list[AgentLadderRow]
-    deltas: list[ExperimentDeltaRow]
-    trajectory: list[ImprovementPoint]
+    rows: list[AgentLadderRow]
 
 
 @dataclass(eq=False, slots=True)
