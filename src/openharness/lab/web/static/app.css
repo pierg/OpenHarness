@@ -1,5 +1,228 @@
 /* App-specific styles. Tailwind is loaded via CDN in base.html. */
 
+:root {
+  color-scheme: light;
+  --app-bg: #eef5f7;
+  --app-bg-soft: #f8fbfb;
+  --surface: rgba(255, 255, 255, 0.92);
+  --surface-solid: #ffffff;
+  --surface-muted: #f6f8fb;
+  --surface-raised: #edf3f7;
+  --text: #0f172a;
+  --muted: #64748b;
+  --border: #d7e1e8;
+  --border-strong: #b7c5d0;
+  --accent: #0f9f7a;
+  --accent-strong: #047857;
+  --accent-cool: #2563eb;
+  --shadow-card: 0 1px 2px rgba(15, 23, 42, 0.04), 0 12px 32px rgba(15, 23, 42, 0.06);
+  --shadow-header: 0 1px 0 rgba(15, 23, 42, 0.05), 0 12px 30px rgba(15, 23, 42, 0.04);
+}
+
+html.dark {
+  color-scheme: dark;
+  --app-bg: #090f1c;
+  --app-bg-soft: #0d1728;
+  --surface: rgba(15, 23, 42, 0.88);
+  --surface-solid: #111827;
+  --surface-muted: #0f1b2d;
+  --surface-raised: #172235;
+  --text: #e6edf5;
+  --muted: #9aa9ba;
+  --border: #243449;
+  --border-strong: #3b5068;
+  --accent: #34d399;
+  --accent-strong: #10b981;
+  --accent-cool: #7dd3fc;
+  --shadow-card: 0 1px 0 rgba(148, 163, 184, 0.08), 0 20px 48px rgba(0, 0, 0, 0.28);
+  --shadow-header: 0 1px 0 rgba(148, 163, 184, 0.12), 0 16px 36px rgba(0, 0, 0, 0.24);
+}
+
+html {
+  background: var(--app-bg);
+}
+
+.app-body {
+  background:
+    linear-gradient(180deg, var(--app-bg-soft) 0%, var(--app-bg) 48%, var(--app-bg-soft) 100%),
+    linear-gradient(90deg, rgba(15, 159, 122, 0.06) 1px, transparent 1px),
+    linear-gradient(180deg, rgba(37, 99, 235, 0.05) 1px, transparent 1px);
+  background-size: auto, 36px 36px, 36px 36px;
+  color: var(--text);
+}
+
+.app-header {
+  background: color-mix(in srgb, var(--surface-solid) 84%, transparent);
+  box-shadow: var(--shadow-header);
+  backdrop-filter: saturate(1.2) blur(16px);
+}
+
+.app-sidebar {
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--surface-solid) 96%, transparent), color-mix(in srgb, var(--surface-muted) 92%, transparent));
+  box-shadow: 12px 0 36px rgba(15, 23, 42, 0.06);
+}
+
+html.dark .app-sidebar {
+  box-shadow: 16px 0 42px rgba(0, 0, 0, 0.32);
+}
+
+section.bg-white,
+div.bg-white.border,
+article.bg-white.border {
+  box-shadow: var(--shadow-card);
+}
+
+a {
+  text-underline-offset: 2px;
+}
+
+button,
+a,
+input,
+select,
+textarea {
+  transition-property: background-color, border-color, color, box-shadow, opacity;
+  transition-duration: 160ms;
+  transition-timing-function: ease;
+}
+
+.theme-toggle {
+  background: color-mix(in srgb, var(--surface-solid) 88%, transparent);
+  border-color: var(--border);
+  color: var(--muted);
+}
+
+.theme-toggle:hover {
+  background: var(--surface-muted);
+  border-color: var(--border-strong);
+  color: var(--text);
+}
+
+.theme-icon-moon {
+  display: none;
+}
+
+html.dark .theme-icon-sun {
+  display: none;
+}
+
+html.dark .theme-icon-moon {
+  display: block;
+}
+
+/* Dark-mode bridge for the existing utility-heavy Jinja templates. */
+html.dark .bg-white { background-color: var(--surface) !important; }
+html.dark .bg-slate-50 { background-color: var(--surface-muted) !important; }
+html.dark .bg-slate-100 { background-color: var(--surface-raised) !important; }
+html.dark .bg-slate-200 { background-color: #26364b !important; }
+html.dark .bg-slate-300 { background-color: #42556d !important; }
+html.dark .bg-slate-700 { background-color: #475569 !important; }
+html.dark .bg-slate-900 { background-color: #050816 !important; }
+
+html.dark .border-slate-100 { border-color: rgba(148, 163, 184, 0.14) !important; }
+html.dark .border-slate-200 { border-color: var(--border) !important; }
+html.dark .border-slate-300 { border-color: var(--border-strong) !important; }
+
+html.dark .text-slate-900,
+html.dark .text-slate-800,
+html.dark .text-slate-700 { color: var(--text) !important; }
+html.dark .text-slate-600,
+html.dark .text-slate-500 { color: var(--muted) !important; }
+html.dark .text-slate-400 { color: #7f8fa3 !important; }
+html.dark .text-blue-600,
+html.dark .text-blue-700 { color: #7dd3fc !important; }
+html.dark .hover\:underline:hover { text-decoration-color: currentColor; }
+
+html.dark .hover\:bg-slate-50:hover,
+html.dark .hover\:bg-slate-100:hover { background-color: #182438 !important; }
+html.dark .hover\:bg-amber-50:hover { background-color: rgba(120, 53, 15, 0.34) !important; }
+html.dark .hover\:bg-amber-100:hover { background-color: rgba(146, 64, 14, 0.38) !important; }
+html.dark .hover\:bg-rose-50:hover { background-color: rgba(127, 29, 29, 0.34) !important; }
+
+html.dark .divide-slate-100 > :not([hidden]) ~ :not([hidden]) { border-color: rgba(148, 163, 184, 0.14) !important; }
+html.dark .ring-amber-400 { --tw-ring-color: #fbbf24 !important; }
+
+html.dark .bg-emerald-50,
+html.dark .bg-emerald-100 { background-color: rgba(6, 95, 70, 0.34) !important; }
+html.dark .border-emerald-200,
+html.dark .border-emerald-300 { border-color: rgba(52, 211, 153, 0.38) !important; }
+html.dark .text-emerald-700,
+html.dark .text-emerald-800,
+html.dark .text-emerald-900 { color: #a7f3d0 !important; }
+
+html.dark .bg-amber-50,
+html.dark .bg-amber-100,
+html.dark .bg-amber-200 { background-color: rgba(120, 53, 15, 0.34) !important; }
+html.dark .border-amber-200,
+html.dark .border-amber-300,
+html.dark .border-amber-400 { border-color: rgba(251, 191, 36, 0.42) !important; }
+html.dark .text-amber-700,
+html.dark .text-amber-800,
+html.dark .text-amber-900 { color: #fde68a !important; }
+
+html.dark .bg-rose-50,
+html.dark .bg-rose-100 { background-color: rgba(127, 29, 29, 0.34) !important; }
+html.dark .border-rose-200,
+html.dark .border-rose-300 { border-color: rgba(251, 113, 133, 0.42) !important; }
+html.dark .text-rose-600,
+html.dark .text-rose-700,
+html.dark .text-rose-800,
+html.dark .text-rose-900 { color: #fecdd3 !important; }
+
+html.dark .bg-sky-50,
+html.dark .bg-sky-100,
+html.dark .bg-blue-50,
+html.dark .bg-blue-100 { background-color: rgba(12, 74, 110, 0.34) !important; }
+html.dark .border-sky-200,
+html.dark .border-blue-200 { border-color: rgba(125, 211, 252, 0.34) !important; }
+html.dark .text-sky-600,
+html.dark .text-sky-700,
+html.dark .text-sky-800,
+html.dark .text-sky-900,
+html.dark .text-blue-800 { color: #bae6fd !important; }
+
+html.dark input:not([type="hidden"]),
+html.dark select,
+html.dark textarea {
+  background-color: var(--surface-muted);
+  border-color: var(--border);
+  color: var(--text);
+}
+
+html.dark input::placeholder,
+html.dark textarea::placeholder {
+  color: #74849a;
+}
+
+html.dark .prose {
+  color: var(--text);
+}
+
+html.dark .prose code {
+  background: #182438;
+  color: #dbeafe;
+}
+
+html.dark .prose pre {
+  background: #050816;
+  color: #e5edf5;
+  border: 1px solid var(--border);
+}
+
+html.dark .prose th,
+html.dark .prose td {
+  border-color: var(--border);
+}
+
+html.dark .prose th {
+  background: var(--surface-raised);
+}
+
+html.dark .prose a {
+  color: #7dd3fc;
+}
+
 .line-clamp-2 {
   display: -webkit-box;
   -webkit-line-clamp: 2;

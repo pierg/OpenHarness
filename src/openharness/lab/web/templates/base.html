@@ -8,6 +8,24 @@
      and 404s (e.g. server not yet restarted after a code change) become
      visible in the result panel instead of failing silently. #}
   <meta name="htmx-config" content='{"responseHandling":[{"code":"204","swap":false},{"code":"[23]..","swap":true},{"code":"[45]..","swap":true,"error":true},{"code":"...","swap":false}]}'>
+  <script>
+    (function () {
+      try {
+        var key = "openharness-lab-theme";
+        var stored = localStorage.getItem(key);
+        var prefersDark = window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches;
+        var theme = stored || (prefersDark ? "dark" : "light");
+        document.documentElement.classList.toggle("dark", theme === "dark");
+        document.documentElement.dataset.theme = theme;
+      } catch (err) {
+        document.documentElement.dataset.theme = "light";
+      }
+    })();
+  </script>
+  <script>
+    window.tailwind = window.tailwind || {};
+    window.tailwind.config = { darkMode: "class" };
+  </script>
   <script src="https://cdn.tailwindcss.com"></script>
   <script src="https://unpkg.com/htmx.org@2.0.4"></script>
   <link rel="stylesheet" href="/static/app.css">
@@ -27,7 +45,7 @@
     .prose a { color: #2563eb; text-decoration: underline; }
   </style>
 </head>
-<body class="bg-slate-50 text-slate-900 min-h-screen"
+<body class="app-body bg-slate-50 text-slate-900 min-h-screen"
       hx-on::send-error="document.querySelectorAll('#cmd-result').forEach(el => el.innerHTML = '<div class=\'border border-rose-300 bg-rose-50 rounded-md p-3 text-sm text-rose-900\'><strong>Network error.</strong> Could not reach the lab server. Is uvicorn still running?</div>')"
       hx-on::timeout="document.querySelectorAll('#cmd-result').forEach(el => el.innerHTML = '<div class=\'border border-amber-300 bg-amber-50 rounded-md p-3 text-sm text-amber-900\'><strong>Request timed out.</strong></div>')">
   {# Mobile nav controller. The ``peer`` keyword on this checkbox lets
@@ -44,7 +62,7 @@
     {% include "_sidebar.html" %}
 
     <main class="flex-1 min-w-0">
-      <header class="border-b border-slate-200 bg-white px-3 sm:px-6 py-3
+      <header class="app-header border-b border-slate-200 bg-white px-3 sm:px-6 py-3
                      flex items-center gap-2 sm:gap-4 flex-wrap sticky top-0 z-10">
         {# Hamburger — visible only below md, where the sidebar is
            collapsed. Renders as a label so clicking toggles the
@@ -76,6 +94,24 @@
              "You owe" panel on the new home page (/), so the header is
              now just the auth posture + DB status. #}
           <span class="text-xs text-slate-400 hidden sm:inline">{% if db_available %}DB connected{% else %}<span class="text-rose-600">DB missing — run a write CLI first</span>{% endif %}</span>
+          <button type="button"
+                  id="theme-toggle"
+                  class="theme-toggle inline-flex h-9 items-center gap-2 rounded-md border border-slate-200 bg-white px-2.5 text-xs font-medium text-slate-600 shadow-sm hover:bg-slate-50"
+                  title="Toggle dark mode"
+                  aria-label="Toggle dark mode"
+                  aria-pressed="false">
+            <svg class="theme-icon theme-icon-sun h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <circle cx="12" cy="12" r="4"></circle>
+              <path d="M12 2v2"></path><path d="M12 20v2"></path>
+              <path d="m4.93 4.93 1.41 1.41"></path><path d="m17.66 17.66 1.41 1.41"></path>
+              <path d="M2 12h2"></path><path d="M20 12h2"></path>
+              <path d="m6.34 17.66-1.41 1.41"></path><path d="m19.07 4.93-1.41 1.41"></path>
+            </svg>
+            <svg class="theme-icon theme-icon-moon h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M20.99 12.79A9 9 0 1 1 11.21 3.01 7 7 0 0 0 20.99 12.79z"></path>
+            </svg>
+            <span data-theme-label>Theme</span>
+          </button>
           {% if (pending.total or 0) > 0 %}
             <a href="/#you-owe"
                class="rounded-md border border-amber-300 bg-amber-50 hover:bg-amber-100 px-2.5 py-1 text-sm flex items-center gap-1.5 text-amber-900">
@@ -111,5 +147,40 @@
        the home page (/). Removing the rail also gives the main pane
        the full viewport width, which the new dense pages need. #}
   </div>
+  <script>
+    (function () {
+      var key = "openharness-lab-theme";
+      var root = document.documentElement;
+      var button = document.getElementById("theme-toggle");
+      var label = button ? button.querySelector("[data-theme-label]") : null;
+
+      function currentTheme() {
+        return root.classList.contains("dark") ? "dark" : "light";
+      }
+
+      function applyTheme(theme, persist) {
+        var dark = theme === "dark";
+        root.classList.toggle("dark", dark);
+        root.dataset.theme = dark ? "dark" : "light";
+        if (button) {
+          button.setAttribute("aria-pressed", dark ? "true" : "false");
+          button.title = dark ? "Switch to light mode" : "Switch to dark mode";
+        }
+        if (label) {
+          label.textContent = dark ? "Dark" : "Light";
+        }
+        if (persist) {
+          try { localStorage.setItem(key, root.dataset.theme); } catch (err) {}
+        }
+      }
+
+      applyTheme(currentTheme(), false);
+      if (button) {
+        button.addEventListener("click", function () {
+          applyTheme(currentTheme() === "dark" ? "light" : "dark", true);
+        });
+      }
+    })();
+  </script>
 </body>
 </html>

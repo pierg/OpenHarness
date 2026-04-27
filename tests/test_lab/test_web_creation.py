@@ -524,6 +524,16 @@ def test_sidebar_omits_legacy_secondary_pages() -> None:
         assert href not in body, f"legacy sidebar link {href} should be gone"
 
 
+def test_base_template_exposes_dark_mode_toggle() -> None:
+    r = _client().get("/")
+    assert r.status_code == 200
+    body = r.text
+    assert 'id="theme-toggle"' in body
+    assert "openharness-lab-theme" in body
+    assert 'classList.toggle("dark"' in body
+    assert 'darkMode: "class"' in body
+
+
 def test_activity_page_includes_usage_summary() -> None:
     r = _client().get("/activity")
     assert r.status_code == 200
