@@ -48,12 +48,6 @@
 
 ### Suggested
 
-#### router-cheap-baseline-preservation-gate
-
--   **Hypothesis:** If router work continues, it must use a runtime classifier derived from the task instruction/workspace plus an explicit cheap-baseline preservation gate; the prior task-name router is measurement-only because it used benchmark identity, and the broad router cost nearly as much as pro while losing several flash/pro wins.
--   **Source:** lab-replan-roadmap@2026-04-25
--   **Cost:** ~$8-15
-
 #### timeout-aware-retry-needs-network-confirmation
 
 -   **Idea:** [`timeout-aware-retry-needs-network-confirmation`](ideas.md#timeout-aware-retry-needs-network-confirmation)
@@ -80,12 +74,6 @@
 -   **Source:** lab-replan-roadmap@2026-04-26
 -   **Cost:** ~$0-2
 
-#### targeted-router-cost-calibration
-
--   **Hypothesis:** Targeted routing may be worth revisiting only as a leakage-free runtime classifier with a route-cost threshold: the confirmation improved 8/24 vs 6/24 but most clusters tied while router cost rose sharply, so any next router run should derive escalation signals from instruction/workspace observations and include an easy-slice guardrail.
--   **Source:** lab-replan-roadmap@2026-04-25
--   **Cost:** ~$8-15
-
 ## Done
 
 ### runtime-component-label-audit
@@ -102,35 +90,13 @@
 ### timeout-recovery-hard-cluster-slice
 
 -   **Idea:** [`timeout-recovery-hard-cluster-slice`](ideas.md#timeout-recovery-hard-cluster-slice)
--   **Hypothesis:** Timeout-aware recovery may be more valuable on the hard clusters exposed by the model-router run than on the original network-only smoke slice, because timeout_no_recovery dominated all-leg failures in c_build, regex_programming, and python_ml.
--   **Plan:** Slice: hard-cluster tasks from model-escalation-router-hard-clusters where all legs failed or timeout_no_recovery / repeated_failed_command dominated, with c_build, regex_programming, and python_ml represented separately; floor section 6 requires at least 10 trials per leg. Legs: 2-leg paired ablation, A chosen basic_flash current best, B same current best plus executor timeout-aware retry / background polling. Repetitions: paired-double because timeout recovery is timing-sensitive. Control: fresh. Why second: the newest run found 50 timeout_no_recovery tags and 7 all-leg failures on hard clusters, so test the recovery mechanism on the failure surface that survived model escalation.
--   **Depends on:** `model-escalation-router-hard-clusters`
+-   **Hypothesis:** Timeout-aware recovery may be more valuable on hard `c_build`, `regex_programming`, and `python_ml` failure clusters than on the original network-only smoke slice, because those clusters repeatedly exhaust turn or wall-clock budgets.
+-   **Plan:** Slice: hard-cluster tasks in `c_build`, `regex_programming`, and `python_ml`, with at least 10 trials per leg. Legs: 2-leg paired ablation, A chosen basic_flash current best, B same current best plus executor timeout-aware retry / background polling. Repetitions: paired-double because timeout recovery is timing-sensitive. Control: fresh.
+-   **Depends on:** `tb2-gemini3-model-baseline`
 -   **Cost:** ~$5-10
 
 -   **Ran:** [runs/experiments/timeout-recovery-hard-cluster-slice-20260426-003209](../runs/experiments/timeout-recovery-hard-cluster-slice-20260426-003209)
 -   **Outcome:** no_op: 0/14 passes in both legs; retry reduced cost/runtime but did not recover hard-cluster failures.
-
-### targeted-router-score-win-confirmation
-
--   **Idea:** [`targeted-router-score-win-confirmation`](ideas.md#targeted-router-score-win-confirmation)
--   **Hypothesis:** A conservative router that escalates only the task families where the hard-cluster run had score-decided router wins can preserve flash's cheap baseline while testing whether the binary/retrieval/regex route signal is real rather than aggregate noise.
--   **Plan:** Slice: binary_analysis tasks, retrieval-heavy python_ml tasks, and regex-log-like regex_programming tasks from the router run plus sibling hard-cluster controls where router lost or tied; aim for at least 10 trials per leg. Legs: 2-leg paired ablation, A basic_flash default, B conservative router with escalation limited to the score-win route surface. Repetitions: paired-double because only 3 score-decided router wins seeded the hypothesis. Control: fresh. Why first: diagnostic specialization evidence exists, but the broad router lost aggregate score and cost discipline; validate the narrow route surface before spending on broader routing policy.
--   **Depends on:** `model-escalation-router-hard-clusters`
--   **Cost:** ~$8-15
-
--   **Ran:** [runs/experiments/targeted-router-score-win-confirmation-20260425-224201](../runs/experiments/targeted-router-score-win-confirmation-20260425-224201)
--   **Outcome:** no_op: targeted router improved pass rate 8/24 vs 6/24, but only one score-positive task and +96% $/pass; keep router calibration lower-confidence.
-
-### model-escalation-router-hard-clusters
-
--   **Idea:** [`model-escalation-router-hard-clusters`](ideas.md#model-escalation-router-hard-clusters)
--   **Hypothesis:** A budget-aware router that starts on the cheap Gemini 3 basic leg, routes Lite-positive clusters to the lowest-cost model, and escalates to basic_pro only for verifier failures or Pro-positive hard clusters can capture most of the model-specific lift without paying the all-Pro cost per pass.
--   **Plan:** Slice: model-sensitive clusters from tb2-gemini3-model-baseline: Lite-positive diagnostic clusters (`c_runtime_debugging`, `git_service_deployment`, `security_python_web`, `sparql_query`, `git_workflow`) plus Pro-positive hard clusters (`c_build`, `python_ml`, `regex_programming`, `binary_analysis`) and a same-size sibling/control sample where Pro or Lite tied/lost; aim for at least 10 trials per leg. Legs: 3-leg model-policy ablation, A `basic_flash` default, B selective router using Lite for Lite-positive clusters and Pro for hard-cluster or verifier-failure escalation, C all-Pro basic as an upper-bound comparator. Repetitions: paired-double because the slice is narrow and model-routing outcomes are stochastic. Control: fresh. Why first: this directly validates model specialization before runtime guardrails are interpreted against the refreshed model floor.
--   **Depends on:** `tb2-gemini3-model-baseline`
--   **Cost:** smoke-gated; reserve ~$35-70
-
--   **Ran:** [runs/experiments/model-escalation-router-hard-clusters-20260425-191501](../runs/experiments/model-escalation-router-hard-clusters-20260425-191501)
--   **Outcome:** measurement-only specialization signal: all-Pro basic beat flash by +5.8 pp on the hard-cluster slice, but the task-name router was invalid for acceptance because it used benchmark identity and also lost aggregate accuracy while costing near pro.
 
 ### tb2-gemini3-model-baseline
 

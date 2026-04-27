@@ -68,33 +68,15 @@
 -   **Sketch:** Run a paired confirmation on at least 10 trials per side from network_dependent plus high_env_complexity tasks, including c_build/download-heavy cases, and compare timeout-aware retry against current basic on decisive wins and timeout_no_recovery tags.
 -   **Auto-proposed by:** cross-experiment-critic@2026-04-24
 
-#### model-escalation-router-hard-clusters
-
--   **Motivation:** The Gemini 3 model baseline improved the full-suite control floor, but pro gained accuracy at a much higher cost while flash/lite stayed cheaper on many easy or tied tasks.
--   **Sketch:** measurement-only as originally written if it uses known benchmark clusters. A generalizable version must classify task type from the instruction/workspace at runtime, start on the cheap current-best model, and escalate only on verifier failure or runtime-observed task signals such as build-system complexity, model-artifact requirements, or parser/toolchain failures.
--   **Auto-proposed by:** cross-experiment-critic@2026-04-25
-
 #### runtime-guards-on-gemini3-floor
 
 -   **Motivation:** [medium confidence; structural gap, 0 component trials on flash/pro] The measured runtime and planner guard rows all come from flash-lite component ablations, while the Gemini 3 model baseline raised the no-component control floor, so the zero-win guard conclusion may be model-floor dependent.
 -   **Sketch:** Run a small paired confirmation on the selected Gemini 3 current-best model with current basic/planner controls versus loop-guard and planner-schema-guard on their strongest historical slices. Treat this as a model-floor interaction test, not a new component graduation attempt.
 -   **Auto-proposed by:** cross-experiment-critic@2026-04-25
 
-#### targeted-router-score-win-confirmation
-
--   **Motivation:** [low confidence: 3 score-decided router wins] The hard-cluster router lost the aggregate but uniquely won extract-elf, mteb-retrieve, and regex-log, suggesting a narrow route surface may exist.
--   **Sketch:** measurement-only if keyed by known task ids or offline labels. A generalizable router must infer binary/retrieval/regex-like work from the instruction/workspace at runtime and then escalate conservatively while leaving flash as the default elsewhere.
--   **Auto-proposed by:** cross-experiment-critic@2026-04-25
-
-#### router-cheap-baseline-preservation-gate
-
--   **Motivation:** The current router cost nearly as much as pro while failing to preserve several cheap flash/pro wins, so routing needs an explicit cheap-baseline preservation check.
--   **Sketch:** Add a route validation gate that prefers the cheap model unless a runtime-derived route rule is high-confidence or a verifier failure justifies escalation. Compare against flash and pro; do not compare against or extend exact task-name routers except as diagnostic upper bounds.
--   **Auto-proposed by:** cross-experiment-critic@2026-04-25
-
 #### timeout-recovery-hard-cluster-slice
 
--   **Motivation:** The model-router hard-cluster run still had timeout_no_recovery as the dominant failure mode, including seven all-leg failed tasks concentrated in c_build, regex_programming, and python_ml.
+-   **Motivation:** Hard `c_build`, `regex_programming`, and `python_ml` tasks repeatedly fail through timeout_no_recovery and repeated_failed_command patterns across valid baseline and guardrail runs.
 -   **Sketch:** Run timeout-aware recovery on a hard-cluster slice rather than only needs_network tasks, with c_build, regex_programming, and python_ml represented separately. Measure decisive wins plus reductions in timeout_no_recovery and repeated_failed_command.
 -   **Auto-proposed by:** cross-experiment-critic@2026-04-25
 
@@ -121,12 +103,6 @@
 -   **Motivation:** [low confidence: 3 registry-pass disagreements in the latest 12-trial audit] Trial critiques can describe reward-1.0 registry passes as failed, which makes cross-experiment anti-pattern summaries noisier even when pass-rate math uses registry scores.
 -   **Sketch:** Add a deterministic post-critic consistency check that compares critique outcome against trials.score and passed, retries or patches the critic payload when they conflict, and stores any irreconcilable discrepancy in extra metadata rather than the main outcome field.
 -   **Auto-proposed by:** cross-experiment-critic@2026-04-26
-
-#### targeted-router-cost-calibration
-
--   **Motivation:** The targeted-router confirmation improved the hard slice from 6/24 to 8/24 passes, but mean cost rose about 162% and the lift concentrated in python_ml while binary_analysis and regex_programming mostly preserved scores at higher cost.
--   **Sketch:** Add route calibration that escalates only when runtime-observable task signals plus verifier feedback justify the expected cost per extra pass, and keep the cheap model for tied or already-strong cases. Rerun flash vs cost-calibrated runtime classifier on the same hard slice plus an easy-slice guardrail.
--   **Auto-proposed by:** cross-experiment-critic@2026-04-25
 
 ## Proposed
 
