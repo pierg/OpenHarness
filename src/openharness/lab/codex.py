@@ -240,8 +240,8 @@ class SkillProfile:
 #   lab-finalize-pr, trial-critic, task-features, experiment-critic,
 #   cross-experiment-critic
 #
-# (The legacy `lab-run-experiment` skill is gone — its
-# responsibilities were split across the deterministic
+# (The deprecated `lab-run-experiment` skill is no longer invoked by
+# the daemon — its responsibilities were split across the deterministic
 # `runner._process_entry_phased` plus the three new `lab-*-variant`
 # skills, with the actual run-kickoff moved into
 # `phase_run.run_experiment`.)
@@ -353,9 +353,10 @@ SKILL_PROFILES: dict[str, SkillProfile] = {
         timeout_sec=60 * 60,  # 1h cap; designs typically settle in <15min
         notes=(
             "Phase 1 of the lab pipeline. Reads the codebase + idea "
-            "and writes runs/lab/state/<slug>/design.md. Medium effort: "
-            "the implement phase catches design gaps anyway, so paying "
-            "high-effort thinking for marginal design polish is waste."
+            "and writes runs/lab/state/<slug>/design.md. High effort: "
+            "design mistakes invalidate every downstream phase, so this "
+            "uses the same flagship/xhigh policy as the other judgment-heavy "
+            "phase skills."
         ),
     ),
     # --- phase 2: implement the variant in the worktree ---

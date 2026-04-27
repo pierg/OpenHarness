@@ -139,6 +139,13 @@ These thresholds are enforced in `src/openharness/lab/tree_ops.py`.
 The thresholds are deterministic and must not depend on narrative
 interpretation after the fact.
 
+Offline cluster wins are evidence, not automatically deployable
+routing policy. If the only available branch predicate is an offline
+analysis label such as `task_features.category`, `tree_ops.evaluate`
+must record a diagnostic branch signal as `no_op` and leave replan to
+queue a follow-up with an instruction/workspace-derived runtime
+trigger.
+
 ## 7. Verdict lifecycle
 
 The verdict is first materialized on the experiment branch during
@@ -177,5 +184,7 @@ an optional side task.
 - confounded 2-leg comparisons
 - selection-biased tiny slices as evidence for trunk promotion
 - promoting diagnostic-only experiments as `add_branch` or `graduate`
+- converting offline `task_features` cluster wins directly into
+  branch-routing predicates
 - runtime routing or prompting keyed by exact benchmark identity
 - letting finalize succeed without a merge back to `main`

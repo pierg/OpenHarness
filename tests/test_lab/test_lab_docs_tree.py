@@ -10,6 +10,7 @@ Covers:
 
 from __future__ import annotations
 
+import re
 from datetime import date
 from pathlib import Path
 
@@ -204,6 +205,26 @@ def test_add_suggested_then_promote(lab_root: Path) -> None:
 def test_promote_unknown_raises(lab_root: Path) -> None:
     with pytest.raises(lab_docs.LabDocError):
         lab_docs.promote_suggested(slug="nope", lab_root=lab_root)
+
+
+def test_append_idea_rejects_unknown_theme(lab_root: Path) -> None:
+    (lab_root / "ideas.md").write_text("# Ideas\n\n## Proposed\n\n_(none)_\n")
+
+    with pytest.raises(lab_docs.LabDocError, match="Unknown idea theme"):
+        lab_docs.append_idea(
+            idea_id="bad-theme",
+            theme="Framework",
+            motivation="x",
+            sketch="y",
+            lab_root=lab_root,
+        )
+
+
+def test_repository_ideas_use_known_proposed_themes() -> None:
+    text = (lab_docs.LAB_ROOT / "ideas.md").read_text()
+    proposed = text.split("## Proposed", 1)[1].split("## Trying", 1)[0]
+    themes = set(re.findall(r"^### (.+)$", proposed, flags=re.MULTILINE))
+    assert themes.issubset(set(lab_docs.VALID_THEMES))
 
 
 def test_add_suggested_replaces_existing_slug(lab_root: Path) -> None:

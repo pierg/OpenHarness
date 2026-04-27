@@ -20,7 +20,7 @@
 
 | ID | Status | Description | Used by | Evidence |
 |----|--------|-------------|---------|----------|
-| `coding-tools` | validated | `bash + read_file + write_file + edit_file + glob + grep + think` — the standard executor toolbelt | `basic`, `planner_executor.executor`, `react.acter`, `reflection.worker` | [tb2-baseline-full-sweep](experiments.md#2026-04-17--tb2-baseline-full-sweep) |
+| `coding-tools` | validated | `bash + read_file + write_file + edit_file + glob + grep + think` — the standard executor toolbelt | `basic`, `planner_executor.executor`, `react.actor`, `reflection.worker` | [tb2-baseline-full-sweep](experiments.md#2026-04-17--tb2-baseline-full-sweep) |
 | `planner-tools-readonly` | experimental | `read_file + glob + grep` — read-only orient toolbelt for a planner subagent | `planner_executor.planner` | [tb2-baseline-full-sweep](experiments.md#2026-04-17--tb2-baseline-full-sweep); ablation folded into [planner-executor-cluster-confirmation](roadmap.md#planner-executor-cluster-confirmation) as Leg C (`planner_executor` with `tools: []`) |
 
 ## Prompt
@@ -32,6 +32,6 @@ _(none)_
 | ID | Status | Description | Used by | Evidence |
 |----|--------|-------------|---------|----------|
 | `gemini-3.1-flash-lite-preview` | validated | default coding/reasoning model on the smoke + full sweeps | `basic`, `planner_executor`, `react`, `reflection` | [tb2-baseline-full-sweep](experiments.md#2026-04-17--tb2-baseline-full-sweep) |
-| `gemini-3-flash-preview` | proposed | current Gemini 3 Flash preview candidate for the trunk `basic` model floor | — | queued: [tb2-gemini3-model-baseline](roadmap.md#tb2-gemini3-model-baseline) |
-| `gemini-3.1-pro-preview` | proposed | current Gemini 3.1 Pro preview candidate for the trunk `basic` model floor | — | queued: [tb2-gemini3-model-baseline](roadmap.md#tb2-gemini3-model-baseline) |
+| `gemini-3-flash-preview` | experimental | Gemini 3 Flash preview measured as a stronger cheap `basic` model floor | `basic_flash` | [tb2-gemini3-model-baseline](experiments.md#2026-04-24--tb2-gemini3-model-baseline) |
+| `gemini-3.1-pro-preview` | experimental | Gemini 3.1 Pro preview measured as the strongest but high-cost `basic` model branch candidate | `basic_pro` | [tb2-gemini3-model-baseline](experiments.md#2026-04-24--tb2-gemini3-model-baseline) |
 | `gemini-2.5-pro` | deferred | superseded stronger-model candidate from the older near-miss baseline proposal | — | superseded by [tb2-gemini3-model-baseline](roadmap.md#tb2-gemini3-model-baseline) |

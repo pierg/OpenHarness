@@ -50,8 +50,12 @@ GRADUATE_PASS_RATE_DELTA_PP: float = 5.0       # pp = percentage points
 GRADUATE_MAX_COST_PER_PASS_DELTA_PCT: float = 10.0
 GRADUATE_MAX_PER_CLUSTER_REGRESSION_PP: float = 3.0
 
-# AddBranch: positive on a coherent task subset (≥ N clusters with
-# non-trivial Δ), but trunk still wins overall.
+# AddBranch signals: positive on a coherent task subset (>= N clusters
+# with non-trivial delta), but trunk still wins overall. These constants
+# identify a branch-shaped signal. The deterministic evaluator may not
+# promote that signal to ``add_branch`` unless the branch predicate is
+# runtime-admissible; offline ``task_features.category`` clusters are
+# analysis metadata, not a runtime router.
 ADD_BRANCH_MIN_CLUSTERS: int = 2
 ADD_BRANCH_PER_CLUSTER_DELTA_PP: float = 5.0
 
@@ -369,31 +373,31 @@ def _classify_pair(
         bits.append("no positive cluster")
         return ("reject", "; ".join(bits) + ".", None, _confidence_from(delta_pp))
 
-    # AddBranch: trunk wins overall but mutation wins on a coherent subset.
+    # Branch-shaped signal: trunk wins overall but mutation wins on a
+    # coherent subset. The only predicate available to this deterministic
+    # evaluator is offline task_features.category, so promoting directly to
+    # add_branch would create a benchmark-derived router. Keep the signal in
+    # the journal and let replan queue a leakage-free runtime predicate.
     if len(positive_clusters) >= ADD_BRANCH_MIN_CLUSTERS:
-        use_when = {
-            "any_of": [
-                {"task_features.category": c["cluster"]}
-                for c in positive_clusters
-            ],
-            "derived_from": "tree_ops.evaluate cluster deltas",
-        }
+        max_cluster_delta = max(c["delta_pp"] for c in positive_clusters)
         rationale = (
-            f"Trunk wins overall (Δ = {delta_pp:+.1f}pp), but mutation "
-            f"wins ≥ +{ADD_BRANCH_PER_CLUSTER_DELTA_PP:.0f}pp on "
+            "diagnostic_branch_signal: trunk wins overall "
+            f"(Δ = {delta_pp:+.1f}pp), but mutation wins ≥ "
+            f"+{ADD_BRANCH_PER_CLUSTER_DELTA_PP:.0f}pp on "
             f"{len(positive_clusters)} cluster(s): "
             + ", ".join(
                 f"{c['cluster']} ({c['delta_pp']:+.0f}pp, n={c['mut_n']})"
                 for c in positive_clusters
             )
-            + "."
+            + ". Automatic add_branch is not runtime-admissible here because "
+            "the only available predicate is offline task_features.category; "
+            "queue a follow-up with an instruction/workspace-derived trigger "
+            "before promoting a specialization."
         )
-        # Confidence is high when cluster wins are large; mid otherwise.
-        max_cluster_delta = max(c["delta_pp"] for c in positive_clusters)
         return (
-            "add_branch",
+            "no_op",
             rationale,
-            use_when,
+            None,
             _confidence_from(max_cluster_delta),
         )
 

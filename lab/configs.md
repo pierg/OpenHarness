@@ -8,11 +8,16 @@
 
 ## Branches
 
+Branch predicates are operator/runtime-admissible hints, not
+benchmark-oracle routers. Offline `task_features` labels may justify
+why a branch is worth retesting, but production selection must be
+derived from the task instruction/workspace or chosen manually by the
+operator.
+
 | ID | Mutation vs trunk | Use-when predicate | Last verified |
 |----|-------------------|--------------------|---------------|
-| `planner_executor` | adds explicit planner subagent on top of trunk | `task_features.category ∈ {security_certificates, system_administration, python_data}` | tb2-baseline-full-sweep |
-| `react` | scratchpad-driven re-plan loop on top of trunk | (tentative; one positive cluster on tb2-baseline; needs targeted re-test) | tb2-baseline-full-sweep |
-| `basic` | Trunk wins overall (Δ = +5.8pp), but mutation wins ≥ +5pp on 4 cluster(s): sparql_query (+100pp, n=2), git_workflow (+12 | task_features.category=sparql_query OR task_features.category=git_workflow OR task_features.category=c_build OR task_features.category=python_ml | 2026-04-25 |
+| `planner_executor` | adds explicit planner subagent on top of trunk | manual/runtime-observable: task appears to require explicit multi-step planning across certificates, system administration, or Python data workflows; do not route by offline `task_features` alone | tb2-baseline-full-sweep |
+| `react` | scratchpad-driven re-plan loop on top of trunk | tentative/manual: task appears to benefit from repeated reason-action-observation cycles; needs targeted re-test before promotion | tb2-baseline-full-sweep |
 
 ## Rejected
 
@@ -20,7 +25,7 @@
 |----|--------|----------|
 | `reflection` | context blow-up: ≥ 500k input tokens / trial on the smoke slice. Re-add only with [`reflection-context-compaction`](ideas.md#reflection-context-compaction). | [`reflection-context-compaction`](ideas.md#reflection-context-compaction) (idea — not yet on the roadmap; needs a meaningful slice, not a smoke run) |
 | `basic_model_router` | Invalid benchmark-oracle branch: routed by exact Terminal-Bench task names instead of runtime-observable task instruction/workspace signals. Removed from runnable agent configs; keep only as diagnostic evidence. | [model-escalation-router-hard-clusters](experiments.md#2026-04-25--model-escalation-router-hard-clusters) |
-| `basic` | Δ pass-rate = -3.6pp; Δ $/pass = -85%; no positive cluster. (also: basic_60_16384 → no_op: Inconclusive: Δ pass-rate = +0.0pp (trunk 14.3% vs mutation 14.3%); 0 positive cluster(s) (threshold 2); Δ $/ | /home/pier_ridgesecurity_ai/OpenHarness/runs/experiments/extended-budget-paired-on-trunk-20260423-184410/critic/experiment-critic.json, /home/pier_ridgesecurity_ai/OpenHarness/runs/experiments/extended-budget-paired-on-trunk-20260423-184410/critic/comparisons |
+| `extended-budget-basic` | Longer-turn `basic` variants did not produce a meaningful pass-rate lift on the near-miss slice; one narrow task win did not justify promotion. | [extended-budget-paired-on-trunk](experiments.md#2026-04-23--extended-budget-paired-on-trunk) |
 | `basic_loop_guard` | Δ pass-rate = -2.2pp; Δ $/pass = +99%; cost spike ≥ 50%; no positive cluster. | (see journal) |
 
 ## Proposed

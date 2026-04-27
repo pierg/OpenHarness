@@ -1,7 +1,8 @@
 # trunk: basic — locked 2026-04-17 by tb2-baseline-full-sweep
 #                (see lab/experiments.md and lab/configs.md)
-# rotate via: uv run lab graduate confirm <slug> --applied-by human:<name>
-#         or: uv run lab trunk set <agent-id>  (markdown + audit only)
+# normal rotation happens through the lab finalize phase after a
+# runtime-admissible `graduate` verdict. For manual metadata repair:
+#   uv run lab trunk set <agent-id>  (markdown + audit only)
 name: basic
 description: Basic single-loop OpenHarness Terminal-Bench baseline agent.
 

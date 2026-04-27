@@ -193,7 +193,7 @@
 -   **Motivation:** Cross-task patterns (e.g. "how to read a Dockerfile before editing") aren't reused.
 -   **Sketch:** Indexed store of post-run reflections keyed by task signature; planner pulls top-k before producing a plan.
 
-### Framework
+### Evaluation
 
 #### cluster-combined-slice-shape
 
@@ -215,8 +215,8 @@
 
 #### graduate-replication-gate
 
--   **Motivation:** A `Graduate` TreeDiff swaps trunk — the highest-stakes mutation in the lab. Today `lab graduate confirm <slug>` is the sole gate (human approval, no replication required). One bad luck run could land a regressing config on trunk, contaminating every downstream experiment until detected.
--   **Sketch:** `lab graduate confirm <slug>` requires one full-experiment replication on the same slice with a fresh random seed before the trunk swap commits. Replication's verdict must agree (`Graduate` or `AddBranch` with Δ ≥ +3pp) for the swap to honor. Adds ~1× experiment cost per graduate, but graduates are rare (≤ 1/month at current cadence) and trunk integrity is worth it. Implementation: extend `lab graduate confirm` to spawn a fresh phase-3 run with a different `seed:` value, ingest, evaluate, and gate the swap on the second verdict.
+-   **Motivation:** A `Graduate` TreeDiff swaps trunk — the highest-stakes mutation in the lab. Today finalize can merge a graduate outcome after one verdict, so one lucky run could land a regressing config on trunk and contaminate downstream experiments.
+-   **Sketch:** Add a finalize-time replication requirement for `graduate`: run one fresh replication on the same slice before merging the trunk swap, then require the second verdict to agree (`graduate` or runtime-admissible `add_branch` with Δ ≥ +3pp). Adds ~1× experiment cost per graduate, but graduates are rare and trunk integrity is worth it.
 -   **Referenced from:** METHODOLOGY §7.
 
 ## Trying

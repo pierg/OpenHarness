@@ -145,7 +145,7 @@
 -   **Cost:** smoke-gated; reserve ~$40-120, with Pro expected to dominate spend.
 
 -   **Ran:** [runs/experiments/tb2-gemini3-model-baseline-20260424-225008](../runs/experiments/tb2-gemini3-model-baseline-20260424-225008)
--   **Outcome:** add_branch: basic_pro raised pass rate to 44.9% versus 34.8% for flash and 23.6% for lite, but cost was 7.9x flash; treat Pro as a selective hard-cluster branch, not the default trunk.
+-   **Outcome:** diagnostic cluster signal: basic_pro raised pass rate to 44.9% versus 34.8% for flash and 23.6% for lite, but cost was 7.9x flash; selective Pro use requires a runtime-derived route, not offline cluster labels.
 
 ### timeout-aware-retry-on-needs-network
 

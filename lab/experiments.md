@@ -153,6 +153,7 @@ The router mutation hurt overall: basic_router finished -9.6 pp behind basic_pro
 ### Tree effect
 -   **Verdict:** **Add branch** — experiment outcome supports a specialized branch
 -   **Target:** `basic`
+-   **Current classification:** diagnostic-only. This add-branch wording predates the generalization guardrail; the offline `task_features` use-when below must not be used as runtime routing policy.
 -   **Pair:** trunk leg `basic_flash` vs mutation `basic_pro`
 -   **Δ pass-rate:** +5.77 pp
 -   **Δ $/pass:** +512.1%
@@ -200,6 +201,7 @@ The higher-capacity basic_pro leg helped overall: +10.1 percentage points over b
 ### Tree effect
 -   **Verdict:** **Add branch** — experiment outcome supports a specialized branch
 -   **Target:** `basic`
+-   **Current classification:** diagnostic-only branch signal. Pro/Lite model deltas are useful evidence, but any selective model policy must derive its route from instruction/workspace/runtime observations, not offline `task_features`.
 -   **Pair:** trunk leg `basic_flash` vs mutation `basic_lite`
 -   **Δ pass-rate:** -11.24 pp
 -   **Δ $/pass:** -46.3%
@@ -415,6 +417,7 @@ Relative to trunk `basic_30_8192` (10.7% pass, 3/28), both extended budgets impr
 ### Tree effect
 -   **Verdict:** **Add branch** — auto-applied
 -   **Target:** `planner_executor`
+-   **Current classification:** historical branch evidence. Interpret the use-when below as a manual/runtime-observable hint, not an automatic `task_features` router.
 -   **Pair:** trunk leg `basic` vs mutation `planner_executor`
 -   **Δ pass-rate:** -11.24 pp
 -   **Δ $/pass:** +147.6%

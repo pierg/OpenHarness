@@ -51,6 +51,25 @@ The postmortem planner is the dedicated `replan` phase:
 - may still write lower-confidence work to `### Suggested` or
   `## Auto-proposed`
 
+## Manual operation
+
+Humans can use the same pipeline without bypassing it:
+
+- add a backlog item with `uv run lab idea append ...`
+- queue or reorder work by editing `lab/roadmap.md` through
+  `lab-plan-next`
+- run the daemon one tick with `uv run lab daemon start --foreground --once`
+- inspect or repair state with `uv run lab phases show <slug>` and
+  `uv run lab phases reset <slug> --phase <phase>`
+- invoke a phase skill directly only when repairing that phase's
+  contract (`lab-design-variant`, `lab-implement-variant`,
+  `lab-replan-roadmap`, or `lab-finalize-pr`)
+
+Manual edits should preserve the same rule as the daemon: offline
+task names, task features, and prior outcomes may select a slice or
+explain a result, but promotable runtime behavior must be derived
+from the task instruction, workspace, tools, and observations.
+
 ## Where to read more
 
 - `lab/METHODOLOGY.md` for experiment-design and verdict thresholds

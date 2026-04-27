@@ -73,7 +73,7 @@ app = typer.Typer(
 idea_app = typer.Typer(no_args_is_help=True, help="Edit lab/ideas.md.")
 exp_app = typer.Typer(no_args_is_help=True, help="Edit lab/experiments.md.")
 roadmap_app = typer.Typer(no_args_is_help=True, help="Edit lab/roadmap.md.")
-daemon_app = typer.Typer(no_args_is_help=True, help="Orchestrator daemon (Phase 2).")
+daemon_app = typer.Typer(no_args_is_help=True, help="Orchestrator daemon and phase loop.")
 tree_app = typer.Typer(no_args_is_help=True, help="Inspect / mutate the configuration tree (lab/configs.md).")
 trunk_app = typer.Typer(no_args_is_help=True, help="Show / set the trunk pointer.")
 graduate_app = typer.Typer(no_args_is_help=True, help="Legacy staged-graduate repair helpers.")

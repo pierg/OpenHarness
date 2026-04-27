@@ -193,13 +193,15 @@ def test_evaluate_reject(db_path: Path) -> None:
     assert diff.target_id == "candidate"
 
 
-def test_evaluate_add_branch(db_path: Path) -> None:
+def test_evaluate_offline_cluster_branch_signal_is_diagnostic_only(db_path: Path) -> None:
     """Trunk wins overall but mutation wins on >=2 coherent clusters.
 
     3 clusters of 8 tasks each. Trunk dominates `c_build` by 8-0
     (which keeps it ahead overall, 10/24 > 6/24), but mutation wins
-    `python_ml` and `scientific_computing` by 3-1 each — two
-    coherent positive clusters at +25pp ⇒ AddBranch.
+    `python_ml` and `scientific_computing` by 3-1 each. That is a
+    branch-shaped signal, but the only predicate available here is
+    offline `task_features.category`, so the evaluator must keep it
+    diagnostic-only rather than emitting an automatic AddBranch.
     """
     conn = labdb.connect(db_path=db_path, read_only=False)
     tasks = []
@@ -229,11 +231,13 @@ def test_evaluate_add_branch(db_path: Path) -> None:
         tasks=tasks,
     )
     diff = tree_ops.evaluate("branch-1", db_conn=conn)
-    assert diff.kind == "add_branch", diff.rationale
+    assert diff.kind == "no_op", diff.rationale
     assert diff.target_id == "specialist"
-    assert diff.use_when is not None
-    cats = {p["task_features.category"] for p in diff.use_when["any_of"]}
-    assert "python_ml" in cats and "scientific_computing" in cats
+    assert diff.use_when is None
+    assert "diagnostic_branch_signal" in diff.rationale
+    assert "offline task_features.category" in diff.rationale
+    clusters = {row["cluster"] for row in diff.cluster_evidence}
+    assert "python_ml" in clusters and "scientific_computing" in clusters
 
 
 def test_evaluate_no_op(db_path: Path) -> None:

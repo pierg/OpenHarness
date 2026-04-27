@@ -1,6 +1,6 @@
 """Deterministic markdown helpers for `lab/*.md` files.
 
-The five lab/* skills are *prompts*: they instruct an agent on judgment-
+The lab skills are *prompts*: they instruct an agent on judgment-
 heavy steps (which idea to propose, which decision to write, how to
 phrase a comparison). The mechanical edits (move an idea between
 sections, append cross-ref bullets, stub an experiment entry, fill the
@@ -276,6 +276,14 @@ def move_idea(
         raise LabDocError(
             f"Unknown ideas section: {target_section!r} (valid: {VALID_IDEAS_SECTIONS})"
         )
+    if (
+        target_section == "Proposed"
+        and target_theme is not None
+        and target_theme not in VALID_THEMES
+    ):
+        raise LabDocError(
+            f"Unknown idea theme: {target_theme!r} (valid: {VALID_THEMES})"
+        )
     path = _ideas_path(lab_root)
     text = _read(path)
     preamble, parsed = _split_ideas_preamble(text)
@@ -329,6 +337,10 @@ def append_idea(
     if not re.fullmatch(r"[a-z][a-z0-9-]*", idea_id):
         raise LabDocError(
             f"Idea id {idea_id!r} must be kebab-case ([a-z][a-z0-9-]*)."
+        )
+    if theme not in VALID_THEMES:
+        raise LabDocError(
+            f"Unknown idea theme: {theme!r} (valid: {VALID_THEMES})"
         )
     path = _ideas_path(lab_root)
     text = _read(path)
