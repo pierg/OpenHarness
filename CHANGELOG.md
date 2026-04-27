@@ -80,6 +80,9 @@ ideas, experiments, and components.
 - Deferred: plugin tool-import deferral commit `1325770` (upstream SHA) as-is because this fork does not yet carry the full plugin-tool loading path expected by that change; remaining upstream commits after `9caf700` are intentionally queued for a later broader sync to avoid pulling autopilot/dashboard and other large subsystems in the same patch.
 - Integrated upstream `HKUDS/OpenHarness` `main` through `9caf700` (`2026-04-15`), covering secure default channel allowlists, profile materialization for base_url resolution, and openai_compat format support.
 - Integration approach: Mixed (merge + manual port). Adapted `src/openharness/ui/runtime.py` and `src/openharness/api/factory.py` so upstream profile and format improvements work with the fork's centralized client factory.
+- Integrated upstream `HKUDS/OpenHarness` `main` via full merge commit `d821ff5` (`2026-04-27`), bringing in the previously deferred larger surfaces (autopilot service/dashboard, broader CLI/runtime/swarm updates, plugin tooling improvements, and associated tests/docs/workflows) on top of the earlier targeted ports.
+- Integration approach: Full merge + compatibility adaptation. Resolved conflicts in fork-touched runtime/tooling/auth/session boundaries to keep fork behavior stable while importing upstream feature and reliability work.
+- Status update: the earlier "Deferred" items from the `2026-04-27` targeted port pass are now integrated by the full-merge follow-up in this same unreleased cycle.
 
 ### Added
 
@@ -96,6 +99,11 @@ ideas, experiments, and components.
 - `docs/examples.md` with concrete OpenHarness usage patterns and demo commands.
 - GitHub issue templates and a pull request template.
 - Built-in `codex` output style for compact, low-noise transcript rendering in React TUI.
+- Autopilot service stack (`src/openharness/autopilot/`) and dashboard assets (`autopilot-dashboard/`, `docs/autopilot/`) from upstream, including CI workflows for autopilot scan/run/pages publication.
+- Plugin `tools/` discovery and registration support so plugin-contributed `BaseTool` subclasses can be surfaced in runtime tool registries.
+- New hook events for richer lifecycle automation: `user_prompt_submit`, `notification`, `stop`, and `subagent_stop`.
+- First-class MiniMax provider wiring in auth/settings/CLI/runtime paths.
+- CLI dry-run safe preview mode for safer command planning/execution previews.
 
 ### Fixed
 
@@ -117,6 +125,9 @@ ideas, experiments, and components.
 - Fixed concurrent permission modals overwriting each other in TUI default mode when the LLM returns multiple tool calls in one response; `_ask_permission` now serialises callers via an `asyncio.Lock` so each modal is shown and resolved before the next one is emitted.
 - Fixed grep tool crashing with `ValueError` / `LimitOverrunError` when ripgrep outputs a line longer than 64 KB (e.g. minified assets or lock files). The asyncio subprocess stream limit is now 8 MB and oversized lines are skipped rather than terminating the session.
 - Reduced React TUI redraw pressure when `output_style=codex` by avoiding token-level assistant buffer flushes during streaming.
+- OpenAI-compatible streaming now strips `<think>...</think>` blocks robustly, including split-tag streaming edge cases.
+- Session restore now sanitizes dangling tool-call state; compacting now preserves tool-use/tool-result pairing across boundaries.
+- Shell execution defaults are safer and more predictable (`stdin=DEVNULL` baseline, stronger Windows/TUI/backspace handling), and Docker domain-policy handling fails closed for unsupported policies.
 
 ### Changed
 
@@ -124,6 +135,8 @@ ideas, experiments, and components.
 - README is now a concise fork overview with setup, example commands, artifact layout, and links into `docs/`.
 - Documentation is reorganized around maintained feature, architecture, run, and example guides.
 - Example documentation now lists only examples that demonstrate distinct end-to-end behavior.
+- Plugin loading/runtime surfaces now include upstream security and trust-boundary hardening while preserving fork-specific compatibility behavior.
+- Swarm/coordinator/task lifecycle behavior now incorporates upstream task-cleanup and async-wait reliability improvements from the full merge.
 
 ## [0.1.0] - 2026-04-01
 
