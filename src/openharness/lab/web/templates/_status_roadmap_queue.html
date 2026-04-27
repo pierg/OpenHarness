@@ -1,124 +1,74 @@
-{# Compact roadmap snapshot for the Status page.
-
-   Inputs:
-     up_next      - ordered RoadmapEntryView list
-     suggested    - SuggestedEntryView list, shown as a count/link only
-     done         - DoneEntryView list
-     daemon_state - runtime DaemonState
-
-   The full edit/action surface lives in /backlog; this panel is for quick
-   orientation: what is running, what the daemon can pick up next, and what is
-   waiting behind it.
-#}
+{# Compact queue rail for the home control plane. The daemon/pipeline panel
+   owns runtime detail; this rail answers only "what is next?" #}
 {% set daemon_mode = daemon_state.mode if daemon_state else None %}
 {% set approved_set = (daemon_state.approved_slugs if daemon_state else [])|list %}
 {% set active_tick = daemon_state.active_tick if daemon_state and daemon_state.active_tick else None %}
 {% set active_slug = active_tick.slug if active_tick else None %}
 
-<div class="grid grid-cols-1 lg:grid-cols-3 gap-4">
-  <div class="lg:col-span-1 space-y-4">
-    <div class="border border-slate-200 rounded-md p-3 bg-slate-50">
-      <div class="text-xs uppercase tracking-wide text-slate-500 font-semibold mb-2">Processing</div>
-      {% if active_tick %}
-        <div class="flex items-center gap-2">
-          <span class="relative flex h-2.5 w-2.5">
-            <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-70"></span>
-            <span class="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500"></span>
-          </span>
-          <a href="/backlog?section=queue#{{ active_tick.slug }}" class="font-mono text-sm font-semibold text-blue-700 hover:underline">{{ active_tick.slug }}</a>
-        </div>
-        <div class="mt-1 text-xs text-slate-600">
-          phase <span class="font-mono">{{ active_tick.phase }}</span>
-          {% if active_tick.started_at %} / {{ fmt_elapsed(active_tick.started_at) }}{% endif %}
-        </div>
-        {% if active_tick.note %}
-          <p class="mt-2 text-xs text-slate-600">{{ active_tick.note }}</p>
-        {% endif %}
-      {% else %}
-        <div class="text-sm text-slate-500">Nothing running.</div>
-      {% endif %}
+<div class="space-y-4">
+  <div class="flex flex-wrap items-center justify-between gap-2 text-xs text-slate-500">
+    <div>
+      mode <span class="font-mono text-slate-700">{{ daemon_mode or 'unknown' }}</span>
     </div>
-
-    <div class="border border-slate-200 rounded-md p-3">
-      <div class="flex items-baseline justify-between mb-2">
-        <div class="text-xs uppercase tracking-wide text-slate-500 font-semibold">Done</div>
-        <a href="/backlog?section=done#done" class="text-xs text-slate-500 hover:underline">{{ done|length }} total</a>
-      </div>
-      {% if done %}
-        <ul class="divide-y divide-slate-100">
-          {% for d in done[:5] %}
-            <li class="py-2">
-              <a href="/backlog?section=done#{{ d.slug }}" class="font-mono text-xs font-semibold text-slate-900 hover:underline">{{ d.slug }}</a>
-              {% if d.outcome %}
-                <p class="text-xs text-slate-600 mt-0.5 truncate">{{ d.outcome }}</p>
-              {% endif %}
-            </li>
-          {% endfor %}
-        </ul>
-      {% else %}
-        <p class="text-sm text-slate-500">No completed entries yet.</p>
-      {% endif %}
+    <div>
+      {{ up_next|length }} up next{% if suggested %} / {{ suggested|length }} suggested{% endif %}
     </div>
   </div>
 
-  <div class="lg:col-span-2 border border-slate-200 rounded-md p-3">
-    <div class="flex flex-wrap items-baseline justify-between gap-2 mb-2">
-      <div>
-        <div class="text-xs uppercase tracking-wide text-slate-500 font-semibold">Daemon queue</div>
-        <div class="text-xs text-slate-500 mt-0.5">
-          {% if daemon_mode == "autonomous" %}
-            autonomous: top ready Up next entry is picked on the next tick
-          {% elif daemon_mode == "manual" %}
-            manual: approved entries are picked in roadmap order
-          {% elif daemon_mode == "paused" %}
-            paused: queue is visible but will not start
-          {% else %}
-            daemon mode unavailable
-          {% endif %}
-        </div>
+  {% if active_tick %}
+    <div class="rounded-md border border-emerald-200 bg-emerald-50 p-3">
+      <div class="flex items-center gap-2">
+        <span class="relative flex h-2.5 w-2.5">
+          <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-70"></span>
+          <span class="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500"></span>
+        </span>
+        <a href="/backlog?section=queue#{{ active_tick.slug }}" class="font-mono text-sm font-semibold text-blue-700 hover:underline">{{ active_tick.slug }}</a>
       </div>
-      <div class="text-xs text-slate-500">
-        {{ up_next|length }} up next{% if suggested %} / {{ suggested|length }} suggested{% endif %}
+      <div class="mt-1 text-xs text-slate-600">
+        phase <span class="font-mono">{{ active_tick.phase }}</span>
+        {% if active_tick.started_at %} / {{ fmt_elapsed(active_tick.started_at) }}{% endif %}
       </div>
+      {% if active_tick.note %}
+        <p class="mt-2 text-xs text-slate-600">{{ active_tick.note }}</p>
+      {% endif %}
     </div>
+  {% endif %}
 
-    {% if up_next %}
-      <ol class="divide-y divide-slate-100">
-        {% for r in up_next[:8] %}
-          {% set is_active = r.slug == active_slug %}
-          {% set is_approved = r.slug in approved_set %}
-          <li class="py-2 flex flex-wrap items-start justify-between gap-x-3 gap-y-1">
+  {% if up_next %}
+    <ol class="divide-y divide-slate-100">
+      {% for r in up_next[:9] %}
+        {% set is_active = r.slug == active_slug %}
+        {% set is_approved = r.slug in approved_set %}
+        <li class="py-2">
+          <div class="flex items-start justify-between gap-3">
             <div class="min-w-0">
-              <div class="flex flex-wrap items-baseline gap-2">
-                <span class="text-xs text-slate-400 font-mono w-5">{{ loop.index }}.</span>
-                <a href="/backlog?section=queue#{{ r.slug }}" class="font-mono text-sm font-semibold text-slate-900 hover:underline">{{ r.slug }}</a>
-                {% if r.idea_id %}
-                  <a href="/backlog?section=ideas#{{ r.idea_id }}" class="text-xs font-mono text-blue-600 hover:underline">{{ r.idea_id }}</a>
-                {% endif %}
+              <div class="flex items-baseline gap-2">
+                <span class="w-5 shrink-0 text-xs text-slate-400 font-mono">{{ loop.index }}.</span>
+                <a href="/backlog?section=queue#{{ r.slug }}" class="truncate font-mono text-sm font-semibold text-slate-900 hover:underline">{{ r.slug }}</a>
               </div>
               {% if r.hypothesis %}
-                <p class="text-xs text-slate-600 mt-0.5 truncate">{{ r.hypothesis }}</p>
+                <p class="mt-0.5 truncate text-xs text-slate-600">{{ r.hypothesis }}</p>
               {% endif %}
             </div>
-            <div class="flex items-center gap-1 shrink-0">
+            <div class="shrink-0">
               {% if is_active %}
-                <span class="text-xs text-emerald-800 bg-emerald-100 border border-emerald-200 px-2 py-0.5 rounded font-mono">running</span>
+                <span class="rounded border border-emerald-200 bg-emerald-100 px-2 py-0.5 font-mono text-xs text-emerald-800">running</span>
               {% elif is_approved %}
-                <span class="text-xs text-blue-800 bg-blue-100 border border-blue-200 px-2 py-0.5 rounded font-mono">approved</span>
+                <span class="rounded border border-blue-200 bg-blue-100 px-2 py-0.5 font-mono text-xs text-blue-800">approved</span>
               {% elif not r.deps_satisfied %}
-                <span class="text-xs text-amber-800 bg-amber-100 border border-amber-200 px-2 py-0.5 rounded font-mono">blocked</span>
+                <span class="rounded border border-amber-200 bg-amber-100 px-2 py-0.5 font-mono text-xs text-amber-800">blocked</span>
               {% else %}
-                <span class="text-xs text-slate-600 bg-slate-100 border border-slate-200 px-2 py-0.5 rounded font-mono">ready</span>
+                <span class="rounded border border-slate-200 bg-slate-100 px-2 py-0.5 font-mono text-xs text-slate-600">ready</span>
               {% endif %}
             </div>
-          </li>
-        {% endfor %}
-      </ol>
-      {% if up_next|length > 8 %}
-        <div class="pt-2 text-xs text-slate-500">+ {{ up_next|length - 8 }} more in Up next</div>
-      {% endif %}
-    {% else %}
-      <p class="text-sm text-slate-500">No roadmap entries in Up next.</p>
+          </div>
+        </li>
+      {% endfor %}
+    </ol>
+    {% if up_next|length > 9 %}
+      <div class="text-xs text-slate-500">+ {{ up_next|length - 9 }} more in Up next</div>
     {% endif %}
-  </div>
+  {% else %}
+    <p class="text-sm text-slate-500">No roadmap entries in Up next.</p>
+  {% endif %}
 </div>

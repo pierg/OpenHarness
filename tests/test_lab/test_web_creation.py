@@ -332,11 +332,14 @@ def test_home_page_renders_leaderboard_and_work_zones() -> None:
     assert "Top ranked" not in body
     assert "Ranked full-suite trajectory" not in body
     assert "Experiment evaluation deltas" not in body
-    # Operator work zones remain on the first page.
-    assert "Now" in body
+    # Operator control plane remains on the first page.
+    assert "Control plane" in body
+    assert "Daemon status" in body
     assert "Queue" in body
+    assert "Operator inbox" in body
+    assert 'id="daemon-status"' in body
     assert 'id="roadmap-queue"' in body
-    assert 'id="you-owe"' in body or "Inbox" in body
+    assert 'id="you-owe"' in body
     # HTMX partials mounted on first render.
     assert "/_hx/leaderboard" in body
     assert "/_hx/experiment-history" in body
@@ -394,9 +397,10 @@ def test_status_roadmap_queue_partial_renders_queue_or_empty_state() -> None:
     r = _client().get("/_hx/status-roadmap-queue")
     assert r.status_code == 200
     body = r.text
-    assert "Processing" in body
-    assert "Done" in body
-    assert "Daemon queue" in body
+    assert "mode" in body
+    assert "up next" in body
+    assert "Processing" not in body
+    assert "Done" not in body
     assert any(
         token in body
         for token in (
