@@ -14,5 +14,3 @@ UPDATE tree_diffs
        ELSE 'no_op'
    END
  WHERE decision IS NULL;
-
-CREATE INDEX IF NOT EXISTS tree_diffs_by_decision ON tree_diffs (decision);
