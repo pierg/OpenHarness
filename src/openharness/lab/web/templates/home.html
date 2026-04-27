@@ -15,8 +15,8 @@
 <div class="grid grid-cols-1 2xl:grid-cols-[minmax(0,1.15fr)_minmax(420px,.85fr)] gap-6 mb-6">
   <section class="bg-white border border-slate-200 rounded-lg p-5">
     <div class="flex items-baseline justify-between mb-4">
-      <h2 class="font-semibold">Improvement trajectory</h2>
-      <a href="/catalog?tab=configs" class="text-xs text-slate-500 hover:underline">configuration history</a>
+      <h2 class="font-semibold">Ranked full-suite trajectory</h2>
+      <a href="/catalog?tab=configs" class="text-xs text-slate-500 hover:underline">evaluations</a>
     </div>
     <div hx-get="/_hx/leaderboard-trajectory"
          hx-trigger="load, every 60s, lab-configs-changed from:body"
@@ -28,7 +28,7 @@
 
   <section class="bg-white border border-slate-200 rounded-lg p-5">
     <div class="flex items-baseline justify-between mb-4">
-      <h2 class="font-semibold">Agent ladder</h2>
+      <h2 class="font-semibold">Model-group leaderboard</h2>
       <a href="/runs" class="text-xs text-slate-500 hover:underline">runs</a>
     </div>
     <div hx-get="/_hx/leaderboard-ladder"
@@ -42,7 +42,7 @@
 
 <section class="bg-white border border-slate-200 rounded-lg p-5 mb-6">
   <div class="flex items-baseline justify-between mb-4">
-    <h2 class="font-semibold">Experiment delta board</h2>
+    <h2 class="font-semibold">Experiment evaluation deltas</h2>
     <a href="/activity?kind=verdict" class="text-xs text-slate-500 hover:underline">verdict timeline</a>
   </div>
   <div hx-get="/_hx/leaderboard-delta"

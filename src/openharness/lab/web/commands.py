@@ -348,15 +348,15 @@ COMMANDS: dict[str, CommandSpec] = {
         # Filled in below — defined as a closure so it can import
         # lazily without a top-level psutil dependency at module load.
     ),
-    "decision-apply": CommandSpec(
-        cmd_id="decision-apply",
-        label="Apply decision",
+    "evaluation-apply": CommandSpec(
+        cmd_id="evaluation-apply",
+        label="Apply evaluation",
         description=(
-            "Load the experiment-critic decision for an experiment slug and apply it. "
+            "Load the experiment-critic evaluation for an experiment slug and apply it. "
             "On `main` this records a direct main-line verdict; on a "
             "worktree branch it materializes branch-local state pending finalize."
         ),
-        argv_template=["decision", "apply", "{slug}", "--applied-by", "{applied_by}"],
+        argv_template=["evaluation", "apply", "{slug}", "--applied-by", "{applied_by}"],
         params=[
             ParamSpec(
                 name="slug",
@@ -373,8 +373,8 @@ COMMANDS: dict[str, CommandSpec] = {
             ),
         ],
         confirm_text=(
-            "Apply this verdict to the current checkout? This updates "
-            "lab configs and the journal deterministically."
+            "Apply this verdict to the current checkout? This records "
+            "the experiment evaluation deterministically."
         ),
         events=[
             "lab-pending-changed",

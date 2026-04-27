@@ -8,7 +8,7 @@ Routes mirror the six-page lab IA:
     /runs/{id}           one run (legs, heatmap, journal entry)
     /catalog             components, tasks, and config state
     /backlog             roadmap, ideas, and operator inbox
-    /activity            command, tick, spawn, verdict, current-best timeline
+    /activity            command, tick, spawn, verdict timeline
     /healthz             liveness
 
 All HTML is rendered with Jinja2 + HTMX + Tailwind (CDN). No build
@@ -215,10 +215,9 @@ def create_app() -> FastAPI:
                 component_perf=perf,
                 tasks=reader.tasks_index(),
                 snapshot=reader.tree(),
-                current_best_history=reader.current_best_history(limit=20),
-                pending_merge=reader.decisions(applied=False, limit=20),
-                pending_eval=reader.experiments_without_decision(limit=10),
-                recent_decisions=reader.decisions(applied=True, limit=10),
+                pending_merge=reader.evaluations(applied=False, limit=20),
+                pending_eval=reader.experiments_without_evaluation(limit=10),
+                recent_evaluations=reader.evaluations(applied=True, limit=10),
                 pr_by_slug=pr_by_slug,
                 pr_by_instance=pr_by_instance,
             )
@@ -413,7 +412,7 @@ def create_app() -> FastAPI:
 
         This is the operator's "what is the daemon doing right now"
         feed — orchestrator loop iterations, signal wake-ups, exit-gate
-        decisions, ingest summaries, anything the runner logs at INFO
+        evaluations, ingest summaries, anything the runner logs at INFO
         or above.
 
         The `lines` query param is bounded to a sensible range so a
@@ -723,21 +722,21 @@ def create_app() -> FastAPI:
             _close_reader(request, reader)
             raise
 
-    @app.get("/_hx/decision-preview", response_class=HTMLResponse)
-    def hx_decision_preview(request: Request, slug: str) -> HTMLResponse:
-        # Load the experiment decision for ``slug`` without applying it.
-        # Used by the "Preview decision" buttons on /catalog and the run
-        # detail page so an operator can see exactly what `decision apply`
+    @app.get("/_hx/evaluation-preview", response_class=HTMLResponse)
+    def hx_evaluation_preview(request: Request, slug: str) -> HTMLResponse:
+        # Load the experiment evaluation for ``slug`` without applying it.
+        # Used by the "Preview evaluation" buttons on /catalog and the run
+        # detail page so an operator can see exactly what `evaluation apply`
         # is about to do before clicking through.
         reader = _reader_ctx(request)
         try:
-            decision = reader.preview_decision(slug)
+            evaluation = reader.preview_evaluation(slug)
             return _render(
                 request,
-                "_decision_preview.html",
+                "_evaluation_preview.html",
                 _reader=reader,
                 slug=slug,
-                decision=decision,
+                evaluation=evaluation,
             )
         except Exception:
             _close_reader(request, reader)
@@ -862,7 +861,7 @@ def create_app() -> FastAPI:
             legs = reader.legs(instance_id)
             tasks, leg_ids, cells = reader.task_pass_matrix(instance_id)
             verdict = next(
-                (d for d in reader.decisions() if d.instance_id == instance_id),
+                (d for d in reader.evaluations() if d.instance_id == instance_id),
                 None,
             )
             journal = reader.journal_entry_for_instance(instance_id)

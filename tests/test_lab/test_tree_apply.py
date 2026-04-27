@@ -1,4 +1,4 @@
-"""Tests for applying simplified experiment decisions."""
+"""Tests for applying simplified experiment evaluations."""
 
 from __future__ import annotations
 
@@ -10,7 +10,7 @@ import pytest
 
 from openharness.lab import lab_docs
 from openharness.lab import tree as tree_mod
-from openharness.lab.tree_ops import ExperimentDecision
+from openharness.lab.evaluation import ExperimentEvaluation
 
 
 @pytest.fixture
@@ -18,7 +18,7 @@ def lab_root(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     (tmp_path / "experiments.md").write_text("# Experiments\n\nPreamble.\n")
     (tmp_path / "configs.md").write_text(
         "# Configs\n\n"
-        "## Current best\n\n"
+        "## Operational baseline\n\n"
         "-   **Agent:** [`basic`](../src/openharness/agents/configs/basic.yaml)\n"
         "-   **Why:** baseline\n\n"
         "## Rejected\n\n_(none)_\n\n"
@@ -32,7 +32,7 @@ def lab_root(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     return tmp_path
 
 
-def _make_decision(verdict: str, **overrides: object) -> ExperimentDecision:
+def _make_evaluation(verdict: str, **overrides: object) -> ExperimentEvaluation:
     base = dict(
         verdict=verdict,
         target_id="planner_executor",
@@ -46,23 +46,25 @@ def _make_decision(verdict: str, **overrides: object) -> ExperimentDecision:
         cluster_evidence=[{"cluster": "multi_file", "summary": "candidate won"}],
     )
     base.update(overrides)
-    return ExperimentDecision(**base)
+    return ExperimentEvaluation(**base)
 
 
-def test_render_decision_block_includes_verdict_badge() -> None:
-    decision = _make_decision("accept")
-    out = tree_mod.render_decision_block(decision, slug="x")
+def test_render_evaluation_block_includes_verdict_badge() -> None:
+    evaluation = _make_evaluation("accept")
+    out = tree_mod.render_evaluation_block(evaluation, slug="x")
     assert "Accept" in out
-    assert "current best" in out
+    assert "dynamic leaderboard" in out
     assert "`planner_executor`" in out
     assert "multi_file" in out
 
 
-def test_apply_accept_updates_current_best_and_journal(lab_root: Path) -> None:
+def test_apply_accept_records_evaluation_without_baseline_mutation(
+    lab_root: Path,
+) -> None:
     lab_docs.append_journal_entry(
         slug="accept-planner",
         type_="paired ablation",
-        current_best_at_runtime="basic",
+        baseline_at_runtime="basic",
         mutation="planner_executor",
         hypothesis="planner helps",
         run_path=None,
@@ -70,21 +72,21 @@ def test_apply_accept_updates_current_best_and_journal(lab_root: Path) -> None:
         lab_root=lab_root,
     )
 
-    decision = _make_decision("accept")
+    evaluation = _make_evaluation("accept")
     with patch.object(tree_mod, "labdb") as mock_db:
         mock_db.writer.side_effect = RuntimeError("no DB in test")
-        result = tree_mod.apply_decision(
-            slug="accept-planner", decision=decision, lab_root=lab_root,
+        result = tree_mod.apply_evaluation(
+            slug="accept-planner", evaluation=evaluation, lab_root=lab_root,
         )
 
     assert result.applied is True
     assert result.journal_block_written is True
 
     snap = lab_docs.tree_snapshot(lab_root=lab_root)
-    assert snap.current_best_id == "planner_executor"
+    assert snap.operational_baseline_id == "basic"
 
     journal = (lab_root / "experiments.md").read_text()
-    assert "### Tree effect" in journal
+    assert "### Experiment evaluation" in journal
     assert "Accept" in journal
 
 
@@ -92,7 +94,7 @@ def test_apply_reject_appends_to_rejected(lab_root: Path) -> None:
     lab_docs.append_journal_entry(
         slug="rej-x",
         type_="paired",
-        current_best_at_runtime="basic",
+        baseline_at_runtime="basic",
         mutation="bad_thing",
         hypothesis="x",
         run_path=None,
@@ -100,10 +102,12 @@ def test_apply_reject_appends_to_rejected(lab_root: Path) -> None:
         lab_root=lab_root,
     )
 
-    decision = _make_decision("reject", target_id="bad_thing", confidence=1.0)
+    evaluation = _make_evaluation("reject", target_id="bad_thing", confidence=1.0)
     with patch.object(tree_mod, "labdb") as mock_db:
         mock_db.writer.side_effect = RuntimeError("no DB in test")
-        result = tree_mod.apply_decision(slug="rej-x", decision=decision, lab_root=lab_root)
+        result = tree_mod.apply_evaluation(
+            slug="rej-x", evaluation=evaluation, lab_root=lab_root,
+        )
 
     assert result.applied is True
     snap = lab_docs.tree_snapshot(lab_root=lab_root)
@@ -114,7 +118,7 @@ def test_apply_no_op_writes_journal_only(lab_root: Path) -> None:
     lab_docs.append_journal_entry(
         slug="noop-x",
         type_="paired",
-        current_best_at_runtime="basic",
+        baseline_at_runtime="basic",
         mutation="planner_executor",
         hypothesis="no signal",
         run_path=None,
@@ -122,10 +126,12 @@ def test_apply_no_op_writes_journal_only(lab_root: Path) -> None:
         lab_root=lab_root,
     )
 
-    decision = _make_decision("no_op", confidence=0.1)
+    evaluation = _make_evaluation("no_op", confidence=0.1)
     with patch.object(tree_mod, "labdb") as mock_db:
         mock_db.writer.side_effect = RuntimeError("no DB in test")
-        result = tree_mod.apply_decision(slug="noop-x", decision=decision, lab_root=lab_root)
+        result = tree_mod.apply_evaluation(
+            slug="noop-x", evaluation=evaluation, lab_root=lab_root,
+        )
 
     assert result.applied is True
     snap = lab_docs.tree_snapshot(lab_root=lab_root)

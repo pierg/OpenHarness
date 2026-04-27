@@ -4,7 +4,7 @@
 
 #### loop-guard-on-planner-executor
 
--   **Motivation:** Once loop-guard lands as a runtime atom on current best, the same mechanism is more likely to help on planner_executor (which adds a planning hop that can also stall) than on basic alone. Composition test, not yet runnable.
+-   **Motivation:** If loop-guard becomes a useful runtime atom on the operational baseline, the same mechanism may help planner_executor (which adds a planning hop that can also stall) more than basic alone. Composition test, not yet runnable.
 -   **Sketch:** Paired ablation on planner_executor only: leg A current YAML; leg B same YAML with loop-guard runtime atom enabled. Run on the three positive clusters from the planner_executor branch (security_certificates, system_administration, python_data) plus a same-size negative-cluster control.
 -   **Auto-proposed by:** archived-reflect-and-plan@2026-04-18
 
@@ -34,7 +34,7 @@
 
 #### verifier-completion-gate-on-long-budget
 
--   **Motivation:** In extended-budget-paired-on-trunk, the 120-turn/32k leg matched the 60-turn/16k leg on passes, cost 3.1x more, and showed 4x as many `hallucinated_success` tags as the current best budget, so more search mostly amplified false completion rather than finding new wins.
+-   **Motivation:** In extended-budget-paired-on-trunk, the 120-turn/32k leg matched the 60-turn/16k leg on passes, cost 3.1x more, and showed 4x as many `hallucinated_success` tags as the baseline budget, so more search mostly amplified false completion rather than finding new wins.
 -   **Sketch:** Add a verifier-completion gate that blocks success claims until the required output paths or end-to-end checks have been revalidated, then replay the extended-budget slice with the gate enabled on the long-budget leg. The comparison should answer whether the remaining long-budget spend is rescuing real work or just prolonging premature success states.
 -   **Auto-proposed by:** cross-experiment-critic@2026-04-23
 
@@ -71,7 +71,7 @@
 #### runtime-guards-on-gemini3-floor
 
 -   **Motivation:** [medium confidence; structural gap, 0 component trials on flash/pro] The measured runtime and planner guard rows all come from flash-lite component ablations, while the Gemini 3 model baseline raised the no-component control floor, so the zero-win guard conclusion may be model-floor dependent.
--   **Sketch:** Run a small paired confirmation on the selected Gemini 3 current-best model with current basic/planner controls versus loop-guard and planner-schema-guard on their strongest historical slices. Treat this as a model-floor interaction test, not a new component graduation attempt.
+-   **Sketch:** Run a small paired confirmation on the top-ranked Gemini 3 model group with basic/planner controls versus loop-guard and planner-schema-guard on their strongest historical slices. Treat this as a model-floor interaction test, not a new component graduation attempt.
 -   **Auto-proposed by:** cross-experiment-critic@2026-04-25
 
 #### timeout-recovery-hard-cluster-slice
@@ -95,7 +95,7 @@
 #### component-catalog-registration-gate
 
 -   **Motivation:** [medium confidence: 32 unknown_id misconfiguration rows] Components can be present in trials.components_active while still being flagged as unknown_id, with planner-schema-guard and executor-bash-timeout-aware-retry both affected.
--   **Sketch:** Add a preflight or ingest gate that requires every active component id to resolve against the component catalog before the run becomes verdict-bearing. If a branch-local component is intentionally experimental, register it deterministically during decision apply or mark it with an explicit experimental catalog entry.
+-   **Sketch:** Add a preflight or ingest gate that requires every active component id to resolve against the component catalog before the run becomes evaluation-bearing. If a branch-local component is intentionally experimental, register it deterministically during evaluation apply or mark it with an explicit experimental catalog entry.
 -   **Auto-proposed by:** cross-experiment-critic@2026-04-26
 
 #### critic-score-outcome-consistency-check
@@ -186,13 +186,13 @@
 #### historical-control-shape
 
 -   **Motivation:** Every experiment currently re-runs its control fresh. For runtime-flag ablations on byte-identical existing branches (e.g. `loop-guard` on `planner_executor`), the control trials already exist in `runs/lab/trials.duckdb` from a prior run. Borrowing them cuts spend ~50% AND wall-clock ~50% on those experiments.
--   **Sketch:** Add `control: historical: <instance_id>/<leg_id>` and `control: historical+replay: ...` modes. Implement phase blocks the run unless drift guards pass: control config hash, bench version pin, verifier hash, model pin (vendor + checkpoint), and `n_attempts` all byte-match. Current-best changes invalidate historical references to the old baseline (DB marks them stale; design phase rejects them). The `+replay` variant adds a third leg that re-runs the borrowed config on the slice to bound regression-to-the-mean noise (recommended for derived slices like `near-miss`).
+-   **Sketch:** Add `control: historical: <instance_id>/<leg_id>` and `control: historical+replay: ...` modes. Implement phase blocks the run unless drift guards pass: control config hash, bench version pin, verifier hash, model pin (vendor + checkpoint), and `n_attempts` all byte-match. Ranking-policy changes invalidate historical references to an old baseline (DB marks them stale; design phase rejects them). The `+replay` variant adds a third leg that re-runs the borrowed config on the slice to bound regression-to-the-mean noise (recommended for derived slices like `near-miss`).
 -   **Referenced from:** methodology simplification follow-up.
 
-#### accept-replication-gate
+#### accepted-experiment-replication-gate
 
--   **Motivation:** An `accept` decision updates the current best — the highest-stakes mutation in the lab. Today finalize can merge an accepted outcome after one run, so one lucky run could land a regressing config and contaminate downstream experiments.
--   **Sketch:** Add a finalize-time replication option for accepted outcomes: run one fresh replication on the same slice before merging the current-best update, then require the second decision to agree. Adds ~1× experiment cost for rare high-stakes accepts.
+-   **Motivation:** An accepted experiment can still land code after one run. Even though best selection is now dynamic, one lucky or noisy run could still put a regressing implementation on `main`.
+-   **Sketch:** Add a finalize-time replication option for accepted outcomes: run one fresh replication on the same slice before merging the experiment PR, then require the second evaluation to agree. Adds ~1× experiment cost for rare high-stakes accepts.
 -   **Referenced from:** methodology simplification follow-up.
 
 ## Trying

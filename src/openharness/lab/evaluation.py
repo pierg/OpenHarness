@@ -1,10 +1,13 @@
-"""Decision helpers for the autonomous lab.
+"""Experiment-evaluation helpers for the autonomous lab.
 
-The simplified lab no longer derives verdicts from deterministic
-thresholds. `experiment-critic` owns the judgment call and writes a
+`experiment-critic` owns the per-experiment judgment call and writes a
 structured recommendation to `critic/experiment-critic.json`. This
-module validates that payload and mirrors it into the `decisions`
-query cache.
+module validates that payload and mirrors it into the
+`experiment_evaluations` query cache.
+
+An evaluation verdict is deliberately local to one experiment PR. It
+does not select the global best agent; dynamic ranking lives in
+`openharness.lab.ranking`.
 """
 
 from __future__ import annotations
@@ -16,9 +19,8 @@ from typing import Any, Iterable, Literal
 
 from openharness.lab import critic_io
 from openharness.lab import db as labdb
-from openharness.lab import lab_docs
 
-DecisionVerdict = Literal["accept", "reject", "no_op"]
+ExperimentVerdict = Literal["accept", "reject", "no_op"]
 
 
 @dataclass(slots=True)
@@ -39,10 +41,10 @@ class LegStats:
 
 
 @dataclass(slots=True)
-class ExperimentDecision:
+class ExperimentEvaluation:
     """The experiment-critic recommendation for one experiment instance."""
 
-    verdict: DecisionVerdict
+    verdict: ExperimentVerdict
     target_id: str
     rationale: str
     evidence_paths: list[Path] = field(default_factory=list)
@@ -95,18 +97,13 @@ def _leg_stats(conn: Any, instance_id: str) -> list[LegStats]:
     ]
 
 
-def current_best_id() -> str:
-    """Return the current best agent id from `lab/configs.md`."""
-    return lab_docs.tree_snapshot().current_best_id
-
-
-def load_decision(
+def load_evaluation(
     instance_id: str,
     *,
     db_conn: Any | None = None,
     run_dir: Path | None = None,
-) -> ExperimentDecision:
-    """Load and validate the experiment-critic decision for `instance_id`."""
+) -> ExperimentEvaluation:
+    """Load and validate the experiment-critic evaluation for `instance_id`."""
     own_conn = db_conn is None
     conn = labdb.connect(read_only=True) if own_conn else db_conn
     try:
@@ -118,7 +115,7 @@ def load_decision(
             raise FileNotFoundError(f"Could not resolve run dir for {instance_id!r}")
         payload = _load_experiment_critic_payload(resolved_run_dir)
         legs = _leg_stats(conn, instance_id)
-        return _decision_from_payload(
+        return _evaluation_from_payload(
             payload,
             instance_id=instance_id,
             run_dir=resolved_run_dir,
@@ -142,13 +139,13 @@ def _load_experiment_critic_payload(run_dir: Path) -> dict[str, Any]:
     return payload
 
 
-def _decision_from_payload(
+def _evaluation_from_payload(
     payload: dict[str, Any],
     *,
     instance_id: str,
     run_dir: Path,
     legs: list[LegStats],
-) -> ExperimentDecision:
+) -> ExperimentEvaluation:
     raw_verdict = _first_str(payload, "verdict")
     verdict = _normalize_verdict(raw_verdict)
     if verdict is None:
@@ -171,7 +168,7 @@ def _decision_from_payload(
     promotability_notes = _first_str(payload, "promotability_notes")
     cluster_evidence = _cluster_evidence_from_payload(payload)
 
-    return ExperimentDecision(
+    return ExperimentEvaluation(
         verdict=verdict,
         target_id=target_id,
         rationale=rationale,
@@ -185,11 +182,11 @@ def _decision_from_payload(
     )
 
 
-def _normalize_verdict(raw: str | None) -> DecisionVerdict | None:
+def _normalize_verdict(raw: str | None) -> ExperimentVerdict | None:
     if raw is None:
         return None
     value = raw.strip().lower().replace("-", "_")
-    allowed: dict[str, DecisionVerdict] = {
+    allowed: dict[str, ExperimentVerdict] = {
         "accept": "accept",
         "reject": "reject",
         "no_op": "no_op",
@@ -242,7 +239,7 @@ def _evidence_paths_for_instance(
     run_dir: Path | None = None,
     db_conn: Any | None = None,
 ) -> Iterable[Path]:
-    """Yield the on-disk evidence files most relevant to a decision."""
+    """Yield the on-disk evidence files most relevant to an evaluation."""
     resolved = run_dir or critic_io.run_dir_from_instance(instance_id, db_conn=db_conn)
     if resolved is None:
         return
@@ -257,27 +254,29 @@ def _evidence_paths_for_instance(
         yield summary
 
 
-def upsert_decision(
+def upsert_evaluation(
     conn: Any,
     *,
     slug: str,
-    decision: ExperimentDecision,
+    evaluation: ExperimentEvaluation,
     applied: bool,
     applied_by: str,
     applied_at: Any,
 ) -> None:
-    """Mirror a decision into the `decisions` query cache."""
+    """Mirror an experiment evaluation into the query cache."""
     conn.execute(
         """
-        INSERT INTO decisions (
-            instance_id, slug, verdict, target_id, rationale,
+        INSERT INTO experiment_evaluations (
+            instance_id, slug, verdict, target_id, baseline_leg, candidate_leg, rationale,
             confidence, evidence_paths, applied, applied_by, applied_at,
             promotability_notes
-        ) VALUES (?,?,?,?,?,?,?,?,?,?,?)
+        ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
         ON CONFLICT (instance_id) DO UPDATE SET
             slug = EXCLUDED.slug,
             verdict = EXCLUDED.verdict,
             target_id = EXCLUDED.target_id,
+            baseline_leg = EXCLUDED.baseline_leg,
+            candidate_leg = EXCLUDED.candidate_leg,
             rationale = EXCLUDED.rationale,
             confidence = EXCLUDED.confidence,
             evidence_paths = EXCLUDED.evidence_paths,
@@ -287,42 +286,18 @@ def upsert_decision(
             promotability_notes = EXCLUDED.promotability_notes
         """,
         [
-            decision.instance_id or "",
+            evaluation.instance_id or "",
             slug,
-            decision.verdict,
-            decision.target_id,
-            decision.rationale,
-            decision.confidence,
-            json.dumps([str(p) for p in decision.evidence_paths]),
+            evaluation.verdict,
+            evaluation.target_id,
+            evaluation.baseline_leg,
+            evaluation.candidate_leg,
+            evaluation.rationale,
+            evaluation.confidence,
+            json.dumps([str(p) for p in evaluation.evidence_paths]),
             bool(applied),
             applied_by,
             applied_at,
-            decision.promotability_notes,
+            evaluation.promotability_notes,
         ],
-    )
-
-
-def insert_current_best_change(
-    conn: Any,
-    *,
-    at_ts: Any,
-    from_id: str | None,
-    to_id: str,
-    reason: str,
-    applied_by: str,
-    instance_id: str | None = None,
-) -> None:
-    """Write a current-best history row."""
-    conn.execute(
-        """
-        INSERT INTO current_best_changes (
-            at_ts, from_id, to_id, reason, applied_by, instance_id
-        ) VALUES (?,?,?,?,?,?)
-        ON CONFLICT (at_ts, to_id) DO UPDATE SET
-            from_id = EXCLUDED.from_id,
-            reason = EXCLUDED.reason,
-            applied_by = EXCLUDED.applied_by,
-            instance_id = EXCLUDED.instance_id
-        """,
-        [at_ts, from_id, to_id, reason, applied_by, instance_id],
     )

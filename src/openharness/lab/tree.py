@@ -1,4 +1,4 @@
-"""Apply experiment decisions to the lab markdown + DB cache."""
+"""Apply experiment evaluations to the lab markdown + DB cache."""
 
 from __future__ import annotations
 
@@ -11,71 +11,67 @@ from openharness.lab import components_doc as cdoc
 from openharness.lab import db as labdb
 from openharness.lab import lab_docs
 from openharness.lab.paths import REPO_ROOT
-from openharness.lab.tree_ops import ExperimentDecision, upsert_decision
+from openharness.lab.evaluation import ExperimentEvaluation, upsert_evaluation
 
 
 @dataclass(slots=True)
 class ApplyResult:
     slug: str
-    decision: ExperimentDecision
+    evaluation: ExperimentEvaluation
     applied: bool
     applied_by: str
     journal_block_written: bool
     notes: list[str]
 
 
-def apply_decision(
+def apply_evaluation(
     *,
     slug: str,
-    decision: ExperimentDecision,
+    evaluation: ExperimentEvaluation,
     applied_by: str = "auto:daemon",
     lab_root: Path | None = None,
     mark_applied: bool = False,
     **_: object,
 ) -> ApplyResult:
-    """Apply an experiment-critic decision to the current checkout."""
+    """Record an experiment-critic evaluation in the current checkout."""
     notes: list[str] = []
     branch_applied = True
     lr = {"lab_root": lab_root} if lab_root is not None else {}
 
-    if decision.verdict == "accept":
-        journal_link = f"[`{slug}`](experiments.md#{slug})"
-        lab_docs.set_current_best(
-            agent_id=decision.target_id,
-            reason=decision.rationale[:200],
-            journal_link=journal_link,
-            **lr,
+    if evaluation.verdict == "accept":
+        notes.append(
+            "accept: experiment implementation is worth preserving; "
+            "leaderboard ranking is recomputed separately"
         )
-        notes.append(f"configs.md > ## Current best now points at `{decision.target_id}`")
-    elif decision.verdict == "reject":
-        evidence = ", ".join(str(p) for p in decision.evidence_paths[:2]) or "(see journal)"
+    elif evaluation.verdict == "reject":
+        evidence = ", ".join(str(p) for p in evaluation.evidence_paths[:2]) or "(see journal)"
         lab_docs.add_rejected(
-            branch_id=decision.target_id,
-            reason=decision.rationale[:200],
+            branch_id=evaluation.target_id,
+            reason=evaluation.rationale[:200],
             evidence=evidence,
             **lr,
         )
-        notes.append(f"appended `{decision.target_id}` to configs.md > ## Rejected")
+        notes.append(f"appended `{evaluation.target_id}` to configs.md > ## Rejected")
     else:
         notes.append("no_op: no config mutation; recorded in journal only")
 
-    block = render_decision_block(decision, slug=slug)
+    block = render_evaluation_block(evaluation, slug=slug)
     try:
-        lab_docs.set_section(slug=slug, section="Tree effect", body=block, **lr)
+        lab_docs.set_section(slug=slug, section="Experiment evaluation", body=block, **lr)
         journal_written = True
     except lab_docs.LabDocError as exc:
         notes.append(f"journal write skipped: {exc}")
         journal_written = False
 
-    notes.extend(_bump_components_for_decision(decision, lab_root=lab_root))
+    notes.extend(_bump_components_for_evaluation(evaluation, lab_root=lab_root))
 
     applied_at = datetime.now(timezone.utc) if mark_applied else None
     try:
         with labdb.writer() as conn:
-            upsert_decision(
+            upsert_evaluation(
                 conn,
                 slug=slug,
-                decision=decision,
+                evaluation=evaluation,
                 applied=mark_applied,
                 applied_by=applied_by if mark_applied else "pending_finalize",
                 applied_at=applied_at,
@@ -85,7 +81,7 @@ def apply_decision(
 
     return ApplyResult(
         slug=slug,
-        decision=decision,
+        evaluation=evaluation,
         applied=branch_applied,
         applied_by=applied_by,
         journal_block_written=journal_written,
@@ -93,7 +89,7 @@ def apply_decision(
     )
 
 
-def mark_decision_merged(
+def mark_evaluation_finalized(
     *,
     instance_id: str,
     applied_by: str,
@@ -101,12 +97,12 @@ def mark_decision_merged(
     branch_sha: str | None = None,
     applied_at: datetime | None = None,
 ) -> None:
-    """Flip a branch-applied decision to `applied=true` after PR merge."""
+    """Flip a branch-recorded evaluation to `applied=true` after finalize."""
     applied_at = applied_at or datetime.now(timezone.utc)
     with labdb.writer() as conn:
         conn.execute(
             """
-            UPDATE decisions
+            UPDATE experiment_evaluations
                SET applied = TRUE,
                    applied_by = ?,
                    applied_at = ?,
@@ -118,39 +114,41 @@ def mark_decision_merged(
         )
 
 
-def render_decision_block(decision: ExperimentDecision, *, slug: str) -> str:
-    """Render the `### Tree effect` body for the journal entry."""
+def render_evaluation_block(evaluation: ExperimentEvaluation, *, slug: str) -> str:
+    """Render the `### Experiment evaluation` body for the journal entry."""
     _ = slug
     badge = {
-        "accept": "**Accept** — experiment outcome supports making this the current best",
+        "accept": "**Accept** — experiment implementation is worth preserving",
         "reject": "**Reject** — experiment outcome argues against this variant",
         "no_op": "**No-op** — recorded for trend analysis",
-    }[decision.verdict]
+    }[evaluation.verdict]
 
     lines: list[str] = [
         f"-   **Verdict:** {badge}",
-        f"-   **Target:** `{decision.target_id}`",
+        f"-   **Target:** `{evaluation.target_id}`",
+        "-   **Ranking:** not assigned here; compare via the dynamic leaderboard "
+        "within the same model/dataset group.",
     ]
-    if decision.baseline_leg or decision.candidate_leg:
+    if evaluation.baseline_leg or evaluation.candidate_leg:
         lines.append(
-            f"-   **Pair:** baseline leg `{decision.baseline_leg or '?'}` "
-            f"vs candidate `{decision.candidate_leg or '?'}`"
+            f"-   **Pair:** baseline leg `{evaluation.baseline_leg or '?'}` "
+            f"vs candidate `{evaluation.candidate_leg or '?'}`"
         )
-    lines.append(f"-   **Confidence:** {decision.confidence:.2f}")
-    lines.append(f"-   **Rationale:** {decision.rationale}")
-    if decision.promotability_notes:
-        lines.append(f"-   **Generalization notes:** {decision.promotability_notes}")
-    if decision.evidence_paths:
+    lines.append(f"-   **Confidence:** {evaluation.confidence:.2f}")
+    lines.append(f"-   **Rationale:** {evaluation.rationale}")
+    if evaluation.promotability_notes:
+        lines.append(f"-   **Generalization notes:** {evaluation.promotability_notes}")
+    if evaluation.evidence_paths:
         ev = ", ".join(
             f"[`{Path(p).name}`]({_journal_relpath(Path(p))})"
-            for p in decision.evidence_paths[:4]
+            for p in evaluation.evidence_paths[:4]
         )
         lines.append(f"-   **Evidence:** {ev}")
-    if decision.cluster_evidence:
+    if evaluation.cluster_evidence:
         lines.append("")
         lines.append("| Cluster | Evidence |")
         lines.append("|---------|----------|")
-        for row in decision.cluster_evidence[:8]:
+        for row in evaluation.cluster_evidence[:8]:
             cluster = row.get("cluster") or row.get("category") or "(unknown)"
             detail = row.get("summary") or row.get("evidence") or json.dumps(row, sort_keys=True)
             lines.append(f"| `{cluster}` | {detail} |")
@@ -175,22 +173,22 @@ _ARCHITECTURE_TO_COMPONENT = {
 }
 
 
-def _bump_components_for_decision(
-    decision: ExperimentDecision,
+def _bump_components_for_evaluation(
+    evaluation: ExperimentEvaluation,
     *,
     lab_root: Path | None,
 ) -> list[str]:
     """Best-effort component status updates for accepted/measured variants."""
     notes: list[str] = []
-    target_components = _components_from_agent_yaml(decision.target_id)
+    target_components = _components_from_agent_yaml(evaluation.target_id)
     if target_components is None:
         return notes
 
-    if decision.verdict == "accept":
+    if evaluation.verdict == "accept":
         bumped = _safe_bump(target_components, "validated", lab_root=lab_root)
         if bumped:
             notes.append(f"components.md: bumped {sorted(bumped)} → validated")
-    elif decision.verdict == "no_op":
+    elif evaluation.verdict == "no_op":
         bumped = _safe_bump(target_components, "experimental", lab_root=lab_root)
         if bumped:
             notes.append(f"components.md: bumped {sorted(bumped)} → experimental")

@@ -1,7 +1,7 @@
 """Deterministic markdown helpers for `lab/*.md` files.
 
 The lab skills are *prompts*: they instruct an agent on judgment-
-heavy steps (which idea to propose, which decision to write, how to
+heavy steps (which idea to propose, which evaluation to write, how to
 phrase a comparison). The mechanical edits (move an idea between
 sections, append cross-ref bullets, stub an experiment entry, fill the
 result table from `summary.md`) need to be reproducible byte-for-byte
@@ -22,8 +22,6 @@ import re
 from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
-from typing import Iterable
-
 from openharness.lab.paths import LAB_ROOT
 
 VALID_IDEAS_SECTIONS: tuple[str, ...] = ("Proposed", "Trying", "Accepted", "Rejected")
@@ -40,17 +38,17 @@ VALID_THEMES: tuple[str, ...] = (
     "Evaluation",
 )
 
-# Sections of a tree-shaped journal entry (the new shape; see plan).
+# Sections of an experiment journal entry.
 JOURNAL_SECTIONS: tuple[str, ...] = (
     "Aggregate",
     "Mutation impact",
     "Failure modes",
-    "Tree effect",
+    "Experiment evaluation",
     "Linked follow-ups",
 )
 
 # Sections inside `lab/configs.md` (the measured configuration state).
-TREE_SECTIONS: tuple[str, ...] = ("Current best", "Rejected", "Proposed")
+TREE_SECTIONS: tuple[str, ...] = ("Operational baseline", "Rejected", "Proposed")
 
 
 class LabDocError(RuntimeError):
@@ -400,113 +398,6 @@ def append_auto_proposed_idea(
     return text
 
 
-# ----- experiments.md operations --------------------------------------------
-
-
-def stub_experiment(
-    *,
-    slug: str,
-    hypothesis: str,
-    variant: str,
-    on_date: date | None = None,
-    lab_root: Path = LAB_ROOT,
-) -> str:
-    """Insert a new in-progress experiment entry at the top of experiments.md."""
-    path = _experiments_path(lab_root)
-    text = _read(path)
-    on_date = on_date or date.today()
-    header = f"## {on_date.isoformat()} — {slug}"
-
-    if header in text:
-        raise LabDocError(f"Experiment {slug!r} already stubbed in {path}")
-
-    stub = (
-        f"{header}\n\n"
-        f"-   **Hypothesis:** {hypothesis.strip()}\n"
-        f"-   **Variant:** {variant.strip()}\n"
-        "-   **Run:** _(filled after the run completes)_\n\n"
-        "### Results\n\n"
-        "| Leg | Trials | Passed | Errored | Pass rate | Total tokens | Cost (USD) |\n"
-        "|-----|-------:|-------:|--------:|----------:|-------------:|-----------:|\n"
-        "|     |        |        |         |           |              |            |\n\n"
-        "### Notes\n\n"
-        "-   _(filled after the run completes)_\n\n"
-        "### Decision\n\n"
-        "_(filled after the run completes)_\n"
-    )
-    parts = _split_top_sections(text, level=2)
-    preamble = parts[0][1]
-    rest = parts[1:]
-    rebuilt = preamble.rstrip() + "\n\n" + stub.rstrip() + "\n"
-    for heading, body in rest:
-        if heading is None:
-            continue
-        rebuilt += f"\n## {heading}\n\n{body.rstrip()}\n"
-    _write(path, rebuilt)
-    return rebuilt
-
-
-def fill_experiment_results(
-    *,
-    slug: str,
-    run_path: str,
-    results_table: str,
-    notes: Iterable[str],
-    decision: str,
-    lab_root: Path = LAB_ROOT,
-) -> str:
-    """Fill in the in-progress entry for `slug`.
-
-    `results_table` should be the full markdown table including header rows.
-    """
-    path = _experiments_path(lab_root)
-    text = _read(path)
-    pattern = re.compile(
-        r"(## \d{4}-\d{2}-\d{2} — " + re.escape(slug) + r"\b.*?)(?=\n## |\Z)",
-        re.DOTALL,
-    )
-    m = pattern.search(text)
-    if not m:
-        raise LabDocError(f"No experiment entry for {slug!r} in {path}")
-    entry = m.group(1)
-
-    # Run line
-    entry = re.sub(
-        r"-\s*\*\*Run:\*\*[^\n]*\n",
-        f"-   **Run:** [`{run_path}`](../{run_path})\n",
-        entry,
-        count=1,
-    )
-    # Results
-    entry = re.sub(
-        r"### Results.*?(?=### Notes)",
-        f"### Results\n\n{results_table.strip()}\n\n",
-        entry,
-        count=1,
-        flags=re.DOTALL,
-    )
-    notes_block = "\n".join(
-        n if n.startswith("-") else f"-   {n}" for n in notes if n.strip()
-    )
-    entry = re.sub(
-        r"### Notes.*?(?=### Decision)",
-        f"### Notes\n\n{notes_block.strip()}\n\n",
-        entry,
-        count=1,
-        flags=re.DOTALL,
-    )
-    entry = re.sub(
-        r"### Decision.*\Z",
-        f"### Decision\n\n{decision.strip()}\n",
-        entry,
-        count=1,
-        flags=re.DOTALL,
-    )
-    new_text = text[: m.start()] + entry + text[m.end():]
-    _write(path, new_text)
-    return new_text
-
-
 # ----- roadmap.md operations -----------------------------------------------
 
 
@@ -663,12 +554,12 @@ def move_roadmap_entry(
 #     ### Aggregate
 #     ### Mutation impact
 #     ### Failure modes
-#     ### Tree effect
+#     ### Experiment evaluation
 #     ### Linked follow-ups
 #
-# `set_section(slug, "Tree effect", body)` rewrites exactly one ###
-# section inside one ## entry. Idempotent. Tolerates missing entries
-# by raising `LabDocError` so the caller (CLI / runner) decides.
+# `set_section(slug, "Experiment evaluation", body)` rewrites exactly
+# one ### section inside one ## entry. Idempotent. Tolerates missing
+# entries by raising `LabDocError` so the caller (CLI / runner) decides.
 
 
 def _entry_pattern(slug: str) -> "re.Pattern[str]":
@@ -770,7 +661,7 @@ def append_journal_entry(
     *,
     slug: str,
     type_: str,
-    current_best_at_runtime: str,
+    baseline_at_runtime: str,
     mutation: str | None,
     hypothesis: str,
     run_path: str | None,
@@ -781,7 +672,7 @@ def append_journal_entry(
     """Insert a new tree-shaped journal entry at the top of `experiments.md`.
 
     Stub-shaped: header bullets present, every `### <section>` empty,
-    populated later by `synthesize` and `decision apply`.
+    populated later by `synthesize` and `evaluation apply`.
 
     ``branch`` is the experiment branch name (e.g. ``lab/<slug>``) the
     code variant lives on. Always rendered — either as the recorded
@@ -798,7 +689,7 @@ def append_journal_entry(
 
     bullets = [
         f"-   **Type:** {type_.strip()}",
-        f"-   **Current best at run-time:** {current_best_at_runtime.strip()}",
+        f"-   **Baseline at run-time:** {baseline_at_runtime.strip()}",
     ]
     if mutation:
         bullets.append(f"-   **Mutation:** {mutation.strip()}")
@@ -958,8 +849,8 @@ class TreeProposed:
 
 @dataclass(slots=True)
 class TreeSnapshot:
-    current_best_id: str
-    current_best_anchor: str | None
+    operational_baseline_id: str
+    operational_baseline_anchor: str | None
     rejected: list[TreeRejected]
     proposed: list[TreeProposed]
 
@@ -980,15 +871,15 @@ def tree_snapshot(*, lab_root: Path = LAB_ROOT) -> TreeSnapshot:
     text = _ensure_configs_skeleton(text)
     parts = dict(_split_top_sections(text, level=2))
 
-    current_body = parts.get("Current best", "")
-    current_best_id = "basic"
-    current_best_anchor: str | None = None
+    current_body = parts.get("Operational baseline", "")
+    operational_baseline_id = "basic"
+    operational_baseline_anchor: str | None = None
     m_id = re.search(r"\*\*Agent:\*\*\s*\[`([^`]+)`\]", current_body)
     if m_id:
-        current_best_id = m_id.group(1)
+        operational_baseline_id = m_id.group(1)
     m_why = re.search(r"\*\*Why:\*\*\s*(.+)", current_body)
     if m_why:
-        current_best_anchor = m_why.group(1).strip()
+        operational_baseline_anchor = m_why.group(1).strip()
 
     rejected: list[TreeRejected] = []
     for row in _parse_md_table(parts.get("Rejected", "")):
@@ -1012,8 +903,8 @@ def tree_snapshot(*, lab_root: Path = LAB_ROOT) -> TreeSnapshot:
         ))
 
     return TreeSnapshot(
-        current_best_id=current_best_id,
-        current_best_anchor=current_best_anchor,
+        operational_baseline_id=operational_baseline_id,
+        operational_baseline_anchor=operational_baseline_anchor,
         rejected=rejected,
         proposed=proposed,
     )
@@ -1054,14 +945,14 @@ def _strip_md_link(cell: str) -> str:
     return cell
 
 
-def set_current_best(
+def set_operational_baseline(
     *,
     agent_id: str,
     reason: str,
     journal_link: str | None = None,
     lab_root: Path = LAB_ROOT,
 ) -> str:
-    """Rewrite `## Current best` in configs.md to point at `agent_id`."""
+    """Rewrite the configured operational baseline in configs.md."""
     path = _configs_path(lab_root)
     text = _read(path)
     text = _ensure_configs_skeleton(text)
@@ -1072,7 +963,7 @@ def set_current_best(
     if journal_link:
         body_lines.append(f"-   **Anchored by:** {journal_link.strip()}")
     new_body = "\n".join(body_lines)
-    new_text = _replace_top_section(text, "Current best", new_body)
+    new_text = _replace_top_section(text, "Operational baseline", new_body)
     _write(path, new_text)
     return new_text
 
@@ -1325,7 +1216,6 @@ def _demote_to_suggested_inplace(up_next_body: str, slug: str) -> tuple[str, boo
         new_up = body_without.rstrip() + sep + f"### Suggested\n\n{suggested_block}"
     return new_up.strip(), True
 
-
 def remove_roadmap_entry(
     *,
     slug: str,
@@ -1532,55 +1422,3 @@ def _promote_suggested_inplace(up_next_body: str, slug: str) -> tuple[str, bool]
         + up_next_body[m.end():]
     )
     return new_up.strip(), True
-
-
-# ----- summary.md → results table renderer ---------------------------------
-
-
-def render_results_table_from_summary(summary_md: str) -> str:
-    """Extract a normalised Results table from `runs/.../results/summary.md`.
-
-    Source columns (Harbor):
-      Leg | Trials | Passed | Failed | Errored | Errors by Phase | Pass Rate
-          | Mean Score | Tokens | Cost | Median Time
-    Target (lab/experiments.md):
-      Leg | Trials | Passed | Errored | Pass rate | Total tokens | Cost (USD)
-    """
-    rows: list[list[str]] = []
-    for line in summary_md.splitlines():
-        if not line.strip().startswith("|"):
-            continue
-        cells = [c.strip() for c in line.strip().strip("|").split("|")]
-        if cells and cells[0] == "Leg":
-            continue
-        if cells and set(cells[0]) <= {"-", ":", " "}:
-            continue
-        if len(cells) < 11:
-            continue
-        rows.append(cells)
-
-    out_lines = [
-        "| Leg | Trials | Passed | Errored | Pass rate | Total tokens | Cost (USD) |",
-        "|-----|-------:|-------:|--------:|----------:|-------------:|-----------:|",
-    ]
-    for cells in rows:
-        leg = cells[0]
-        trials = cells[1]
-        passed = cells[2]
-        errored = cells[4]
-        try:
-            pass_rate = f"{float(cells[6]) * 100:.1f}%"
-        except ValueError:
-            pass_rate = cells[6]
-        try:
-            tokens = f"{int(cells[8]):,}"
-        except ValueError:
-            tokens = cells[8]
-        try:
-            cost = f"${float(cells[9]):.2f}"
-        except ValueError:
-            cost = cells[9]
-        out_lines.append(
-            f"| {leg} | {trials} | {passed} | {errored} | {pass_rate} | {tokens} | {cost} |"
-        )
-    return "\n".join(out_lines)

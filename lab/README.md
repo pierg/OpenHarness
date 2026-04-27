@@ -2,13 +2,13 @@
 
 The lab is the repo's autonomous experiment surface. Its job is to find
 generalizable improvements to agentic harnesses and preserve the
-evidence behind each decision.
+evidence behind each experiment evaluation.
 
 ## Files
 
 | File | Purpose |
 |------|---------|
-| `configs.md` | current best config + rejected + proposed configs |
+| `configs.md` | operational baseline + rejected + proposed configs |
 | `components.md` | catalog of reusable building blocks |
 | `experiments.md` | append-only journal of experiment outcomes |
 | `ideas.md` | themed backlog |
@@ -22,7 +22,7 @@ One experiment owns one branch.
 2. preflight creates `lab/<slug>` worktree from `main`
 3. the slug runs through:
    `preflight → design → implement → run → critique → replan → finalize`
-4. critique writes the experiment-critic decision on the experiment branch
+4. critique writes the experiment-critic evaluation on the experiment branch
 5. replan rewrites the queue consequences on that same branch
 6. finalize opens the canonical experiment PR and syncs the outcome to `main`
 7. only then does the daemon pick the next roadmap entry
@@ -42,17 +42,24 @@ config YAML and any source edits. Accepted experiments merge it.
 Rejected and no-op experiments get a final verdict comment and are
 closed unmerged so their implementation diff remains inspectable.
 If lab metadata still needs to land for a rejected/no-op experiment,
-finalize syncs that metadata separately while keeping the decision and
+finalize syncs that metadata separately while keeping the evaluation and
 journal linked to the canonical experiment PR.
 
-## Decisions
+## Evaluations And Rankings
 
 - `accept`: comment on and merge the canonical experiment PR
 - `reject`: comment on and close the canonical experiment PR, preserve discarded SHA
 - `no_op`: comment on and close the canonical experiment PR, preserve discarded SHA
 
-The critic decision is a recommendation backed by evidence and
-confidence. Replan decides what that evidence means for the queue.
+The critic evaluation is a recommendation backed by evidence and
+confidence. It decides PR disposition, not global best.
+
+The leaderboard is a separate dynamic view derived from
+`experiments`, `legs`, `trials`, and `experiment_evaluations`. It ranks
+comparable results by model id, dataset, evidence scope, pass rate,
+cost, tokens, and duration. A valid no-op measurement can still change
+the leaderboard; an accepted PR can later be outranked by newer
+evidence.
 
 ## Planning
 

@@ -1,12 +1,12 @@
 {% set chart = trajectory_chart(trajectory) %}
 {% if not trajectory %}
-  <p class="text-sm text-slate-500">No accepted current-best history yet.</p>
+  <p class="text-sm text-slate-500">No full-suite ranked results yet.</p>
 {% else %}
   <div class="overflow-x-auto">
     <svg viewBox="0 0 {{ chart.width }} {{ chart.height }}"
          class="w-full min-w-[520px] h-56"
          role="img"
-         aria-label="Accepted current-best pass-rate trajectory">
+         aria-label="Full-suite pass-rate trajectory">
       <line x1="40" y1="18" x2="40" y2="146" class="stroke-slate-200" />
       <line x1="40" y1="146" x2="622" y2="146" class="stroke-slate-200" />
       {% for y, label in [(18, '100%'), (82, '50%'), (146, '0%')] %}

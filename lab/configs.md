@@ -1,6 +1,6 @@
 # Configs
 
-## Current best
+## Operational baseline
 
 -   **Agent:** [`basic`](../src/openharness/agents/configs/basic.yaml)
 -   **Why:** baseline single-loop agent used as the simplest known-good harness; model overrides in experiment specs may outperform this YAML on particular benchmarks.

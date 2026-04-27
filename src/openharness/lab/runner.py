@@ -42,9 +42,9 @@ Phases, in order:
         - Fan out ``trial-critic`` and ``task-features`` spawns.
         - Run ``experiment-critic`` once all trial critiques land.
         - ``ingest-critiques``, ``journal_synth.synthesize``, then
-          load the structured ``experiment-critic`` decision and apply
-          it to the worktree copy of ``lab/``.
-        - The decision (accept / reject / no_op) is recorded in
+          load the structured ``experiment-critic`` evaluation and
+          apply it to the worktree copy of ``lab/``.
+        - The evaluation verdict (accept / reject / no_op) is recorded in
           ``phases.json`` so phase 5 can read it.
 
     5. replan (codex spawn ``lab-replan-roadmap``)
@@ -103,7 +103,7 @@ from openharness.lab import phase_run as phase_run_mod
 from openharness.lab import phase_state
 from openharness.lab import preflight as preflight_mod
 from openharness.lab import tree as labtree
-from openharness.lab import tree_ops
+from openharness.lab import evaluation
 from openharness.lab.paths import (
     EXPERIMENTS_RUNS_ROOT,
     LAB_ROOT,
@@ -1022,11 +1022,11 @@ def _phase_run(
     lab_root = _worktree_lab_root(worktree)
     run_payload: dict[str, object] = {}
 
-    # Determine the current best for the journal header. We re-resolve
+    # Determine the operational baseline for the journal header. We re-resolve
     # it at run-time rather than design-time so accepted experiments
     # that landed while this entry was queued are reflected.
     snap = lab_docs.tree_snapshot()
-    current_best_id = snap.current_best_id or "unknown"
+    operational_baseline_id = snap.operational_baseline_id or "unknown"
 
     # Decide journal entry type. Baselines are broad-sweep; everything
     # else defaults to paired-ablation. The implement payload may
@@ -1043,7 +1043,7 @@ def _phase_run(
         phase_run_mod.append_journal_stub(
             slug=entry.slug,
             type_=journal_type,
-            current_best_id=current_best_id,
+            operational_baseline_id=operational_baseline_id,
             mutation=mutation,
             hypothesis=entry.hypothesis,
             branch=pre["branch"],
@@ -1084,7 +1084,7 @@ def _phase_run(
                 "run_dir": str(outcome.run_dir),
                 "spec_name": outcome.spec_name,
                 "log_path": str(outcome.log_path),
-                "current_best_at_runtime": current_best_id,
+                "baseline_at_runtime": operational_baseline_id,
             },
         )
 
@@ -1135,7 +1135,7 @@ def _phase_run(
         "run_dir": str(outcome.run_dir),
         "spec_name": outcome.spec_name,
         "log_path": str(outcome.log_path),
-        "current_best_at_runtime": current_best_id,
+        "baseline_at_runtime": operational_baseline_id,
     })
     phase_state.mark_ok(entry.slug, "run", payload=run_payload)
     gcs_sync.maybe_auto_push(
@@ -1244,7 +1244,7 @@ def _phase_critique(
         ", ".join(f"{k}={v}" for k, v in cache_counts.items() if v),
     )
 
-    # Journal narrative + experiment-critic decision.
+    # Journal narrative + experiment-critic evaluation.
     try:
         sections = journal_synth.synthesize(
             slug=entry.slug,
@@ -1255,28 +1255,28 @@ def _phase_critique(
     except Exception:
         logger.exception("journal synthesize failed for %s", entry.slug)
 
-    decision: tree_ops.ExperimentDecision | None = None
+    evaluation_result: evaluation.ExperimentEvaluation | None = None
     verdict_kind = "unknown"
     verdict_target: str | None = None
     verdict_branch_applied = False
     try:
-        decision = tree_ops.load_decision(summary.instance_id, run_dir=run_dir)
-        result = labtree.apply_decision(
+        evaluation_result = evaluation.load_evaluation(summary.instance_id, run_dir=run_dir)
+        result = labtree.apply_evaluation(
             slug=entry.slug,
-            decision=decision,
+            evaluation=evaluation_result,
             applied_by="auto:critique",
             lab_root=lab_root,
             mark_applied=False,
         )
-        verdict_kind = decision.verdict
-        verdict_target = decision.target_id
+        verdict_kind = evaluation_result.verdict
+        verdict_target = evaluation_result.target_id
         verdict_branch_applied = result.applied
         logger.info(
-            "decision apply %s: verdict=%s branch_applied=%s target=%s",
-            entry.slug, decision.verdict, result.applied, decision.target_id,
+            "evaluation apply %s: verdict=%s branch_applied=%s target=%s",
+            entry.slug, evaluation_result.verdict, result.applied, evaluation_result.target_id,
         )
     except Exception:
-        logger.exception("decision apply failed for %s", entry.slug)
+        logger.exception("evaluation apply failed for %s", entry.slug)
 
     _append_commit(
         critique_payload,
@@ -1294,10 +1294,12 @@ def _phase_critique(
         "verdict_kind": verdict_kind,
         "verdict_target": verdict_target,
         "verdict_branch_applied": verdict_branch_applied,
-        "verdict_rationale": decision.rationale if decision else None,
-        "verdict_confidence": decision.confidence if decision else None,
-        "promotability_notes": decision.promotability_notes if decision else None,
-        "cluster_evidence": decision.cluster_evidence if decision else [],
+        "verdict_rationale": evaluation_result.rationale if evaluation_result else None,
+        "verdict_confidence": evaluation_result.confidence if evaluation_result else None,
+        "promotability_notes": (
+            evaluation_result.promotability_notes if evaluation_result else None
+        ),
+        "cluster_evidence": evaluation_result.cluster_evidence if evaluation_result else [],
     })
     phase_state.mark_ok(entry.slug, "critique", payload=critique_payload)
     gcs_sync.maybe_auto_push(
@@ -1514,14 +1516,14 @@ def _phase_finalize(
             return TickResult(ok=False, outcome="error", summary=_summary_truncate(msg))
 
         try:
-            labtree.mark_decision_merged(
+            labtree.mark_evaluation_finalized(
                 instance_id=str(instance_id or ""),
                 applied_by="auto:finalize",
                 pr_url=canonical_pr_url,
                 branch_sha=str(finalize_data.get("discarded_sha") or "") or None,
             )
         except Exception:
-            logger.exception("failed to mark merged decision for %s", entry.slug)
+            logger.exception("failed to mark finalized evaluation for %s", entry.slug)
 
     # Worktree cleanup (deterministic, this module).
     if finalize_data.get("cleanup_worktree", True):

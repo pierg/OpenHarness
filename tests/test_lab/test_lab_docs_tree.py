@@ -3,8 +3,8 @@
 Covers:
 - `set_section` / `get_section` round-trip on a stub journal entry.
 - `append_journal_entry` produces the canonical 5-section shell.
-- `tree_snapshot` parses Current best + Rejected.
-- `add_rejected` / `set_current_best` are idempotent.
+- `tree_snapshot` parses Operational baseline + Rejected.
+- `add_rejected` / `set_operational_baseline` are idempotent.
 - `add_suggested_followup` and `promote_suggested` round-trip.
 """
 
@@ -44,7 +44,7 @@ def test_append_journal_entry_creates_canonical_shell(lab_root: Path) -> None:
     lab_docs.append_journal_entry(
         slug="foo-bar",
         type_="paired ablation",
-        current_best_at_runtime="basic",
+        baseline_at_runtime="basic",
         mutation="planner_executor",
         hypothesis="planner helps on multi-file tasks.",
         run_path="runs/experiments/foo-bar-2026",
@@ -61,7 +61,7 @@ def test_append_journal_entry_rejects_duplicate(lab_root: Path) -> None:
     lab_docs.append_journal_entry(
         slug="foo-bar",
         type_="paired",
-        current_best_at_runtime="basic",
+        baseline_at_runtime="basic",
         mutation=None,
         hypothesis="x",
         run_path=None,
@@ -72,7 +72,7 @@ def test_append_journal_entry_rejects_duplicate(lab_root: Path) -> None:
         lab_docs.append_journal_entry(
             slug="foo-bar",
             type_="paired",
-            current_best_at_runtime="basic",
+            baseline_at_runtime="basic",
             mutation=None,
             hypothesis="x",
             run_path=None,
@@ -83,17 +83,17 @@ def test_append_journal_entry_rejects_duplicate(lab_root: Path) -> None:
 
 def test_set_section_inserts_in_canonical_order(lab_root: Path) -> None:
     lab_docs.append_journal_entry(
-        slug="x", type_="paired", current_best_at_runtime="basic",
+        slug="x", type_="paired", baseline_at_runtime="basic",
         mutation=None, hypothesis="h", run_path=None,
         on_date=date(2026, 4, 18), lab_root=lab_root,
     )
     lab_docs.set_section(
-        slug="x", section="Tree effect",
+        slug="x", section="Experiment evaluation",
         body="-   **Verdict:** accept",
         lab_root=lab_root,
     )
     body = lab_docs.get_section(
-        slug="x", section="Tree effect", lab_root=lab_root
+        slug="x", section="Experiment evaluation", lab_root=lab_root
     )
     assert body is not None
     assert "**Verdict:** accept" in body
@@ -101,7 +101,7 @@ def test_set_section_inserts_in_canonical_order(lab_root: Path) -> None:
 
 def test_set_section_replaces_existing(lab_root: Path) -> None:
     lab_docs.append_journal_entry(
-        slug="x", type_="paired", current_best_at_runtime="basic",
+        slug="x", type_="paired", baseline_at_runtime="basic",
         mutation=None, hypothesis="h", run_path=None,
         on_date=date(2026, 4, 18), lab_root=lab_root,
     )
@@ -130,21 +130,21 @@ def test_set_section_missing_entry_raises(lab_root: Path) -> None:
 
 def test_tree_snapshot_bootstraps_empty_skeleton(lab_root: Path) -> None:
     snap = lab_docs.tree_snapshot(lab_root=lab_root)
-    assert snap.current_best_id == "basic"
+    assert snap.operational_baseline_id == "basic"
     assert snap.proposed == []
     assert snap.rejected == []
 
 
-def test_set_current_best_then_snapshot_roundtrips(lab_root: Path) -> None:
-    lab_docs.set_current_best(
+def test_set_operational_baseline_then_snapshot_roundtrips(lab_root: Path) -> None:
+    lab_docs.set_operational_baseline(
         agent_id="planner_executor",
         reason="best on multi-file tasks",
         journal_link="[`x`](experiments.md#x)",
         lab_root=lab_root,
     )
     snap = lab_docs.tree_snapshot(lab_root=lab_root)
-    assert snap.current_best_id == "planner_executor"
-    assert snap.current_best_anchor and "best on multi-file tasks" in snap.current_best_anchor
+    assert snap.operational_baseline_id == "planner_executor"
+    assert snap.operational_baseline_anchor and "best on multi-file tasks" in snap.operational_baseline_anchor
 
 
 def test_add_rejected_appears_in_snapshot(lab_root: Path) -> None:

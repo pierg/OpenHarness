@@ -11,7 +11,7 @@
   {% endif %}
   {% if verdict %}
     <span class="ml-auto px-2 py-1 border rounded text-xs {{ verdict_color(verdict.verdict, verdict.applied) }}">
-      Verdict: {{ verdict.verdict }}{% if not verdict.applied %} · pending merge{% endif %}
+      Evaluation: {{ verdict.verdict }}{% if not verdict.applied %} · pending finalize{% endif %}
       {% if verdict.target_id %} · <span class="font-mono">{{ verdict.target_id }}</span>{% endif %}
     </span>
   {% endif %}
@@ -25,7 +25,7 @@
   <section class="border border-amber-300 bg-amber-50 rounded-lg p-4 mb-6">
     <div class="font-semibold text-amber-900">Outcome pending merge</div>
     <p class="text-sm text-amber-800 mt-1">
-      Critique has materialized the verdict on the experiment branch.
+      Critique has materialized the evaluation on the experiment branch.
       Finalize is responsible for merging the experiment PR back to <code>main</code>.
     </p>
     {% if pr %}
@@ -36,32 +36,32 @@
   </section>
 {% endif %}
 
-{# Verdict preview / re-evaluation. Always present (even for already-
-   applied decisions and no-ops) so an operator can re-compute the verdict
+{# Evaluation preview / re-evaluation. Always present (even for already-
+   applied evaluations and no-ops) so an operator can re-compute the verdict
    after editing the journal / critic and decide whether to re-apply. #}
 <section id="experiment-verdict-panel" class="bg-white border border-slate-200 rounded-lg p-5 mb-6"
          hx-get="/runs/{{ instance_id }}" hx-trigger="lab-configs-changed from:body"
          hx-select="#experiment-verdict-panel" hx-swap="outerHTML">
   <div class="flex items-baseline justify-between gap-3 flex-wrap mb-2">
-    <h2 class="font-semibold">Verdict workflow</h2>
-    <button hx-get="/_hx/decision-preview?slug={{ instance_id }}"
-            hx-target="#experiment-decision-preview" hx-swap="innerHTML"
+    <h2 class="font-semibold">Evaluation Workflow</h2>
+    <button hx-get="/_hx/evaluation-preview?slug={{ instance_id }}"
+            hx-target="#experiment-evaluation-preview" hx-swap="innerHTML"
             class="text-xs bg-white border border-slate-300 hover:border-slate-500 rounded px-2.5 py-1">
-      {% if verdict %}Re-evaluate verdict{% else %}Preview verdict{% endif %}
+      {% if verdict %}Re-evaluate{% else %}Preview evaluation{% endif %}
     </button>
   </div>
   <p class="text-xs text-slate-500 mb-2">
     {% if verdict %}
-      A decision has already been recorded for
+      An evaluation has already been recorded for
       this experiment. Re-evaluating is safe — it recomputes from the
       current data without writing — and lets you re-apply if the
       data has changed.
     {% else %}
       No verdict recorded for this experiment yet. Click <em>Preview</em>
-      to compute what <code>decision apply</code> would do.
+      to compute what <code>evaluation apply</code> would do.
     {% endif %}
   </p>
-  <div id="experiment-decision-preview" class="mt-3 empty:hidden"></div>
+  <div id="experiment-evaluation-preview" class="mt-3 empty:hidden"></div>
 </section>
 
 <div id="cmd-result" class="mb-4"></div>
@@ -87,7 +87,7 @@
       <h2 class="font-semibold mb-3">Journal entry · {{ journal.slug }}</h2>
       <dl class="grid grid-cols-3 gap-y-1 text-sm">
         {% if journal.type_ %}<dt class="text-slate-500">Type</dt><dd class="col-span-2">{{ journal.type_ }}</dd>{% endif %}
-        {% if journal.current_best_at_runtime %}<dt class="text-slate-500">Current best at run-time</dt><dd class="col-span-2 font-mono text-xs">{{ journal.current_best_at_runtime }}</dd>{% endif %}
+        {% if journal.baseline_at_runtime %}<dt class="text-slate-500">Baseline at run-time</dt><dd class="col-span-2 font-mono text-xs">{{ journal.baseline_at_runtime }}</dd>{% endif %}
         {% if journal.mutation %}<dt class="text-slate-500">Mutation</dt><dd class="col-span-2">{{ journal.mutation }}</dd>{% endif %}
         {% if journal.hypothesis %}<dt class="text-slate-500">Hypothesis</dt><dd class="col-span-2">{{ journal.hypothesis }}</dd>{% endif %}
       </dl>
@@ -259,7 +259,7 @@
   <p class="text-xs text-slate-500 mb-3">
     Each row compares two legs on the <em>same</em> tasks within a
     cluster. Δ = leg A pass-rate − leg B pass-rate. Rows with a small
-    task count are suggestive rather than decision-grade evidence.
+    task count are suggestive rather than evaluation-grade evidence.
   </p>
   <div class="-mx-5 px-5 overflow-x-auto">
   <table class="w-full text-sm min-w-[640px]">

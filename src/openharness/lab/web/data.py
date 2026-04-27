@@ -17,6 +17,7 @@ from pathlib import Path
 from typing import Iterator
 
 from openharness.lab import db as labdb
+from openharness.lab import ranking
 from openharness.lab.components_doc import ComponentsCatalog, read_catalog
 from openharness.lab.lab_docs import TreeSnapshot, tree_snapshot
 from openharness.lab.paths import (
@@ -57,12 +58,11 @@ from openharness.lab.web.models import (
     TaskClusterRow,
     TaskFeatureView,
     TaskLeaderboardRow,
-    DecisionRow,
+    EvaluationRow,
     TreeVizNode,
     TrialCritique,
     TrialDetail,
     TrialRow,
-    CurrentBestChangeRow,
     TurnCard,
     UsageSummaryRow,
     VerifierReport,
@@ -162,8 +162,7 @@ class LabReader:
             "components_perf",
             "misconfigurations",
             "spawns",
-            "decisions",
-            "current_best_changes",
+            "experiment_evaluations",
         ):
             try:
                 (n,) = self._q(f"SELECT count(*) FROM {tbl}")[0]
@@ -688,7 +687,10 @@ class LabReader:
         else:
             rows = self._qd(sql)
 
-        verdicts = {r["instance_id"]: _row_to_decision(r) for r in self._qd("SELECT * FROM decisions")}
+        verdicts = {
+            r["instance_id"]: _row_to_evaluation(r)
+            for r in self._qd("SELECT * FROM experiment_evaluations")
+        }
         return [
             ExperimentSummary(
                 instance_id=str(r["instance_id"]),
@@ -796,7 +798,7 @@ class LabReader:
         cells = {(t.task_name, t.leg_id): t for t in trials}
         return tasks, legs, cells
 
-    # ---- config state / components / current-best history ----------------
+    # ---- config state / components / dynamic rankings --------------------
 
     def tree(self) -> TreeSnapshot:
         return tree_snapshot()
@@ -804,47 +806,22 @@ class LabReader:
     def components(self) -> ComponentsCatalog:
         return read_catalog()
 
-    def current_best_history(self, limit: int = 50) -> list[CurrentBestChangeRow]:
-        if not self._db_available:
-            return []
-        rows = self._qd(
-            """
-            SELECT at_ts, from_id, to_id, reason, applied_by, instance_id
-            FROM current_best_changes
-            ORDER BY at_ts DESC
-            LIMIT ?
-            """,
-            [limit],
-        )
-        return [
-            CurrentBestChangeRow(
-                at_ts=_to_dt(r["at_ts"]) or datetime.now(timezone.utc),
-                from_id=_opt_str(r.get("from_id")),
-                to_id=str(r["to_id"]),
-                reason=_opt_str(r.get("reason")),
-                applied_by=str(r.get("applied_by") or "?"),
-                instance_id=_opt_str(r.get("instance_id")),
-            )
-            for r in rows
-        ]
-
     def leaderboard(self) -> LeaderboardView:
-        snapshot = self.tree()
         trajectory = self.improvement_trajectory()
         ladder = self.agent_ladder()
-        current_row = next((r for r in ladder if r.agent_id == snapshot.current_best_id), None)
+        top_row = next((r for r in ladder if r.eligible and r.evidence_scope == "full_suite"), None)
+        if top_row is None:
+            top_row = next((r for r in ladder if r.eligible), None)
         return LeaderboardView(
-            current_best_id=snapshot.current_best_id,
-            current_best_anchor=snapshot.current_best_anchor,
-            current_best_pass_rate_pct=(
-                current_row.pass_rate_pct if current_row is not None else None
+            top_agent_id=top_row.agent_id if top_row is not None else "(none)",
+            top_model_id=top_row.model_id if top_row is not None else None,
+            top_dataset=top_row.dataset if top_row is not None else None,
+            top_pass_rate_pct=top_row.pass_rate_pct if top_row is not None else None,
+            top_cost_per_task_usd=(
+                top_row.cost_per_task_usd if top_row is not None else None
             ),
-            current_best_cost_per_task_usd=(
-                current_row.cost_per_task_usd if current_row is not None else None
-            ),
-            current_best_last_accepted_at=(
-                current_row.accepted_at if current_row is not None else None
-            ),
+            top_evaluated_at=top_row.evaluated_at if top_row is not None else None,
+            policy_label="pass rate, then cost/task, grouped by model + dataset",
             ladder=ladder,
             deltas=self.experiment_delta_board(limit=50),
             trajectory=trajectory,
@@ -853,81 +830,64 @@ class LabReader:
     def agent_ladder(self) -> list[AgentLadderRow]:
         if not self._db_available:
             return []
-        snapshot = self.tree()
-        changes = list(reversed(self.current_best_history(limit=500)))
-        by_agent: dict[str, AgentLadderRow] = {}
-        for change in changes:
-            metric = (
-                self._metric_for_agent(change.instance_id, change.to_id)
-                if change.instance_id
-                else None
-            )
-            row = AgentLadderRow(
-                agent_id=change.to_id,
+        return [
+            AgentLadderRow(
+                rank=row.rank,
+                model_id=row.model_id,
+                dataset=row.dataset,
+                evidence_scope=row.evidence_scope,
+                agent_id=row.agent_id,
                 status=(
-                    "current best"
-                    if change.to_id == snapshot.current_best_id
-                    else "superseded"
+                    "ineligible"
+                    if not row.eligible
+                    else "top ranked"
+                    if row.rank == 1
+                    else "ranked"
                 ),
-                accepted_at=change.at_ts,
-                accepting_instance_id=change.instance_id,
-                pass_rate_pct=metric.pass_rate_pct if metric is not None else None,
-                cost_per_task_usd=(
-                    metric.cost_per_task_usd if metric is not None else None
-                ),
-                n_trials=metric.n_trials if metric is not None else 0,
-                n_passed=metric.n_passed if metric is not None else 0,
-                reason=change.reason,
+                evaluated_at=row.created_at,
+                accepting_instance_id=row.instance_id,
+                pass_rate_pct=row.pass_rate_pct,
+                cost_per_task_usd=row.cost_per_task_usd,
+                cost_per_pass_usd=row.cost_per_pass_usd,
+                tokens_per_task=row.tokens_per_task,
+                median_duration_sec=row.median_duration_sec,
+                n_trials=row.n_trials,
+                n_passed=row.n_passed,
+                eligible=row.eligible,
+                eligibility_reason=row.eligibility_reason,
+                reason=row.rationale,
             )
-            prior = by_agent.get(change.to_id)
-            if prior is None or _metric_sort_key(row) > _metric_sort_key(prior):
-                by_agent[change.to_id] = row
-
-        if snapshot.current_best_id not in by_agent:
-            by_agent[snapshot.current_best_id] = AgentLadderRow(
-                agent_id=snapshot.current_best_id,
-                status="current best",
-                accepted_at=None,
-                accepting_instance_id=None,
-                pass_rate_pct=None,
-                cost_per_task_usd=None,
-                n_trials=0,
-                n_passed=0,
-                reason=snapshot.current_best_anchor,
-            )
-
-        return sorted(
-            by_agent.values(),
-            key=lambda r: (
-                r.status != "current best",
-                -(r.pass_rate_pct if r.pass_rate_pct is not None else -1),
-                r.agent_id,
-            ),
-        )
+            for row in ranking.rankings(self._conn)
+        ]
 
     def improvement_trajectory(self) -> list[ImprovementPoint]:
         if not self._db_available:
             return []
         out: list[ImprovementPoint] = []
-        last_pct: float | None = None
-        for change in reversed(self.current_best_history(limit=500)):
-            metric = (
-                self._metric_for_agent(change.instance_id, change.to_id)
-                if change.instance_id
+        last_by_model: dict[str, float] = {}
+        rows = [
+            row for row in ranking.rankings(self._conn)
+            if row.eligible and row.evidence_scope == "full_suite"
+        ]
+        rows.sort(key=lambda row: row.created_at or datetime.min.replace(tzinfo=timezone.utc))
+        for row in rows:
+            pct = row.pass_rate_pct
+            last_pct = last_by_model.get(row.model_id)
+            delta_pp = (
+                pct - last_pct
+                if pct is not None and last_pct is not None
                 else None
             )
-            pct = metric.pass_rate_pct if metric is not None else None
-            delta_pp = (pct - last_pct) if pct is not None and last_pct is not None else None
             if pct is not None:
-                last_pct = pct
+                last_by_model[row.model_id] = pct
             out.append(
                 ImprovementPoint(
-                    at_ts=change.at_ts,
-                    agent_id=change.to_id,
-                    instance_id=change.instance_id,
+                    at_ts=row.created_at or datetime.now(timezone.utc),
+                    agent_id=row.agent_id,
+                    instance_id=row.instance_id,
                     pass_rate_pct=pct,
                     delta_pp=delta_pp,
-                    rationale=change.reason,
+                    rationale=row.rationale,
                 )
             )
         return out
@@ -942,9 +902,9 @@ class LabReader:
         }
         rows = self._qd(
             """
-            SELECT instance_id, slug, verdict, target_id, rationale,
-                   confidence, applied_at
-            FROM decisions
+            SELECT instance_id, slug, verdict, target_id, baseline_leg,
+                   candidate_leg, rationale, confidence, applied_at
+            FROM experiment_evaluations
             ORDER BY applied_at DESC NULLS LAST, instance_id DESC
             LIMIT ?
             """,
@@ -954,13 +914,18 @@ class LabReader:
         for r in rows:
             instance_id = str(r["instance_id"])
             target_id = str(r.get("target_id") or "")
+            baseline_leg_hint = _opt_str(r.get("baseline_leg"))
+            candidate_leg_hint = _opt_str(r.get("candidate_leg"))
             metrics = self._leg_metrics(instance_id)
-            candidate = _select_metric(metrics, target_id)
+            candidate = _select_metric(metrics, candidate_leg_hint) or _select_metric(metrics, target_id)
             journal = journals.get(instance_id)
             baseline_hint = _extract_agent_id(
-                journal.current_best_at_runtime if journal is not None else None
+                journal.baseline_at_runtime if journal is not None else None
             )
-            baseline = _select_metric(metrics, baseline_hint, exclude=candidate)
+            baseline = (
+                _select_metric(metrics, baseline_leg_hint, exclude=candidate)
+                or _select_metric(metrics, baseline_hint, exclude=candidate)
+            )
             if baseline is None and candidate is not None:
                 baseline = next((m for m in metrics if m.leg_id != candidate.leg_id), None)
 
@@ -1041,15 +1006,15 @@ class LabReader:
             for r in rows
         ]
 
-    # ---- slug → instance_id resolution + verdict preview --------------
+    # ---- slug → instance_id resolution + evaluation preview -------------
 
     def resolve_slug(self, slug: str) -> str | None:
         """Map an experiment slug to an ``experiments.instance_id``.
 
         Mirrors the resolution order in
         :func:`openharness.lab.cli._lookup_instance_for_slug` so the
-        web UI's "Preview verdict" button finds the same instance the
-        ``uv run lab decision apply <slug>`` CLI would. Read-only —
+        web UI's "Preview evaluation" button finds the same instance the
+        ``uv run lab evaluation apply <slug>`` CLI would. Read-only —
         the whole call uses the LabReader's read-only DuckDB connection.
         """
 
@@ -1063,7 +1028,10 @@ class LabReader:
         if rows:
             return str(rows[0][0])
 
-        rows = self._q("SELECT instance_id FROM decisions WHERE slug = ?", [slug])
+        rows = self._q(
+            "SELECT instance_id FROM experiment_evaluations WHERE slug = ?",
+            [slug],
+        )
         if rows and rows[0][0]:
             return str(rows[0][0])
 
@@ -1094,10 +1062,10 @@ class LabReader:
                 return str(inst_id)
         return None
 
-    def experiments_without_decision(self, limit: int = 20) -> list[ExperimentSummary]:
-        """Recent experiments that have no row in ``decisions``.
+    def experiments_without_evaluation(self, limit: int = 20) -> list[ExperimentSummary]:
+        """Recent experiments that have no row in ``experiment_evaluations``.
 
-        These are the typical "rescue" candidates for the decision
+        These are the typical "rescue" candidates for the evaluation
         apply button: the daemon either failed at the verdict step or
         the run was started by hand and never had a verdict computed.
         Sorted newest-first so the most relevant ones bubble up.
@@ -1109,38 +1077,38 @@ class LabReader:
         # lab typically holds a few dozen).
         return [e for e in self.experiments(limit=None) if e.verdict is None][:limit]
 
-    def preview_decision(self, slug: str) -> dict[str, object] | None:
-        """Load the experiment decision for ``slug`` without applying it.
+    def preview_evaluation(self, slug: str) -> dict[str, object] | None:
+        """Load the experiment evaluation for ``slug`` without applying it.
 
         Returns ``None`` when the slug doesn't resolve to any known
         instance, so the caller can render a clear "unknown experiment"
-        message rather than a confusing empty decision. The decision
+        message rather than a confusing empty evaluation. The evaluation
         itself is returned as a dict so templates don't need to import
-        the tree_ops dataclass.
+        the evaluation dataclass.
         """
 
-        from openharness.lab import tree_ops as _tree_ops
+        from openharness.lab import evaluation as _evaluation
 
         instance_id = self.resolve_slug(slug)
         if instance_id is None:
             return None
         try:
-            decision = _tree_ops.load_decision(instance_id, db_conn=self._conn)
+            evaluation = _evaluation.load_evaluation(instance_id, db_conn=self._conn)
         except (FileNotFoundError, ValueError):
             return None
-        out = decision.to_dict()
+        out = evaluation.to_dict()
         # Echo the slug + resolved instance_id so the template doesn't
         # need to thread them in separately.
         out["slug"] = slug
         out["resolved_instance_id"] = instance_id
         return out
 
-    def decisions(
+    def evaluations(
         self, *, applied: bool | None = None, verdict: str | None = None, limit: int = 100
-    ) -> list[DecisionRow]:
+    ) -> list[EvaluationRow]:
         if not self._db_available:
             return []
-        sql = "SELECT * FROM decisions WHERE 1=1"
+        sql = "SELECT * FROM experiment_evaluations WHERE 1=1"
         params: list[object] = []
         if applied is not None:
             sql += " AND applied = ?"
@@ -1150,7 +1118,7 @@ class LabReader:
             params.append(verdict)
         sql += " ORDER BY applied_at DESC NULLS LAST LIMIT ?"
         params.append(limit)
-        return [_row_to_decision(r) for r in self._qd(sql, params)]
+        return [_row_to_evaluation(r) for r in self._qd(sql, params)]
 
     # ---- markdown surfaces ---------------------------------------------
 
@@ -1530,7 +1498,7 @@ class LabReader:
     ) -> list[PRStateRow]:
         """Snapshot of every canonical experiment PR known to the lab.
 
-        Joins ``decisions.pr_url`` (cheap, always present once
+        Joins ``experiment_evaluations.pr_url`` (cheap, always present once
         :func:`cli.set_branch` has run) with cached ``gh pr view``
         output. Rejected and no-op outcomes point at the closed
         implementation PR, not any metadata-only bookkeeping PR. The
@@ -1552,7 +1520,7 @@ class LabReader:
         rows = self._qd(
             f"""
             SELECT slug, instance_id, verdict, pr_url
-            FROM decisions
+            FROM experiment_evaluations
             WHERE pr_url IS NOT NULL
               AND verdict IN ({placeholders})
             ORDER BY applied_at DESC NULLS LAST
@@ -1694,7 +1662,7 @@ class LabReader:
 
         Folds together ``runs/lab/web_commands.jsonl`` (web commands),
         ``daemon_state.history`` (tick outcomes), DuckDB ``spawns``
-        (codex skill spawns), experiment decisions, and current-best history.
+        (codex skill spawns) and experiment evaluations.
 
         Sorted newest-first. ``kinds`` filters by row type.
         """
@@ -1706,7 +1674,6 @@ class LabReader:
             "tick",
             "spawn",
             "verdict",
-            "current-best",
         }
         out: list[ActivityLogEntry] = []
 
@@ -1765,7 +1732,7 @@ class LabReader:
                 )
 
         if "verdict" in wanted and self._db_available:
-            for d in self.decisions(limit=limit):
+            for d in self.evaluations(limit=limit):
                 out.append(
                     ActivityLogEntry(
                         at_ts=d.applied_at or datetime.now(timezone.utc),
@@ -1779,20 +1746,6 @@ class LabReader:
                         slug=d.slug,
                         instance_id=d.instance_id,
                         href=f"/runs/{d.instance_id}",
-                    )
-                )
-
-        if "current-best" in wanted:
-            for tc in self.current_best_history(limit=limit):
-                out.append(
-                    ActivityLogEntry(
-                        at_ts=tc.at_ts,
-                        kind="current-best",
-                        actor=tc.applied_by,
-                        title=f"current best → {tc.to_id}",
-                        detail=(f"from {tc.from_id}" if tc.from_id else "initial"),
-                        instance_id=tc.instance_id,
-                        href=(f"/runs/{tc.instance_id}" if tc.instance_id else None),
                     )
                 )
 
@@ -1859,7 +1812,7 @@ class LabReader:
         leg_b_pass_rate`` for every ordered pair (legA, legB).
         ``warning`` fires when the per-cluster sample is small enough
         that the row should be treated as suggestive rather than
-        decision-grade evidence.
+        evaluation-grade evidence.
         """
         cells = self.cells_for_instance(instance_id)
         if not cells:
@@ -1903,10 +1856,10 @@ class LabReader:
         nodes: list[TreeVizNode] = []
         nodes.append(
             TreeVizNode(
-                node_id=snapshot.current_best_id,
-                role="current_best",
-                mutation="(current best)",
-                sketch=snapshot.current_best_anchor,
+                node_id=snapshot.operational_baseline_id,
+                role="operational_baseline",
+                mutation="(operational baseline)",
+                sketch=snapshot.operational_baseline_anchor,
             )
         )
         for r in snapshot.rejected:
@@ -2257,7 +2210,7 @@ def _parse_journal(text: str) -> list[JournalEntryView]:
         bullets = _parse_bullets(header_body)
         run_link = bullets.get("Run")
         type_ = bullets.get("Type")
-        current_best = bullets.get("Current best at run-time")
+        baseline_at_runtime = bullets.get("Baseline at run-time")
         mutation = bullets.get("Mutation")
         hypothesis = bullets.get("Hypothesis")
 
@@ -2281,7 +2234,7 @@ def _parse_journal(text: str) -> list[JournalEntryView]:
                 slug=slug,
                 date=date,
                 type_=type_,
-                current_best_at_runtime=current_best,
+                baseline_at_runtime=baseline_at_runtime,
                 mutation=mutation,
                 hypothesis=hypothesis,
                 run_link=run_link,
@@ -2296,13 +2249,6 @@ def _parse_journal(text: str) -> list[JournalEntryView]:
 # ---------------------------------------------------------------------------
 # Misc helpers
 # ---------------------------------------------------------------------------
-
-
-def _metric_sort_key(row: AgentLadderRow) -> tuple[float, int]:
-    return (
-        row.pass_rate_pct if row.pass_rate_pct is not None else -1.0,
-        row.n_trials,
-    )
 
 
 def _select_metric(
@@ -2379,8 +2325,8 @@ def _row_to_usage(r: dict[str, object]) -> UsageSummaryRow:
     )
 
 
-def _row_to_decision(r: dict[str, object]) -> DecisionRow:
-    return DecisionRow(
+def _row_to_evaluation(r: dict[str, object]) -> EvaluationRow:
+    return EvaluationRow(
         instance_id=str(r["instance_id"]),
         slug=str(r.get("slug") or ""),
         verdict=str(r.get("verdict") or ""),

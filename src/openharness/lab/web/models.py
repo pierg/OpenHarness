@@ -155,7 +155,7 @@ class UsageSummaryRow:
 
 
 @dataclass(eq=False, slots=True)
-class DecisionRow:
+class EvaluationRow:
     instance_id: str
     slug: str
     verdict: str  # accept | reject | no_op
@@ -168,25 +168,24 @@ class DecisionRow:
 
 
 @dataclass(eq=False, slots=True)
-class CurrentBestChangeRow:
-    at_ts: datetime
-    from_id: str | None
-    to_id: str
-    reason: str | None
-    applied_by: str
-    instance_id: str | None
-
-
-@dataclass(eq=False, slots=True)
 class AgentLadderRow:
+    rank: int
+    model_id: str
+    dataset: str
+    evidence_scope: str
     agent_id: str
-    status: str  # current best | superseded
-    accepted_at: datetime | None
+    status: str  # top ranked | ranked | ineligible
+    evaluated_at: datetime | None
     accepting_instance_id: str | None
     pass_rate_pct: float | None
     cost_per_task_usd: float | None
+    cost_per_pass_usd: float | None
+    tokens_per_task: float | None
+    median_duration_sec: float | None
     n_trials: int
     n_passed: int
+    eligible: bool
+    eligibility_reason: str
     reason: str | None
 
 
@@ -220,11 +219,13 @@ class ImprovementPoint:
 
 @dataclass(eq=False, slots=True)
 class LeaderboardView:
-    current_best_id: str
-    current_best_anchor: str | None
-    current_best_pass_rate_pct: float | None
-    current_best_cost_per_task_usd: float | None
-    current_best_last_accepted_at: datetime | None
+    top_agent_id: str
+    top_model_id: str | None
+    top_dataset: str | None
+    top_pass_rate_pct: float | None
+    top_cost_per_task_usd: float | None
+    top_evaluated_at: datetime | None
+    policy_label: str
     ladder: list[AgentLadderRow]
     deltas: list[ExperimentDeltaRow]
     trajectory: list[ImprovementPoint]
@@ -241,7 +242,7 @@ class ExperimentSummary:
     n_passed: int
     pass_rate_pct: float | None
     cost_usd: float | None
-    verdict: DecisionRow | None
+    verdict: EvaluationRow | None
 
 
 @dataclass(eq=False, slots=True)
@@ -321,7 +322,7 @@ class JournalEntryView:
     slug: str
     date: str  # YYYY-MM-DD as it appears in the heading
     type_: str | None
-    current_best_at_runtime: str | None
+    baseline_at_runtime: str | None
     mutation: str | None
     hypothesis: str | None
     run_link: str | None
@@ -530,9 +531,9 @@ class ComponentDetail:
 # Phase 3 — PR-aware redesign view models
 #
 # Surface the methodology dimensions documented in lab/METHODOLOGY.md:
-# every accepted/rejected/no-op decision is bound to the canonical
+# every accepted/rejected/no-op evaluation is bound to the canonical
 # experiment PR. Accepted PRs land on `main`; rejected/no-op PRs are
-# closed unmerged after a verdict comment. The web UI needs to know, per
+# closed unmerged after an evaluation comment. The web UI needs to know, per
 # row, whether that PR is open, merged, or rejected.
 # ---------------------------------------------------------------------------
 
@@ -542,14 +543,14 @@ class PRStateRow:
     """Summarised state of one experiment PR.
 
     Built by :meth:`LabReader.pr_states`. Composes
-    ``decisions.pr_url`` (cheap, always present) with optional
+    ``experiment_evaluations.pr_url`` (cheap, always present) with optional
     ``gh pr view`` data (slow, may be None when ``gh`` is missing or
     the worker host has no GitHub token). When ``state`` is None the
     UI renders a "PR open · CI status unknown" fallback rather than
     pretending the PR doesn't exist.
 
     ``slug`` and ``instance_id`` are duplicated so callers can render
-    a row without re-joining decisions.
+    a row without re-joining evaluations.
     """
 
     slug: str
@@ -600,7 +601,7 @@ class ActivityLogEntry:
 
     Fold-in of audit-log entries (``runs/lab/web_commands.jsonl``),
     tick history (from daemon_state.history), spawn finishes (from
-    DuckDB ``spawns``), current-best history, and experiment decisions.
+    DuckDB ``spawns``), experiment evaluations, and dynamic rankings.
     Lets the operator see "what changed
     in the last hour" without bouncing between four pages.
 
@@ -608,8 +609,8 @@ class ActivityLogEntry:
       - ``cmd``            — web /api/cmd execution
       - ``tick``           — daemon tick finished
       - ``spawn``          — codex skill spawn finished
-      - ``verdict``        — decision row appeared
-      - ``current-best``   — current-best history row appeared
+      - ``verdict``        — evaluation row appeared
+      - ``ranking``        — dynamic ranking context
     """
 
     at_ts: datetime
@@ -676,15 +677,15 @@ class ClusterDeltaRow:
 class TreeVizNode:
     """One node in the configuration-tree visualisation.
 
-    Joined view: ``lab/configs.md`` (current best + rejected +
-    proposed) + the canonical ``decisions.pr_url`` + the live PR
+    Joined view: ``lab/configs.md`` (baseline + rejected +
+    proposed) + the canonical ``experiment_evaluations.pr_url`` + the live PR
     cache. The template uses this to render the SVG with per-node
     badges indicating which branch has an open PR (dashed outline), a
     merged or closed PR (solid border), or no PR yet (no badge).
     """
 
     node_id: str
-    role: str  # current_best | rejected | proposed
+    role: str  # operational_baseline | rejected | proposed
     mutation: str | None = None
     linked_idea: str | None = None
     sketch: str | None = None

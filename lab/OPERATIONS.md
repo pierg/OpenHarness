@@ -22,7 +22,7 @@ resumes from the first unfinished phase.
 - parent repo starts on synced `main`
 - preflight creates worktree branch `lab/<slug>`
 - all durable experiment edits live on that worktree branch
-- critique writes the structured experiment decision to the branch
+- critique writes the structured experiment evaluation to the branch
 - replan writes the roadmap/idea consequences on the branch
 - finalize opens the canonical experiment PR and syncs the outcome to `main`
 - only after that merge does the daemon pick the next roadmap entry
@@ -37,7 +37,7 @@ There is no separate human promotion gate in the normal autonomous path.
 | `design` | `lab-design-variant` | `runs/lab/state/<slug>/design.md` |
 | `implement` | `lab-implement-variant` | worktree commits + `implement.json` |
 | `run` | deterministic Python | `runs/experiments/<instance-id>/...` + journal stub |
-| `critique` | deterministic Python + Gemini trial critics + Codex aggregate critic | branch-local decision + journal narrative |
+| `critique` | deterministic Python + Gemini trial critics + Codex aggregate critic | branch-local evaluation + journal narrative |
 | `replan` | `lab-replan-roadmap` | branch-local roadmap/ideas updates + `replan.json` |
 | `finalize` | `lab-finalize-pr` | canonical experiment PR + synced outcome + `finalize.json` |
 
@@ -87,7 +87,7 @@ uv run lab preflight remove <slug>
 | `lab/roadmap.md > ## Up next > ### Suggested` | yes | yes |
 | `lab/roadmap.md > ## Done` | review | yes, during `replan` |
 | `lab/experiments.md` | no manual close-out editing | yes |
-| `lab/configs.md` | rare manual repair only | critique/finalize flow |
+| `lab/configs.md` | rare manual repair only | rejected/proposed config bookkeeping |
 | `lab/components.md` | rare manual repair only | critique/finalize flow |
 
 ## Finalize Rules
@@ -100,7 +100,7 @@ uv run lab preflight remove <slug>
   keep rejected implementation out of `main`, record discarded SHA
 - if rejected/no-op lab metadata still needs to land, sync it separately
   without replacing the canonical experiment PR URL in the journal or
-  decisions table
+  `experiment_evaluations` table
 
 Finalize must not return success without a durable lab outcome on
 `main` and a canonical experiment PR in a terminal state.

@@ -107,7 +107,7 @@ def append_journal_stub(
     *,
     slug: str,
     type_: str,
-    current_best_id: str,
+    operational_baseline_id: str,
     mutation: str | None,
     hypothesis: str,
     branch: str,
@@ -130,14 +130,14 @@ def append_journal_stub(
     if lab_docs.journal_entry_exists(slug, lab_root=lab_root):
         logger.info("journal entry for %s already exists; skipping append", slug)
         return
-    current_best_md = (
-        f"[`{current_best_id}`](../src/openharness/agents/configs/{current_best_id}.yaml)"
-        if not current_best_id.startswith("[") else current_best_id
+    baseline_md = (
+        f"[`{operational_baseline_id}`](../src/openharness/agents/configs/{operational_baseline_id}.yaml)"
+        if not operational_baseline_id.startswith("[") else operational_baseline_id
     )
     lab_docs.append_journal_entry(
         slug=slug,
         type_=type_,
-        current_best_at_runtime=current_best_md,
+        baseline_at_runtime=baseline_md,
         mutation=mutation,
         hypothesis=hypothesis,
         run_path=None,

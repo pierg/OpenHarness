@@ -1,4 +1,4 @@
-"""Unit tests for simplified experiment decisions."""
+"""Unit tests for simplified experiment evaluations."""
 
 from __future__ import annotations
 
@@ -10,7 +10,7 @@ import duckdb
 import pytest
 
 from openharness.lab import db as labdb
-from openharness.lab import tree_ops
+from openharness.lab import evaluation
 
 
 def _fresh_db(tmp_path: Path) -> Path:
@@ -65,7 +65,7 @@ def db_path(tmp_path: Path) -> Path:
     return _fresh_db(tmp_path)
 
 
-def test_load_decision_accept_from_experiment_critic(
+def test_load_evaluation_accept_from_experiment_critic(
     tmp_path: Path,
     db_path: Path,
 ) -> None:
@@ -89,7 +89,7 @@ def test_load_decision_accept_from_experiment_critic(
         },
     )
 
-    decision = tree_ops.load_decision("accept-1", db_conn=conn, run_dir=run_dir)
+    decision = evaluation.load_evaluation("accept-1", db_conn=conn, run_dir=run_dir)
 
     assert decision.verdict == "accept"
     assert decision.target_id == "artifact_first"
@@ -99,7 +99,7 @@ def test_load_decision_accept_from_experiment_critic(
     assert decision.evidence_paths == [run_dir / "critic" / "experiment-critic.json"]
 
 
-def test_load_decision_rejects_non_schema_verdicts(
+def test_load_evaluation_rejects_non_schema_verdicts(
     tmp_path: Path,
     db_path: Path,
 ) -> None:
@@ -116,10 +116,10 @@ def test_load_decision_rejects_non_schema_verdicts(
     )
 
     with pytest.raises(ValueError, match="accept, reject, no_op"):
-        tree_ops.load_decision("bad-label-1", db_conn=conn, run_dir=run_dir)
+        evaluation.load_evaluation("bad-label-1", db_conn=conn, run_dir=run_dir)
 
 
-def test_load_decision_requires_verdict(
+def test_load_evaluation_requires_verdict(
     tmp_path: Path,
     db_path: Path,
 ) -> None:
@@ -129,4 +129,4 @@ def test_load_decision_requires_verdict(
     _write_experiment_critic(run_dir, {"rationale": "missing verdict"})
 
     with pytest.raises(ValueError, match="verdict"):
-        tree_ops.load_decision("bad-1", db_conn=conn, run_dir=run_dir)
+        evaluation.load_evaluation("bad-1", db_conn=conn, run_dir=run_dir)

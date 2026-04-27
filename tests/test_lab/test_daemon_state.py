@@ -525,7 +525,7 @@ def client(isolated_lab: Path):
     )
     (isolated_lab / "lab" / "experiments.md").write_text("# Experiments\n")
     (isolated_lab / "lab" / "components.md").write_text("# Components\n")
-    (isolated_lab / "lab" / "configs.md").write_text("# Configs\n\n## Current best\n\n")
+    (isolated_lab / "lab" / "configs.md").write_text("# Configs\n\n## Operational baseline\n\n")
 
     app = create_app()
     return TestClient(app)

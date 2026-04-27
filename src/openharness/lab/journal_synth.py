@@ -10,9 +10,9 @@ that live in `lab/experiments.md`:
 - ``### Failure modes``     — recurring failure clusters from comparisons.
 - ``### Linked follow-ups`` — ideas and roadmap consequences spawned.
 
-Note: the ``### Tree effect`` block is owned by ``tree.apply_decision``
-(it depends on the structured experiment-critic decision), so we never
-write it from here.
+Note: the ``### Experiment evaluation`` block is owned by
+``tree.apply_evaluation`` (it depends on the structured
+experiment-critic evaluation), so we never write it from here.
 
 This module is **deterministic**. The narrative content comes from
 the agent JSON; this module only stitches it into markdown.

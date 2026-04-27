@@ -1,17 +1,17 @@
-{# /_hx/decision-preview?slug=<slug> partial.
+{# /_hx/evaluation-preview?slug=<slug> partial.
 
-   Shows what ``uv run lab decision apply <slug>`` would do, given the
-   experiment-critic decision. Includes an "Apply"
-   button on the bottom that fires the ``decision-apply`` whitelisted
+   Shows what ``uv run lab evaluation apply <slug>`` would do, given the
+   experiment-critic evaluation. Includes an "Apply"
+   button on the bottom that fires the ``evaluation-apply`` whitelisted
    command (admins only — the form is gated by ``identity.can_write``
    in the parent context, but we re-gate here so this fragment is
    safe to swap into any container).
 
-   This template is intentionally robust to a missing decision (the
+   This template is intentionally robust to a missing evaluation (the
    slug didn't resolve to any known experiment) so the rendered error
    matches the operator's mental model. #}
 
-{% if decision is none %}
+{% if evaluation is none %}
   <div class="border border-amber-300 bg-amber-50 rounded-md p-3 text-sm text-amber-900">
     <strong>No experiment found for slug</strong>
     <code class="font-mono">{{ slug }}</code>.
@@ -19,19 +19,19 @@
     into the lab DB yet.
   </div>
 {% else %}
-  {% set kind = decision.verdict %}
+  {% set kind = evaluation.verdict %}
   {% set color_class = verdict_color(kind, applied=False) %}
   <article class="border rounded-md p-4 {{ color_class }}">
     <header class="flex items-baseline justify-between gap-3 flex-wrap">
       <div class="flex items-baseline gap-2">
-        <span class="text-[10px] uppercase tracking-wide font-semibold opacity-70">Decision</span>
+        <span class="text-[10px] uppercase tracking-wide font-semibold opacity-70">Evaluation</span>
         <h3 class="font-mono font-semibold text-base">{{ kind }}</h3>
       </div>
       <div class="text-xs opacity-70 font-mono">
-        slug: <strong>{{ decision.slug }}</strong>
-        {% if decision.resolved_instance_id and decision.resolved_instance_id != decision.slug %}
+        slug: <strong>{{ evaluation.slug }}</strong>
+        {% if evaluation.resolved_instance_id and evaluation.resolved_instance_id != evaluation.slug %}
           · instance:
-          <a href="/runs/{{ decision.resolved_instance_id }}" class="underline">{{ decision.resolved_instance_id }}</a>
+          <a href="/runs/{{ evaluation.resolved_instance_id }}" class="underline">{{ evaluation.resolved_instance_id }}</a>
         {% endif %}
       </div>
     </header>
@@ -39,37 +39,37 @@
     <dl class="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-1 mt-3 text-sm">
       <div class="flex items-baseline gap-2">
         <dt class="opacity-60 w-32">Target</dt>
-        <dd class="font-mono">{{ decision.target_id or "—" }}</dd>
+        <dd class="font-mono">{{ evaluation.target_id or "—" }}</dd>
       </div>
       <div class="flex items-baseline gap-2">
         <dt class="opacity-60 w-32">Confidence</dt>
-        <dd class="font-mono">{{ '{:.0%}'.format(decision.confidence) if decision.confidence is not none else "—" }}</dd>
+        <dd class="font-mono">{{ '{:.0%}'.format(evaluation.confidence) if evaluation.confidence is not none else "—" }}</dd>
       </div>
-      {% if decision.baseline_leg %}
+      {% if evaluation.baseline_leg %}
       <div class="flex items-baseline gap-2">
         <dt class="opacity-60 w-32">Baseline leg</dt>
-        <dd class="font-mono text-xs">{{ decision.baseline_leg }}</dd>
+        <dd class="font-mono text-xs">{{ evaluation.baseline_leg }}</dd>
       </div>
       {% endif %}
-      {% if decision.candidate_leg %}
+      {% if evaluation.candidate_leg %}
       <div class="flex items-baseline gap-2">
         <dt class="opacity-60 w-32">Candidate leg</dt>
-        <dd class="font-mono text-xs">{{ decision.candidate_leg }}</dd>
+        <dd class="font-mono text-xs">{{ evaluation.candidate_leg }}</dd>
       </div>
       {% endif %}
     </dl>
 
-    {% if decision.rationale %}
+    {% if evaluation.rationale %}
       <div class="mt-3">
         <div class="text-[10px] uppercase tracking-wide font-semibold opacity-60">Rationale</div>
-        <div class="prose prose-sm max-w-none mt-1">{{ render_md(decision.rationale) | safe }}</div>
+        <div class="prose prose-sm max-w-none mt-1">{{ render_md(evaluation.rationale) | safe }}</div>
       </div>
     {% endif %}
 
-    {% if decision.cluster_evidence %}
+    {% if evaluation.cluster_evidence %}
       <details class="mt-3">
         <summary class="cursor-pointer text-xs opacity-70 hover:opacity-100">
-          Cluster evidence ({{ decision.cluster_evidence|length }})
+          Cluster evidence ({{ evaluation.cluster_evidence|length }})
         </summary>
         <div class="mt-2 overflow-x-auto">
           <table class="text-xs border-collapse min-w-[480px]">
@@ -82,7 +82,7 @@
               </tr>
             </thead>
             <tbody>
-              {% for c in decision.cluster_evidence %}
+              {% for c in evaluation.cluster_evidence %}
                 <tr class="border-b border-current/10">
                   <td class="py-1 pr-3 font-mono">{{ c.cluster or c.task_cluster or "—" }}</td>
                   <td class="py-1 pr-3 text-right font-mono">{{ c.n_trials or c.n or "—" }}</td>
@@ -100,13 +100,13 @@
       </details>
     {% endif %}
 
-    {% if decision.evidence_paths %}
+    {% if evaluation.evidence_paths %}
       <details class="mt-3">
         <summary class="cursor-pointer text-xs opacity-70 hover:opacity-100">
-          Evidence paths ({{ decision.evidence_paths|length }})
+          Evidence paths ({{ evaluation.evidence_paths|length }})
         </summary>
         <ul class="mt-1 text-xs font-mono opacity-80 space-y-0.5">
-          {% for p in decision.evidence_paths %}
+          {% for p in evaluation.evidence_paths %}
             <li>{{ p }}</li>
           {% endfor %}
         </ul>
@@ -117,21 +117,21 @@
       <div class="mt-4 border-t border-current/20 pt-3">
         {% if kind == "no_op" %}
           <p class="text-xs opacity-70 italic">
-            No-op: nothing to apply. Re-running <code>decision apply</code>
-            still records the decision in the journal but doesn't mutate
+            No-op: nothing to apply. Re-running <code>evaluation apply</code>
+            still records the evaluation in the journal but doesn't mutate
             configs.
           </p>
         {% endif %}
         <form hx-post="/api/cmd" hx-target="#cmd-result" hx-swap="innerHTML"
-              hx-confirm="Apply this {{ kind }} decision to the current checkout? This updates lab configs and the journal for {{ decision.slug }}."
+              hx-confirm="Apply this {{ kind }} evaluation to the current checkout? This records the journal outcome for {{ evaluation.slug }}."
               class="flex items-center gap-2">
-          <input type="hidden" name="cmd_id" value="decision-apply">
-          <input type="hidden" name="slug" value="{{ decision.slug }}">
+          <input type="hidden" name="cmd_id" value="evaluation-apply">
+          <input type="hidden" name="slug" value="{{ evaluation.slug }}">
           <button class="text-xs bg-slate-900 hover:bg-black text-white rounded px-3 py-1.5 font-semibold">
-            Apply decision
+            Apply evaluation
           </button>
           <span class="text-xs opacity-70">
-            CLI equivalent: <code class="font-mono">uv run lab decision apply {{ decision.slug }}</code>
+            CLI equivalent: <code class="font-mono">uv run lab evaluation apply {{ evaluation.slug }}</code>
           </span>
         </form>
       </div>

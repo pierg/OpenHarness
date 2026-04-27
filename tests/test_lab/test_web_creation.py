@@ -328,10 +328,10 @@ def test_home_page_renders_leaderboard_and_work_zones() -> None:
     assert r.status_code == 200
     body = r.text
     # Leaderboard-first home.
-    assert "Current best" in body
-    assert "Improvement trajectory" in body
-    assert "Agent ladder" in body
-    assert "Experiment delta board" in body
+    assert "Top ranked" in body
+    assert "Ranked full-suite trajectory" in body
+    assert "Model-group leaderboard" in body
+    assert "Experiment evaluation deltas" in body
     # Operator work zones remain on the first page.
     assert "Now" in body
     assert "Queue" in body
@@ -349,10 +349,10 @@ def test_home_page_renders_leaderboard_and_work_zones() -> None:
 def test_leaderboard_partials_render() -> None:
     c = _client()
     expected = {
-        "/_hx/leaderboard-hero": "Current best",
-        "/_hx/leaderboard-trajectory": ("No accepted", "<svg"),
-        "/_hx/leaderboard-ladder": ("No current-best", "<table"),
-        "/_hx/leaderboard-delta": ("No experiment decisions", "<table"),
+        "/_hx/leaderboard-hero": "Top ranked",
+        "/_hx/leaderboard-trajectory": ("No full-suite", "<svg"),
+        "/_hx/leaderboard-ladder": ("No ranked", "<table"),
+        "/_hx/leaderboard-delta": ("No experiment evaluations", "<table"),
     }
     for path, markers in expected.items():
         r = c.get(path)
@@ -440,8 +440,8 @@ def test_activity_page_renders_filter_form_and_kind_pills() -> None:
     # Filter form controls.
     assert 'name="kind"' in body
     assert 'name="actor"' in body
-    # The five activity kinds the unified log merges.
-    for kind in ("cmd", "tick", "spawn", "verdict", "current-best"):
+    # The activity kinds the unified log merges.
+    for kind in ("cmd", "tick", "spawn", "verdict"):
         assert kind in body, f"kind '{kind}' missing from /activity"
 
 
@@ -490,9 +490,9 @@ def test_catalog_configs_renders_with_pr_badge_template_available() -> None:
     r = _client().get("/catalog?tab=configs")
     assert r.status_code == 200
     body = r.text
-    assert "Current best" in body
-    # Verdict workflow surface is part of the configs tab.
-    assert "Verdicts" in body
+    assert "Operational baseline" in body
+    # Evaluation workflow surface is part of the configs tab.
+    assert "Experiment Evaluations" in body
 
 
 def test_phase_reset_command_accepts_replan() -> None:

@@ -92,7 +92,7 @@ TickPhase = Literal[
     "design",              # `lab-design-variant` codex spawn (read-only)
     "implement",           # `lab-implement-variant` codex spawn (worktree-write)
     "run",                 # harbor exec + poll for results/summary.md
-    "critique",            # ingest + per-trial critic fan-out + decision apply
+    "critique",            # ingest + per-trial critic fan-out + evaluation apply
     "replan",              # `lab-replan-roadmap` codex spawn + roadmap rewrite
     "finalize",            # `lab-finalize-pr` codex spawn + cleanup
     # Post-pipeline / generic:

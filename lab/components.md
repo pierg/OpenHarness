@@ -13,7 +13,7 @@
 
 | ID | Status | Description | Used by | Evidence |
 |----|--------|-------------|---------|----------|
-| `loop-guard` | rejected | detects no-progress turns (repeated tool calls, empty assistant) and steers toward recovery | — | [loop-guard-on-basic-near-miss](experiments.md#2026-04-24--loop-guard-on-basic-near-miss) scored 1/46 vs current best 2/46; re-add only as part of a concrete recovery playbook, not as a standalone brake |
+| `loop-guard` | rejected | detects no-progress turns (repeated tool calls, empty assistant) and steers toward recovery | — | [loop-guard-on-basic-near-miss](experiments.md#2026-04-24--loop-guard-on-basic-near-miss) scored 1/46 vs operational baseline 2/46; re-add only as part of a concrete recovery playbook, not as a standalone brake |
 | `context-compaction` | proposed | truncates large tool-stdout blocks above a threshold | — | [idea](ideas.md#reflection-context-compaction) (no roadmap entry yet — re-queue under the original `reflection-context-compaction` idea on a meaningful slice) |
 
 ## Tools

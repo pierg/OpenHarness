@@ -39,7 +39,7 @@
     <span class="text-xs text-slate-500">kind</span>
     <select name="kind" class="border border-slate-200 rounded px-2 py-1 text-sm ml-1">
       <option value="">all</option>
-      {% for k in ("cmd", "tick", "spawn", "verdict", "current-best") %}
+      {% for k in ("cmd", "tick", "spawn", "verdict") %}
         <option value="{{ k }}" {% if filter_kind == k %}selected{% endif %}>{{ k }}</option>
       {% endfor %}
     </select>
@@ -68,7 +68,6 @@
   "tick":       ("border-emerald-300", "bg-emerald-50", "text-emerald-900"),
   "spawn":      ("border-violet-300", "bg-violet-50", "text-violet-900"),
   "verdict":    ("border-amber-300", "bg-amber-50", "text-amber-900"),
-  "current-best": ("border-rose-300", "bg-rose-50", "text-rose-900"),
 } %}
 
 <section class="bg-white border border-slate-200 rounded-lg overflow-hidden">

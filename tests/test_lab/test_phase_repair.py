@@ -388,7 +388,7 @@ def test_phase_finalize_retries_unmerged_finalize_json(
     ps.mark_ok("alpha", "run", payload={
         "instance_id": "alpha-20260426-000000",
         "lab_commits": ["1111111"],
-        "current_best_at_runtime": "basic",
+        "baseline_at_runtime": "basic",
     })
     ps.mark_ok("alpha", "critique", payload={
         "instance_id": "alpha-20260426-000000",
@@ -435,7 +435,11 @@ def test_phase_finalize_retries_unmerged_finalize_json(
     merged: list[dict[str, object]] = []
     monkeypatch.setattr(runner.codex_adapter, "run", _fake_run)
     monkeypatch.setattr(runner, "_fast_forward_parent_main", lambda: None)
-    monkeypatch.setattr(runner.labtree, "mark_decision_merged", lambda **kw: merged.append(kw))
+    monkeypatch.setattr(
+        runner.labtree,
+        "mark_evaluation_finalized",
+        lambda **kw: merged.append(kw),
+    )
     monkeypatch.setattr(runner.preflight_mod, "remove_worktree", lambda _slug: None)
 
     result = runner._phase_finalize(

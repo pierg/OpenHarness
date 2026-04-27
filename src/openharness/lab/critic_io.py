@@ -67,8 +67,8 @@ def trial_critique_path(trial_dir: Path) -> Path:
     return Path(trial_dir) / CRITIC_DIRNAME / "trial-critic.json"
 
 
-def localize_trial_dir(trial_dir: Path) -> Path:
-    """Map stale absolute trial paths onto this checkout's runs root.
+def _localize_experiment_path(path: Path) -> Path:
+    """Map stale absolute run/trial paths onto this checkout's runs root.
 
     Synced DuckDB files may contain absolute paths from another host
     (for example `/home/.../OpenHarness/runs/experiments/...`). The
@@ -76,17 +76,27 @@ def localize_trial_dir(trial_dir: Path) -> Path:
     is absent, rebuild it under this machine's
     :data:`EXPERIMENTS_RUNS_ROOT`.
     """
-    trial_dir = Path(trial_dir)
-    if trial_dir.exists():
-        return trial_dir
-    parts = trial_dir.parts
+    path = Path(path)
+    if path.exists():
+        return path
+    parts = path.parts
     for i in range(len(parts) - 1):
         if parts[i] == "runs" and parts[i + 1] == "experiments":
             rel = Path(*parts[i + 2 :])
             candidate = EXPERIMENTS_RUNS_ROOT / rel
             if candidate.exists():
                 return candidate
-    return trial_dir
+    return path
+
+
+def localize_trial_dir(trial_dir: Path) -> Path:
+    """Map stale absolute trial paths onto this checkout's runs root."""
+    return _localize_experiment_path(trial_dir)
+
+
+def localize_run_dir(run_dir: Path) -> Path:
+    """Map stale absolute run paths onto this checkout's runs root."""
+    return _localize_experiment_path(run_dir)
 
 
 def trial_evidence_path(trial_dir: Path) -> Path:
@@ -499,4 +509,4 @@ def run_dir_from_instance(
             ).fetchone()
     if not row:
         return None
-    return Path(row[0])
+    return localize_run_dir(Path(row[0]))

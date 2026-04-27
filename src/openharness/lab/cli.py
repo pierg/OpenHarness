@@ -19,8 +19,7 @@ Two audiences, one entry point:
 - **Lab phase skills** call deterministic markdown helpers:
   `uv run lab idea move <id> trying`
   `uv run lab idea append <id> --theme runtime --motivation ... --sketch ...`
-  `uv run lab experiments append-entry <slug> --current-best ...`
-  `uv run lab experiments fill <slug> --run-path ... --from-summary ...`
+  `uv run lab experiments append-entry <slug> --baseline ...`
   `uv run lab roadmap add <slug> ...`
   `uv run lab roadmap done <slug> --ran ... --outcome ...`
 
@@ -71,8 +70,9 @@ exp_app = typer.Typer(no_args_is_help=True, help="Edit lab/experiments.md.")
 roadmap_app = typer.Typer(no_args_is_help=True, help="Edit lab/roadmap.md.")
 daemon_app = typer.Typer(no_args_is_help=True, help="Orchestrator daemon and phase loop.")
 tree_app = typer.Typer(no_args_is_help=True, help="Inspect / mutate the configuration tree (lab/configs.md).")
-decision_app = typer.Typer(no_args_is_help=True, help="Apply experiment-critic decisions.")
-current_best_app = typer.Typer(no_args_is_help=True, help="Show / set the current-best pointer.")
+evaluation_app = typer.Typer(no_args_is_help=True, help="Apply experiment-critic evaluations.")
+baseline_app = typer.Typer(no_args_is_help=True, help="Show / set the operational baseline pointer.")
+leaderboard_app = typer.Typer(no_args_is_help=True, help="Show dynamic experiment rankings.")
 components_app = typer.Typer(no_args_is_help=True, help="Inspect / mutate the components catalog (lab/components.md).")
 runs_app = typer.Typer(no_args_is_help=True, help="Manage runs/experiments/<id>/ directories on disk.")
 preflight_app = typer.Typer(
@@ -89,8 +89,9 @@ app.add_typer(exp_app, name="experiments")
 app.add_typer(roadmap_app, name="roadmap")
 app.add_typer(daemon_app, name="daemon")
 app.add_typer(tree_app, name="tree")
-app.add_typer(decision_app, name="decision")
-app.add_typer(current_best_app, name="current-best")
+app.add_typer(evaluation_app, name="evaluation")
+app.add_typer(baseline_app, name="baseline")
+app.add_typer(leaderboard_app, name="leaderboard")
 app.add_typer(components_app, name="components")
 app.add_typer(runs_app, name="runs")
 app.add_typer(preflight_app, name="preflight")
@@ -123,8 +124,8 @@ def info() -> None:
         raise typer.Exit(0)
     with labdb.reader() as conn:
         for tbl in ("experiments", "legs", "trials", "trial_critiques",
-                    "comparisons", "task_features", "components_perf",
-                    "misconfigurations", "spawns"):
+                    "comparisons", "experiment_evaluations", "task_features",
+                    "components_perf", "misconfigurations", "spawns"):
             (n,) = conn.execute(f"SELECT count(*) FROM {tbl}").fetchone()
             console.print(f"  [cyan]{tbl}[/cyan]: {n}")
 
@@ -672,16 +673,16 @@ def cmd_exp_append_entry(
         "--type",
         help="paired-ablation | broad-sweep | smoke",
     ),
-    current_best: str = typer.Option(
+    baseline: str = typer.Option(
         "",
-        "--current-best",
-        help="Current-best agent id at run-time (e.g. 'basic'). "
-             "Defaults to `uv run lab current-best show`.",
+        "--baseline",
+        help="Operational baseline agent id at run-time (e.g. 'basic'). "
+             "Defaults to `uv run lab baseline show`.",
     ),
     mutation: Optional[str] = typer.Option(
         None,
         "--mutation",
-        help="One-line description of what differs from the current best. "
+        help="One-line description of what differs from the baseline. "
              "Omit for --type broad-sweep.",
     ),
     hypothesis: str = typer.Option(..., "--hypothesis"),
@@ -703,20 +704,20 @@ def cmd_exp_append_entry(
 
     Header is filled in immediately; the five `### <section>` blocks
     are stubbed empty and populated later by `experiments synthesize`
-    and `decision apply`.
+    and `evaluation apply`.
     """
-    if not current_best:
+    if not baseline:
         snap = lab_docs.tree_snapshot()
-        current_best = snap.current_best_id or "unknown"
-    current_best_md = (
-        f"[`{current_best}`](../src/openharness/agents/configs/{current_best}.yaml)"
-        if not current_best.startswith("[")
-        else current_best
+        baseline = snap.operational_baseline_id or "unknown"
+    baseline_md = (
+        f"[`{baseline}`](../src/openharness/agents/configs/{baseline}.yaml)"
+        if not baseline.startswith("[")
+        else baseline
     )
     lab_docs.append_journal_entry(
         slug=slug,
         type_=type_,
-        current_best_at_runtime=current_best_md,
+        baseline_at_runtime=baseline_md,
         mutation=mutation,
         hypothesis=hypothesis,
         run_path=run_path,
@@ -734,7 +735,7 @@ def cmd_exp_set_branch(
         "--pr-url",
         help="Canonical experiment PR URL. Renders as "
              "`Branch: [<branch>](<pr-url>)` and mirrors into "
-             "`decisions.pr_url` so the web UI can render the link "
+             "`experiment_evaluations.pr_url` so the web UI can render the link "
              "without re-parsing markdown.",
     ),
     rejected_reason: Optional[str] = typer.Option(
@@ -750,7 +751,7 @@ def cmd_exp_set_branch(
         "--discarded-sha",
         help="HEAD SHA of the discarded branch (Reject/NoOp paths). "
              "Recorded in the markdown bullet AND in "
-             "`decisions.branch_sha` so the deleted branch can be "
+             "`experiment_evaluations.branch_sha` so the deleted branch can be "
              "resurrected later via `git fetch origin <sha>:retro/<slug>`.",
     ),
 ) -> None:
@@ -759,7 +760,7 @@ def cmd_exp_set_branch(
     Called from the `lab-finalize-pr` skill after deciding whether to
     merge the experiment PR (`accept`) or close it unmerged
     (`reject` / `no_op`).
-    Also writes the PR URL / discarded SHA into the `decisions`
+    Also writes the PR URL / discarded SHA into the `experiment_evaluations`
     cache so downstream tooling (web UI, audit queries, finalize
     recovery) can find them with a SQL query.
     Idempotent — safe to re-run with the same arguments.
@@ -774,12 +775,12 @@ def cmd_exp_set_branch(
         rejected_reason=rejected_reason,
         discarded_sha=discarded_sha,
     )
-    # Mirror into the decisions cache so the web UI / merge-gate /
+    # Mirror into the evaluation cache so the web UI / merge-gate /
     # daemon checks don't have to re-parse markdown.
     if pr_url or discarded_sha:
         with labdb.writer() as conn:
             row = conn.execute(
-                "SELECT instance_id FROM decisions WHERE slug = ? "
+                "SELECT instance_id FROM experiment_evaluations WHERE slug = ? "
                 "ORDER BY applied_at DESC NULLS LAST LIMIT 1",
                 [slug],
             ).fetchone()
@@ -787,12 +788,12 @@ def cmd_exp_set_branch(
                 instance_id = row[0]
                 if pr_url:
                     conn.execute(
-                        "UPDATE decisions SET pr_url = ? WHERE instance_id = ?",
+                        "UPDATE experiment_evaluations SET pr_url = ? WHERE instance_id = ?",
                         [pr_url, instance_id],
                     )
                 if discarded_sha:
                     conn.execute(
-                        "UPDATE decisions SET branch_sha = ? WHERE instance_id = ?",
+                        "UPDATE experiment_evaluations SET branch_sha = ? WHERE instance_id = ?",
                         [discarded_sha, instance_id],
                     )
     if pr_url and rejected_reason:
@@ -810,26 +811,6 @@ def cmd_exp_set_branch(
         )
     else:
         typer.echo(f"set Branch bullet for {slug!r} -> {branch}")
-
-
-@exp_app.command("fill")
-def cmd_exp_fill(
-    slug: str,
-    run_path: str = typer.Option(..., "--run-path"),
-    from_summary: Path = typer.Option(..., "--from-summary",
-                                      help="Path to runs/.../results/summary.md"),
-    note: list[str] = typer.Option([], "--note", help="Repeat for each note bullet."),
-    decision: str = typer.Option(..., "--decision"),
-) -> None:
-    table_md = lab_docs.render_results_table_from_summary(from_summary.read_text())
-    lab_docs.fill_experiment_results(
-        slug=slug,
-        run_path=run_path,
-        results_table=table_md,
-        notes=note,
-        decision=decision,
-    )
-    typer.echo(f"filled experiment {slug!r}")
 
 
 @roadmap_app.command("add")
@@ -1250,14 +1231,14 @@ def analyze(
     typer.echo(f"\nanalyze done in {elapsed:.0f}s ({elapsed/60:.1f}m).")
 
 
-# ===== config decisions / current best / experiments-synthesize ============
+# ===== evaluations / operational baseline / experiments-synthesize ==========
 #
 # All of these commands are *deterministic* mutations of the lab.
 # They never touch codex. Critic skills and the daemon call them via
 # this CLI; humans do too. The runner's close-loop is just:
 #
 #   lab experiments synthesize <slug>      # write Aggregate / Mutation impact
-#   lab decision apply <slug>              # experiment-critic decision apply
+#   lab evaluation apply <slug>            # experiment-critic evaluation apply
 #   lab roadmap suggest <new_slug> ...     # daemon suggestion stream
 
 
@@ -1266,7 +1247,7 @@ def _lookup_instance_for_slug(conn: object, slug: str) -> str | None:
 
     Resolution order (each rejects to the next on miss):
       1. exact: instance_id == slug
-      2. cached: decisions.slug == slug
+      2. cached: experiment_evaluations.slug == slug
       3. prefix: instance_id LIKE slug || '-%'
       4. experiment_id == slug
       5. slug starts with `<experiment_id>-` for some row
@@ -1278,7 +1259,7 @@ def _lookup_instance_for_slug(conn: object, slug: str) -> str | None:
     if exact:
         return exact[0]
     cached = conn.execute(  # type: ignore[attr-defined]
-        "SELECT instance_id FROM decisions WHERE slug = ?", [slug],
+        "SELECT instance_id FROM experiment_evaluations WHERE slug = ?", [slug],
     ).fetchone()
     if cached and cached[0]:
         return cached[0]
@@ -1308,14 +1289,14 @@ def _lookup_instance_for_slug(conn: object, slug: str) -> str | None:
     return None
 
 
-def _resolve_decision_for_slug(slug: str):
-    # -> tuple[str, tree_ops.ExperimentDecision]; lazy import to avoid cycles.
-    """Look up the experiment instance for a slug and load its decision.
+def _resolve_evaluation_for_slug(slug: str):
+    # -> tuple[str, evaluation.ExperimentEvaluation]; lazy import to avoid cycles.
+    """Look up the experiment instance for a slug and load its evaluation.
 
-    Falls back to the cached row in `decisions` if the slug isn't in
-    `experiments`.
+    Falls back to the cached row in `experiment_evaluations` if the
+    slug isn't in `experiments`.
     """
-    from openharness.lab import tree_ops as _tree_ops
+    from openharness.lab import evaluation as _evaluation
 
     instance_id: str | None = None
     with labdb.reader() as conn:
@@ -1327,8 +1308,8 @@ def _resolve_decision_for_slug(slug: str):
         )
         raise typer.Exit(2)
 
-    decision = _tree_ops.load_decision(instance_id)
-    return instance_id, decision
+    evaluation = _evaluation.load_evaluation(instance_id)
+    return instance_id, evaluation
 
 
 @tree_app.command("show")
@@ -1337,15 +1318,15 @@ def tree_show(json_out: bool = typer.Option(False, "--json")) -> None:
     snap = lab_docs.tree_snapshot()
     if json_out:
         typer.echo(json.dumps({
-            "current_best_id": snap.current_best_id,
-            "current_best_anchor": snap.current_best_anchor,
+            "operational_baseline_id": snap.operational_baseline_id,
+            "operational_baseline_anchor": snap.operational_baseline_anchor,
             "rejected": [asdict(r) for r in snap.rejected],
             "proposed": [asdict(p) for p in snap.proposed],
         }, indent=2))
         return
-    console.print(f"[bold]Current best:[/bold] [cyan]{snap.current_best_id}[/cyan]")
-    if snap.current_best_anchor:
-        console.print(f"  [dim]{snap.current_best_anchor}[/dim]")
+    console.print(f"[bold]Operational baseline:[/bold] [cyan]{snap.operational_baseline_id}[/cyan]")
+    if snap.operational_baseline_anchor:
+        console.print(f"  [dim]{snap.operational_baseline_anchor}[/dim]")
     if snap.rejected:
         t = Table(title="Rejected", show_header=True)
         t.add_column("ID")
@@ -1356,8 +1337,8 @@ def tree_show(json_out: bool = typer.Option(False, "--json")) -> None:
         console.print(t)
 
 
-@decision_app.command("apply")
-def decision_apply(
+@evaluation_app.command("apply")
+def evaluation_apply(
     slug: str = typer.Argument(...),
     instance: Optional[str] = typer.Option(
         None, "--instance",
@@ -1366,26 +1347,26 @@ def decision_apply(
     applied_by: str = typer.Option("auto:cli", "--applied-by"),
     dry_run: bool = typer.Option(
         False, "--dry-run",
-        help="Print the decision that would be applied; do not write.",
+        help="Print the evaluation that would be applied; do not write.",
     ),
 ) -> None:
-    """Load the experiment-critic decision for `slug` and apply it.
+    """Load the experiment-critic evaluation for `slug` and apply it.
 
     On `main`, this is treated as a direct main-line mutation and the
     DB cache is marked `applied=true`. On any non-`main` branch/worktree
     it is treated as branch-local materialization pending finalize.
     """
     from openharness.lab import tree as _tree
-    from openharness.lab import tree_ops as _tree_ops
+    from openharness.lab import evaluation as _evaluation
     from openharness.lab import preflight as _preflight
 
     if instance:
-        decision = _tree_ops.load_decision(instance)
+        evaluation = _evaluation.load_evaluation(instance)
     else:
-        _, decision = _resolve_decision_for_slug(slug)
+        _, evaluation = _resolve_evaluation_for_slug(slug)
 
-    console.print(f"[bold]Decision for {slug}:[/bold]")
-    console.print(json.dumps(decision.to_dict(), indent=2, default=str))
+    console.print(f"[bold]Evaluation for {slug}:[/bold]")
+    console.print(json.dumps(evaluation.to_dict(), indent=2, default=str))
 
     if dry_run:
         typer.echo("(dry-run; no edits)")
@@ -1404,9 +1385,9 @@ def decision_apply(
         current_branch = ""
     mark_applied = current_branch == _preflight.DEFAULT_BASE_BRANCH
 
-    result = _tree.apply_decision(
+    result = _tree.apply_evaluation(
         slug=slug,
-        decision=decision,
+        evaluation=evaluation,
         applied_by=applied_by,
         mark_applied=mark_applied,
     )
@@ -1419,17 +1400,14 @@ def decision_apply(
         typer.echo(f"  - {note}")
 
 
-@current_best_app.command("show")
-def current_best_show() -> None:
-    """Print the current-best id."""
-    from openharness.lab import tree_ops as _tree_ops
-
-    agent_id = _tree_ops.current_best_id()
-    typer.echo(agent_id)
+@baseline_app.command("show")
+def baseline_show() -> None:
+    """Print the configured operational baseline id."""
+    typer.echo(lab_docs.tree_snapshot().operational_baseline_id)
 
 
-@current_best_app.command("set")
-def current_best_set(
+@baseline_app.command("set")
+def baseline_set(
     agent_id: str = typer.Argument(...),
     reason: str = typer.Option(..., "--reason"),
     journal_link: Optional[str] = typer.Option(
@@ -1438,27 +1416,58 @@ def current_best_set(
     ),
     audit: bool = typer.Option(
         True, "--audit/--no-audit",
-        help="Also append a current-best history row.",
+        help="Deprecated no-op: baseline changes are no longer ranked as best history.",
     ),
 ) -> None:
-    """Manually set the `## Current best` pointer in configs.md."""
-    from openharness.lab.tree_ops import current_best_id, insert_current_best_change
+    """Manually set the configured operational baseline pointer in configs.md."""
+    _ = audit
+    lab_docs.set_operational_baseline(
+        agent_id=agent_id,
+        reason=reason,
+        journal_link=journal_link,
+    )
+    typer.echo(f"operational baseline set to {agent_id!r}")
 
-    prev = current_best_id()
-    lab_docs.set_current_best(agent_id=agent_id, reason=reason, journal_link=journal_link)
-    msg = f"current best set to {agent_id!r}"
-    if audit:
-        with labdb.writer() as conn:
-            insert_current_best_change(
-                conn,
-                at_ts=datetime.now(timezone.utc),
-                from_id=prev if prev != agent_id else None,
-                to_id=agent_id,
-                reason=reason,
-                applied_by="human:cli",
-            )
-        msg += " (audited in current-best history)"
-    typer.echo(msg)
+
+@leaderboard_app.command("show")
+def leaderboard_show(
+    model: Optional[str] = typer.Option(
+        None, "--model", help="Limit to one model id.",
+    ),
+    dataset: Optional[str] = typer.Option(
+        None, "--dataset", help="Limit to one dataset id.",
+    ),
+    json_out: bool = typer.Option(False, "--json"),
+) -> None:
+    """Print dynamic rankings grouped by model and dataset."""
+    from openharness.lab import ranking
+
+    with labdb.reader() as conn:
+        rows = ranking.rankings(conn, model_id=model, dataset=dataset)
+    if json_out:
+        typer.echo(json.dumps([r.to_dict() for r in rows], indent=2, default=str))
+        return
+    table = Table(title="Dynamic leaderboard")
+    table.add_column("Rank", justify="right")
+    table.add_column("Model")
+    table.add_column("Dataset")
+    table.add_column("Agent")
+    table.add_column("Experiment")
+    table.add_column("Pass", justify="right")
+    table.add_column("Cost/task", justify="right")
+    table.add_column("Verdict")
+    for row in rows:
+        table.add_row(
+            str(row.rank),
+            row.model_id,
+            row.dataset,
+            row.agent_id,
+            row.instance_id,
+            f"{row.pass_rate_pct:.1f}%" if row.pass_rate_pct is not None else "-",
+            f"${row.cost_per_task_usd:.3f}" if row.cost_per_task_usd is not None else "-",
+            row.verdict or "-",
+        )
+    console.print(table)
 
 @exp_app.command("synthesize")
 def cmd_exp_synthesize(
@@ -1473,7 +1482,7 @@ def cmd_exp_synthesize(
             "Repeat to limit which `### <section>`s are synthesised. "
             "Default: Aggregate, Mutation impact, Failure modes, "
             "Linked follow-ups (the four narrative sections; "
-            "Tree effect comes from `lab decision apply`)."
+            "Experiment evaluation comes from `lab evaluation apply`)."
         ),
     ),
 ) -> None:

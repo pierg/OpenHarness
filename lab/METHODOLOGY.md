@@ -59,14 +59,14 @@ experiment. Historical controls can be useful for planning, but should
 be treated with drift skepticism unless the configs, models, verifier,
 dataset, and repetition policy are clearly comparable.
 
-## Verdicts
+## Experiment Evaluations
 
-`experiment-critic` writes the experiment decision. The three outcomes
+`experiment-critic` writes the experiment evaluation. The three outcomes
 are:
 
-- `accept` — the candidate is the best current harness choice for the
-  measured goal, and the implementation should land with the lab
-  metadata.
+- `accept` — the candidate implementation is valid, interpretable, and
+  worth preserving. This lands the experiment PR, but it does not by
+  itself make the candidate the global best.
 - `reject` — the candidate is worse, invalid, too costly, or otherwise
   not worth keeping as implemented. The lab should keep the evidence,
   comment on the experiment PR, close it unmerged, and preserve the
@@ -81,6 +81,22 @@ Confidence is a judgment field, not a threshold. The critic should
 explain the evidence, the likely causal story, and any generalization
 risk in plain language.
 
+## Dynamic Ranking
+
+Best selection is a separate derived view. The leaderboard compares
+leg-level experiment results only within comparable groups:
+
+- same base model id
+- same dataset / benchmark version
+- same evidence scope (`full_suite` vs slice)
+- compatible verifier and budget envelope when those fields matter
+
+The default policy ranks by pass rate, then cost per task, then tokens
+per task, then median duration. Rejected target legs remain visible as
+evidence but are ineligible for best selection. No-op and
+measurement-only experiments can still feed the leaderboard when their
+facts are valid.
+
 ## Replan
 
 An experiment is not complete until its findings have changed the
@@ -90,7 +106,7 @@ the evidence suggests a sharper next question.
 
 ## Anti-Patterns
 
-- drawing a decision from a wiring-only smoke run
+- drawing a verdict from a wiring-only smoke run
 - using different task lists across legs without saying so
 - confounding unrelated changes in one candidate
 - treating a tiny selected slice as proof of broad superiority

@@ -3,7 +3,7 @@
 ## 2026-04-26 — runtime-component-label-audit
 
 -   **Type:** paired-ablation
--   **Current best at run-time:** [`basic`](../src/openharness/agents/configs/basic.yaml)
+-   **Baseline at run-time:** [`basic`](../src/openharness/agents/configs/basic.yaml)
 -   **Hypothesis:** A preflight or ingest validation that requires runtime-flag ablation legs to declare their expected component id will prevent component_perf undercounting and make future runtime experiments verdict-bearing.
 -   **Run:** [`runs/experiments/runtime-component-label-audit-20260426-022341`](../runs/experiments/runtime-component-label-audit-20260426-022341)
 -   **Branch:** [`lab/runtime-component-label-audit`](https://github.com/pierg/OpenHarness/pull/48) — metadata-only merge (no_op: metadata-only no-op outcome; implementation branch discarded; discarded=`11c01bd`)
@@ -20,14 +20,14 @@ Accuracy was a wash: basic_timeout_aware_retry and basic_flash both passed 3/6 t
 -   **empty-first-completion** (×2): Both legs had one regex-log trial where the model produced an empty first response with no tool calls, recorded as empty-model-response/empty-response and gave-up-too-early.
 -   **sequential-regex-edge-testing** (×1): basic_flash had one regex-log critique marked inefficient_testing and timeout_no_recovery after it tested edge cases one Perl command at a time instead of batching them after python3 was unavailable.
 -   **critic-registry-outcome-disagreement** (×3): Three reward-1.0 registry passes were described as failed by trial-critic: both timeout log-summary-date-ranges trials and one basic_flash regex-log trial, so downstream analysis should prefer registry score for pass-rate math and preserve the discrepancy as evidence metadata.
-### Tree effect
+### Experiment evaluation
 -   **Verdict:** **No-op** — recorded for trend analysis
 -   **Target:** `basic_timeout_aware_retry`
 -   **Pair:** baseline leg `basic_flash` vs mutation `basic_timeout_aware_retry`
 -   **Δ pass-rate:** +0.00 pp
 -   **Δ $/pass:** -19.1%
 -   **Confidence:** 0.00
--   **Rationale:** Inconclusive: Δ pass-rate = +0.0pp (current best 50.0% vs mutation 50.0%); 0 positive cluster(s) (threshold 2); Δ $/pass = -19%.
+-   **Rationale:** Inconclusive: Δ pass-rate = +0.0pp (operational baseline 50.0% vs mutation 50.0%); 0 positive cluster(s) (threshold 2); Δ $/pass = -19%.
 -   **Evidence:** [`experiment-critic.json`](../runs/experiments/runtime-component-label-audit-20260426-022341/critic/experiment-critic.json), [`comparisons`](../runs/experiments/runtime-component-label-audit-20260426-022341/critic/comparisons), [`critic_summary.md`](../runs/experiments/runtime-component-label-audit-20260426-022341/results/critic_summary.md)
 
 | Cluster | baseline pass | mut pass | Δ pp |
@@ -45,7 +45,7 @@ Accuracy was a wash: basic_timeout_aware_retry and basic_flash both passed 3/6 t
 ## 2026-04-26 — timeout-recovery-hard-cluster-slice
 
 -   **Type:** paired-ablation
--   **Current best at run-time:** [`basic`](../src/openharness/agents/configs/basic.yaml)
+-   **Baseline at run-time:** [`basic`](../src/openharness/agents/configs/basic.yaml)
 -   **Hypothesis:** Timeout-aware recovery may be more valuable on hard `c_build`, `regex_programming`, and `python_ml` failure clusters than on the original network-only smoke slice, because those clusters repeatedly exhaust turn or wall-clock budgets.
 -   **Run:** [`runs/experiments/timeout-recovery-hard-cluster-slice-20260426-003209`](../runs/experiments/timeout-recovery-hard-cluster-slice-20260426-003209)
 -   **Branch:** [`lab/timeout-recovery-hard-cluster-slice`](https://github.com/pierg/OpenHarness/pull/47) — metadata-only merge (no_op: both legs passed 0/14; retry only reduced cost/runtime and did not recover hard-cluster failures.; discarded=`86482e0`)
@@ -64,13 +64,13 @@ The mutation produced a 0.0 percentage-point pass-rate delta: basic_flash passed
 -   **dependency-toolchain-loop** (×3): Build and ML trials repeatedly stalled around missing compilers, Coq/CompCert setup, MIPS cross-compiler discovery, or PyStan environment details instead of reaching a verified deliverable.
 -   **insufficient-or-misdirected-testing** (×3): Agents relied on manual checks or local scratch tests and missed the verifier's real edge cases, especially filter-js-from-html and sam-cell-seg.
 -   **repeated-failed-command-loop** (×2): Several trials kept guessing URLs, package/tool invocations, or PyStan sampling arguments without switching to a more reliable strategy before the turn budget expired.
-### Tree effect
+### Experiment evaluation
 -   **Verdict:** **No-op** — recorded for trend analysis
 -   **Target:** `basic_timeout_aware_retry`
 -   **Pair:** baseline leg `basic_flash` vs mutation `basic_timeout_aware_retry`
 -   **Δ pass-rate:** +0.00 pp
 -   **Confidence:** 0.00
--   **Rationale:** Inconclusive: Δ pass-rate = +0.0pp (current best 0.0% vs mutation 0.0%); 0 positive cluster(s) (threshold 2); no cost data.
+-   **Rationale:** Inconclusive: Δ pass-rate = +0.0pp (operational baseline 0.0% vs mutation 0.0%); 0 positive cluster(s) (threshold 2); no cost data.
 -   **Evidence:** [`experiment-critic.json`](../runs/experiments/timeout-recovery-hard-cluster-slice-20260426-003209/critic/experiment-critic.json), [`comparisons`](../runs/experiments/timeout-recovery-hard-cluster-slice-20260426-003209/critic/comparisons), [`critic_summary.md`](../runs/experiments/timeout-recovery-hard-cluster-slice-20260426-003209/results/critic_summary.md)
 
 | Cluster | baseline pass | mut pass | Δ pp |
@@ -88,8 +88,8 @@ The mutation produced a 0.0 percentage-point pass-rate delta: basic_flash passed
 ## 2026-04-24 — tb2-gemini3-model-baseline
 
 -   **Type:** paired-ablation
--   **Current best at run-time:** [`basic`](../src/openharness/agents/configs/basic.yaml)
--   **Hypothesis:** The current-best score is partly model-bound: replacing `gemini-3.1-flash-lite-preview` with the stronger Gemini 3 Flash / 3.1 Pro coding models on the same `basic` harness will raise full-suite pass rate enough to change which runtime and prompt mechanisms are worth pursuing next.
+-   **Baseline at run-time:** [`basic`](../src/openharness/agents/configs/basic.yaml)
+-   **Hypothesis:** The model-group baseline score is partly model-bound: replacing `gemini-3.1-flash-lite-preview` with the stronger Gemini 3 Flash / 3.1 Pro coding models on the same `basic` harness will raise full-suite pass rate enough to change which runtime and prompt mechanisms are worth pursuing next.
 -   **Run:** [`runs/experiments/tb2-gemini3-model-baseline-20260424-225008`](../runs/experiments/tb2-gemini3-model-baseline-20260424-225008)
 -   **Branch:** [`lab/tb2-gemini3-model-baseline`](https://github.com/pierg/OpenHarness/pull/45)
 
@@ -107,7 +107,7 @@ The higher-capacity basic_pro leg helped overall: +10.1 percentage points over b
 -   **gave-up-too-early** (×28): Agents stopped after setup or partial progress; critiques used "gave-up-too-early", "gave_up_too_early", or "empty-assistant-turn".
 -   **hallucinated-success** (×7): Agents claimed completion despite failed or missing verification; critiques used "hallucinated-success" / "hallucinated_success".
 -   **analysis-paralysis** (×7): Agents spent turns planning or overcomplicating without converging on the deliverable; critiques used "analysis-paralysis" or "overcomplication".
-### Tree effect
+### Experiment evaluation
 -   **Verdict:** **No-op** — historical scoped-accept signal retained as diagnostic evidence
 -   **Target:** `basic`
 -   **Current classification:** measurement-only scoped signal. Pro/Lite model deltas are useful evidence, but any selective model policy must derive its route from instruction/workspace/runtime observations, not offline `task_features`.
@@ -135,7 +135,7 @@ _(none retained)_
 ## 2026-04-24 — timeout-aware-retry-on-needs-network
 
 -   **Type:** paired-ablation
--   **Current best at run-time:** [`basic`](../src/openharness/agents/configs/basic.yaml)
+-   **Baseline at run-time:** [`basic`](../src/openharness/agents/configs/basic.yaml)
 -   **Hypothesis:** timeout-aware retry / background polling recovers a meaningful share of the `needs_network` + `high_env_complexity` failures that currently collapse into repeated command loops or unrecovered bash timeouts.
 -   **Run:** [`runs/experiments/timeout-aware-retry-on-needs-network-smoke-20260424-193153`](../runs/experiments/timeout-aware-retry-on-needs-network-smoke-20260424-193153)
 -   **Branch:** [`lab/timeout-aware-retry-on-needs-network`](https://github.com/pierg/OpenHarness/pull/38) — metadata-only merge (no_op: smoke tied control at 2/4 passes per leg and was under the evidence floor.; discarded=`a4ca455`)
@@ -154,7 +154,7 @@ _(none retained)_
 
 _(pending)_
 
-### Tree effect
+### Experiment evaluation
 -   **Verdict:** **No-op** — recorded for trend analysis
 -   **Target:** `basic_timeout_aware_retry`
 -   **Pair:** baseline leg `basic` vs mutation `basic_timeout_aware_retry`
@@ -169,7 +169,7 @@ _(pending)_
 ## 2026-04-24 — planner-schema-guard-paired
 
 -   **Type:** paired-ablation
--   **Current best at run-time:** [`basic`](../src/openharness/agents/configs/basic.yaml)
+-   **Baseline at run-time:** [`basic`](../src/openharness/agents/configs/basic.yaml)
 -   **Hypothesis:** forcing `planner_executor` to repair invalid or empty planner JSON before executor handoff cuts planner-side `ValidationError` / `structured-output-failure` enough to recover trustworthy signal on the planner-positive slice.
 -   **Run:** [`runs/experiments/planner-schema-guard-paired-20260424-154436`](../runs/experiments/planner-schema-guard-paired-20260424-154436)
 -   **Branch:** [`lab/planner-schema-guard-paired`](https://github.com/pierg/OpenHarness/pull/33) — metadata-only merge (no_op: schema guard matched control at 8/22 passes and only lowered cost, so the variant stays rejected.; discarded=`74d125b`)
@@ -188,14 +188,14 @@ Overall pass rate moved 0.0 percentage points: `planner_executor_control` stayed
 -   **hallucinated_success** (×9): The agent declared success from local checks that did not match the verifier contract or ignored failing evidence already in the run.
 -   **verification_gap** (×8): Validation stayed partial or sample-only, missing global constraints, clean-environment execution, or exact numeric targets.
 -   **environment_mutation** (×5): The agent used environment changes such as `pip install` as a fix instead of delivering portable task artifacts.
-### Tree effect
+### Experiment evaluation
 -   **Verdict:** **No-op** — recorded for trend analysis
 -   **Target:** `planner_executor_schema_guard`
 -   **Pair:** baseline leg `planner_executor_control` vs mutation `planner_executor_schema_guard`
 -   **Δ pass-rate:** +0.00 pp
 -   **Δ $/pass:** -22.7%
 -   **Confidence:** 0.00
--   **Rationale:** Inconclusive: Δ pass-rate = +0.0pp (current best 36.4% vs mutation 36.4%); 1 positive cluster(s) (threshold 2); Δ $/pass = -23%.
+-   **Rationale:** Inconclusive: Δ pass-rate = +0.0pp (operational baseline 36.4% vs mutation 36.4%); 1 positive cluster(s) (threshold 2); Δ $/pass = -23%.
 -   **Evidence:** [`experiment-critic.json`](../runs/experiments/planner-schema-guard-paired-20260424-154436/critic/experiment-critic.json), [`comparisons`](../runs/experiments/planner-schema-guard-paired-20260424-154436/critic/comparisons), [`critic_summary.md`](../runs/experiments/planner-schema-guard-paired-20260424-154436/results/critic_summary.md)
 
 | Cluster | baseline pass | mut pass | Δ pp |
@@ -206,15 +206,15 @@ Overall pass rate moved 0.0 percentage points: `planner_executor_control` stayed
 ### Linked follow-ups
 -   **roadmap** `timeout-aware-retry-on-needs-network`: promoted to the top of `## Up next` because repeated command loops and unrecovered timeouts remain the strongest cross-experiment blocker after schema repair only reduced cost.
 -   **roadmap** `planner-executor-cluster-confirmation`: demoted to `### Suggested` because `planner-schema-guard-paired` was a score wash, so the higher-cost planner confirmation is no longer front-of-queue.
--   **idea** `planner-empty-glob-breaker`: remains the narrower planner-specific follow-up if the current-best-facing timeout-recovery run still leaves planner path-grounding failures unresolved.
+-   **idea** `planner-empty-glob-breaker`: remains the narrower planner-specific follow-up if the baseline-facing timeout-recovery run still leaves planner path-grounding failures unresolved.
 
 ## 2026-04-24 — loop-guard-on-basic-near-miss
 
 -   **Type:** paired-ablation
--   **Current best at run-time:** [`basic`](../src/openharness/agents/configs/basic.yaml)
--   **Hypothesis:** enabling `LoopGuardConfig.enabled` on current best `basic` recovers a meaningful share of the loop-heavy near-miss failures from `extended-budget-paired-on-trunk` by breaking repeated command / timeout spirals without the cost blow-up of longer budgets.
+-   **Baseline at run-time:** [`basic`](../src/openharness/agents/configs/basic.yaml)
+-   **Hypothesis:** enabling `LoopGuardConfig.enabled` on operational baseline `basic` recovers a meaningful share of the loop-heavy near-miss failures from `extended-budget-paired-on-trunk` by breaking repeated command / timeout spirals without the cost blow-up of longer budgets.
 -   **Run:** [`runs/experiments/loop-guard-on-basic-near-miss-20260424-021810`](../runs/experiments/loop-guard-on-basic-near-miss-20260424-021810)
--   **Branch:** [`lab/loop-guard-on-basic-near-miss`](https://github.com/pierg/OpenHarness/pull/32) — metadata-only merge (reject: loop-guard on basic scored 1/46 vs current best 2/46 on the near-miss slice and did not recover loop-heavy failures.; discarded=`9b96272`)
+-   **Branch:** [`lab/loop-guard-on-basic-near-miss`](https://github.com/pierg/OpenHarness/pull/32) — metadata-only merge (reject: loop-guard on basic scored 1/46 vs operational baseline 2/46 on the near-miss slice and did not recover loop-heavy failures.; discarded=`9b96272`)
 
 ### Aggregate
 | Leg | Agent | Trials | Passed | Failed | Pass rate | Cost (USD) |
@@ -230,7 +230,7 @@ Overall pass rate moved 0.0 percentage points: `planner_executor_control` stayed
 
 _(pending)_
 
-### Tree effect
+### Experiment evaluation
 -   **Verdict:** **Reject** — experiment outcome supports rejection
 -   **Target:** `basic_loop_guard`
 -   **Pair:** baseline leg `basic` vs mutation `basic_loop_guard`
@@ -256,7 +256,7 @@ _(pending)_
 ## 2026-04-23 — extended-budget-paired-on-trunk
 
 -   **Type:** paired-ablation
--   **Current best at run-time:** [`basic`](../src/openharness/agents/configs/basic.yaml)
+-   **Baseline at run-time:** [`basic`](../src/openharness/agents/configs/basic.yaml)
 -   **Hypothesis:** the 22.5% baseline is meaningfully budget-bound on the near-miss slice; raising `max_turns` from 30 → 60 → 120 (with `max_tokens` scaled 8192 → 16384 → 32768) lifts pass-rate by ≥10pp on tasks that pinned `n_turns=30` in `tb2-baseline-full-sweep`.
 -   **Run:** [`runs/experiments/extended-budget-paired-on-trunk-20260423-184410`](../runs/experiments/extended-budget-paired-on-trunk-20260423-184410)
 -   **Branch:** `lab/extended-budget-paired-on-trunk` — not opened (reject: verdict rejected by critique; head=`dd03751`)
@@ -268,7 +268,7 @@ _(pending)_
 | `basic_30_8192` | `basic` | 28 | 3 | 25 | 10.7% | $2.28 |
 | `basic_60_16384` | `basic` | 28 | 4 | 24 | 14.3% | $6.58 |
 ### Mutation impact
-Relative to current best `basic_30_8192` (10.7% pass, 3/28), both extended budgets improved to 14.3% (4/28), a +3.6 percentage-point gain driven entirely by the `scientific_computing` task `tune-mjcf`; `crack-7z-hash`, `headless-terminal`, and `pytorch-model-cli` already passed across legs and only changed on efficiency. The 60-turn/16k leg captured the full pass-rate gain at 2.9x baseline cost ($6.58 vs $2.28), while the 120-turn/32k leg added 0 extra percentage points over 60-turn and raised cost to 9.1x current best ($20.63). The causal pattern is narrow: extra search budget helps evaluator-guided optimization, but on most tasks it just prolongs the same `repeated_failed_command` / `timeout_no_recovery` loops and increases `hallucinated_success`.
+Relative to baseline `basic_30_8192` (10.7% pass, 3/28), both extended budgets improved to 14.3% (4/28), a +3.6 percentage-point gain driven entirely by the `scientific_computing` task `tune-mjcf`; `crack-7z-hash`, `headless-terminal`, and `pytorch-model-cli` already passed across legs and only changed on efficiency. The 60-turn/16k leg captured the full pass-rate gain at 2.9x baseline cost ($6.58 vs $2.28), while the 120-turn/32k leg added 0 extra percentage points over 60-turn and raised cost to 9.1x baseline cost ($20.63). The causal pattern is narrow: extra search budget helps evaluator-guided optimization, but on most tasks it just prolongs the same `repeated_failed_command` / `timeout_no_recovery` loops and increases `hallucinated_success`.
 ### Failure modes
 -   **repeated_command_loops** (×64): 64/84 trials carried `repeated_failed_command` or `timeout_no_recovery`: the agent kept rerunning near-identical probes after a blocker instead of switching strategy.
 -   **premature_abandonment** (×31): 31 trials were tagged `gave_up_too_early`, usually after the first missing-tool or hard-instance signal rather than after a verifier-grounded recovery attempt.
@@ -276,14 +276,15 @@ Relative to current best `basic_30_8192` (10.7% pass, 3/28), both extended budge
 -   **required_artifact_never_written** (×15): 15 trials made partial analytical progress but still never wrote the required output artifact, which is the decisive miss on tasks like `db-wal-recovery`, `password-recovery`, and `write-compressor`.
 -   **insufficient_workspace_inspection** (×14): 14 trials were tagged `no_pre_edit_inspection`, with the agent locking onto regex-only or guessed-distribution plans before inspecting the real workspace and verifier contract.
 -   **false_completion_after_partial_validation** (×6): 6 trials showed `hallucinated_success` or `partial_verification`: the agent treated a partial local check as completion even though the verifier still exercised missing paths.
-### Tree effect
--   **Verdict:** **Reject** — auto-applied
--   **Target:** `basic`
--   **Pair:** baseline leg `basic_120_32768` vs mutation `basic_30_8192`
--   **Δ pass-rate:** -3.57 pp
--   **Δ $/pass:** -85.3%
+### Experiment evaluation
+-   **Verdict:** **Reject** — evaluation applied
+-   **Target:** `extended-budget-basic`
+-   **Ranking:** not assigned here; compare via the dynamic leaderboard within the same model/dataset group.
+-   **Pair:** baseline leg `basic_30_8192` vs candidate `basic_60_16384` / `basic_120_32768`
+-   **Δ pass-rate:** +3.6 pp for both extended budgets on this slice
+-   **Δ $/pass:** worse value: 60-turn cost/pass +116%; 120-turn cost/pass +578%
 -   **Confidence:** 0.71
--   **Rationale:** Δ pass-rate = -3.6pp; Δ $/pass = -85%; no positive cluster. (also: basic_60_16384 → no_op: Inconclusive: Δ pass-rate = +0.0pp (current best 14.3% vs mutation 14.3%); 0 positive cluster(s) (threshold 2); Δ $/pass = -68%.)
+-   **Rationale:** Reject as an implementation change: the slice gained only one extra pass, the 120-turn leg added no score over 60 turns, and both extended-budget variants were much less efficient than the baseline. Keep the result as slice evidence for budget/capability analysis; do not treat the verdict as a leaderboard selection.
 -   **Evidence:** [`experiment-critic.json`](../runs/experiments/extended-budget-paired-on-trunk-20260423-184410/critic/experiment-critic.json), [`comparisons`](../runs/experiments/extended-budget-paired-on-trunk-20260423-184410/critic/comparisons), [`critic_summary.md`](../runs/experiments/extended-budget-paired-on-trunk-20260423-184410/results/critic_summary.md)
 
 | Cluster | baseline pass | mut pass | Δ pp |
@@ -305,7 +306,7 @@ Relative to current best `basic_30_8192` (10.7% pass, 3/28), both extended budge
 ## 2026-04-17 — tb2-baseline-full-sweep
 
 -   **Type:** broad-sweep
--   **Current best at run-time:** none (this run anchored the current best)
+-   **Baseline at run-time:** none (initial full-suite measurement)
 -   **Hypothesis:** the post-reset baseline runs cleanly across all of `terminal-bench@2.0` and produces a real per-agent pass-rate distribution to anchor every future ablation.
 -   **Run:** [`runs/experiments/tb2-baseline-20260417-234913`](../runs/experiments/tb2-baseline-20260417-234913)
 
@@ -322,12 +323,13 @@ Relative to current best `basic_30_8192` (10.7% pass, 3/28), both extended budge
 -   **Spread:** +11.2 pp
 -   _(experiment-critic JSON missing a `mutation_impact` field; this is a DB-only fallback.)_
 
-### Tree effect
--   **Verdict:** **Accept** — anchored current best
+### Experiment evaluation
+-   **Verdict:** **No-op** — baseline measurement retained for ranking
 -   **Target:** `basic`
 -   **Pair:** full-suite sweep of `basic`, `planner_executor`, and `react`
+-   **Ranking:** dynamic leaderboard selects the best leg per model/dataset; this evaluation only records that the sweep is valid evidence.
 -   **Confidence:** 1.00
--   **Rationale:** `basic` was the strongest full-suite baseline: 22.5% pass rate (20/89) at $5.84. `react` and `planner_executor` were not retained as current-best candidates; their narrow cluster signals are diagnostic only and require fresh leakage-free follow-up before promotion.
+-   **Rationale:** Valid full-suite measurement. `basic` ranked highest within `gemini-3.1-flash-lite-preview` on `terminal-bench@2.0` (20/89, 22.5%, $5.84). `react` and `planner_executor` remain diagnostic evidence only; ranking, not this verdict, determines best status over time.
 -   **Evidence:** [`experiment-critic.json`](../runs/experiments/tb2-baseline-20260417-234913/critic/experiment-critic.json), [`comparisons`](../runs/experiments/tb2-baseline-20260417-234913/critic/comparisons), [`critic_summary.md`](../runs/experiments/tb2-baseline-20260417-234913/results/critic_summary.md)
 
 ### Linked follow-ups
