@@ -19,7 +19,7 @@
       {% for point in chart.points %}
         <g>
           <circle cx="{{ '%.1f'|format(point.x) }}" cy="{{ '%.1f'|format(point.y) }}" r="4" class="fill-white stroke-emerald-600" stroke-width="2" />
-          <title>{{ point.agent_id }} · {{ '%.1f'|format(point.pct) }}%{% if point.delta_pp is not none %} · {{ fmt_delta(point.delta_pp) }} pp{% endif %}</title>
+          <title>{{ point.instance_id or 'no experiment id' }} · {{ point.agent_id }} · {{ '%.1f'|format(point.pct) }}%{% if point.delta_pp is not none %} · {{ fmt_delta(point.delta_pp) }} pp{% endif %}</title>
         </g>
       {% endfor %}
     </svg>
@@ -27,9 +27,9 @@
   <div class="mt-3 flex flex-wrap gap-2 text-xs">
     {% for point in trajectory[-5:] %}
       <a href="{% if point.instance_id %}/runs/{{ point.instance_id }}{% else %}/catalog?tab=configs{% endif %}"
-         class="rounded border border-slate-200 px-2 py-1 hover:bg-slate-50">
-        <span class="font-mono">{{ point.agent_id }}</span>
-        <span class="text-slate-500">{{ '{:.0f}%'.format(point.pass_rate_pct) if point.pass_rate_pct is not none else '—' }}</span>
+         class="max-w-full rounded border border-slate-200 px-2 py-1 hover:bg-slate-50">
+        <span class="font-mono break-all">{{ point.instance_id or point.agent_id }}</span>
+        <span class="text-slate-500">{{ point.agent_id }} · {{ '{:.0f}%'.format(point.pass_rate_pct) if point.pass_rate_pct is not none else '—' }}</span>
       </a>
     {% endfor %}
   </div>

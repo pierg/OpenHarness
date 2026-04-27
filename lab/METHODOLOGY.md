@@ -68,11 +68,14 @@ are:
   measured goal, and the implementation should land with the lab
   metadata.
 - `reject` — the candidate is worse, invalid, too costly, or otherwise
-  not worth keeping as implemented. The lab should keep the evidence
-  and discard the implementation branch.
+  not worth keeping as implemented. The lab should keep the evidence,
+  comment on the experiment PR, close it unmerged, and preserve the
+  discarded implementation SHA.
 - `no_op` — the run was inconclusive, measurement-only, underpowered, or
   useful mainly as trend data. The lab should keep the metadata and
-  decide in replan whether a clearer follow-up is worth running.
+  decide in replan whether a clearer follow-up is worth running. The
+  experiment PR should be commented on and closed unless the outcome is
+  reclassified before finalize.
 
 Confidence is a judgment field, not a threshold. The critic should
 explain the evidence, the likely causal story, and any generalization
@@ -96,4 +99,5 @@ the evidence suggests a sharper next question.
   routing behavior
 - preserving a complex mechanism when a simpler experiment would answer
   the same question
-- letting finalize succeed without a merged outcome back to `main`
+- letting finalize succeed without a durable lab outcome on `main`
+- overwriting the experiment PR link with a metadata-only bookkeeping PR

@@ -23,6 +23,8 @@ stays fast.
 
 from __future__ import annotations
 
+import pytest
+
 from openharness.lab.web import commands as labcmd
 
 
@@ -357,6 +359,36 @@ def test_leaderboard_partials_render() -> None:
         assert r.status_code == 200, f"{path} -> {r.status_code}"
         choices = markers if isinstance(markers, tuple) else (markers,)
         assert any(marker in r.text for marker in choices), path
+
+
+def test_leaderboard_trajectory_shows_experiment_ids(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from datetime import datetime, timezone
+
+    from openharness.lab.web import data as labdata
+    from openharness.lab.web.models import ImprovementPoint
+
+    instance_id = "exp-20260427-unique-pr-audit"
+    monkeypatch.setattr(
+        labdata.LabReader,
+        "improvement_trajectory",
+        lambda _self: [
+            ImprovementPoint(
+                at_ts=datetime(2026, 4, 27, tzinfo=timezone.utc),
+                agent_id="candidate-agent",
+                instance_id=instance_id,
+                pass_rate_pct=42.0,
+                delta_pp=None,
+                rationale="accepted",
+            )
+        ],
+    )
+
+    r = _client().get("/_hx/leaderboard-trajectory")
+    assert r.status_code == 200
+    assert instance_id in r.text
+    assert "candidate-agent" in r.text
 
 
 def test_you_owe_partial_renders_or_is_empty_state() -> None:

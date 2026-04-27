@@ -1,6 +1,6 @@
 -- 0003_pr_url.sql — record the PR URL and the discarded-branch SHA on tree_diffs.
 --
--- Background. Every experiment outcome opens or records a PR via
+-- Background. Every experiment outcome opens a canonical PR via
 -- `lab-finalize-pr` and
 -- the PR URL is stored in the journal markdown's `**Branch:**`
 -- bullet. That's the human-readable source of truth, but the web UI
@@ -8,17 +8,17 @@
 -- have to scrape markdown to render "show me every open lab PR" or
 -- "is the accepted experiment X already merged".
 --
--- Background — discarded branches. For `reject` / `no_op` verdicts
--- the worktree is removed and the branch deleted, so the audit
--- trail otherwise loses the last commit SHA. We capture it here so
--- a curious human can fetch it back later (`git fetch origin
--- <sha>:retro/<slug>`).
+-- Background — discarded implementations. For `reject` / `no_op`
+-- verdicts the canonical experiment PR is closed unmerged, and the
+-- durable metadata sync must not replace that PR link. We capture the
+-- discarded implementation SHA here so a curious human can fetch it
+-- back later (`git fetch origin <sha>:retro/<slug>`).
 --
 -- Both columns are nullable because:
 --   - tree_diffs rows are created BEFORE the PR exists (the daemon's
 --     critique phase writes them; finalize fills these in later).
---   - metadata-only rows naturally carry branch_sha for the discarded
---     implementation branch.
+--   - closed rejected/no-op experiment PR rows naturally carry
+--     branch_sha for the discarded implementation branch.
 
 ALTER TABLE tree_diffs ADD COLUMN IF NOT EXISTS pr_url TEXT;
 ALTER TABLE tree_diffs ADD COLUMN IF NOT EXISTS branch_sha TEXT;

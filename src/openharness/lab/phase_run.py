@@ -120,8 +120,8 @@ def append_journal_stub(
 
     The ``Branch:`` bullet is recorded immediately — by phase 3 the
     branch already exists in the worktree, even if no PR has been
-    opened yet. Finalize will rewrite it later with the PR URL or a
-    "not opened" reason.
+    opened yet. Finalize will rewrite it later with the canonical PR
+    URL and, for rejected/no-op outcomes, the closed-PR reason.
 
     Idempotent: a previous tick may have stubbed this entry already,
     in which case we no-op.

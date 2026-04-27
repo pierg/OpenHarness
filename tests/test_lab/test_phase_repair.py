@@ -400,7 +400,7 @@ def test_phase_finalize_retries_unmerged_finalize_json(
     ps.mark_failed(
         "alpha",
         "finalize",
-        error="finalize did not merge the experiment outcome back to main",
+        error="finalize did not sync the experiment outcome back to main",
     )
     finalize_path = ps.slug_dir("alpha") / "finalize.json"
     finalize_path.write_text(json.dumps({
@@ -415,7 +415,14 @@ def test_phase_finalize_retries_unmerged_finalize_json(
         finalize_path.write_text(json.dumps({
             "merged": True,
             "cleanup_worktree": False,
+            "experiment_pr_url": "https://github.com/pierg/OpenHarness/pull/99",
+            "experiment_pr_state": "closed",
+            "metadata_pr_url": "https://github.com/pierg/OpenHarness/pull/100",
             "pr_url": "https://github.com/pierg/OpenHarness/pull/99",
+            "pr_urls": [
+                "https://github.com/pierg/OpenHarness/pull/99",
+                "https://github.com/pierg/OpenHarness/pull/100",
+            ],
             "discarded_sha": "deadbeef",
         }))
         return SimpleNamespace(
@@ -450,6 +457,7 @@ def test_phase_finalize_retries_unmerged_finalize_json(
     assert rec.payload["merged"] is True
     assert rec.failure_count == 0
     assert merged[0]["pr_url"] == "https://github.com/pierg/OpenHarness/pull/99"
+    assert merged[0]["branch_sha"] == "deadbeef"
 
 
 def test_process_entry_pauses_after_requested_phase(
