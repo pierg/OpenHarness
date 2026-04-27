@@ -88,9 +88,7 @@ def _collect_trial_results(job_result_path: Path) -> list[TrialResult]:
         exception = harbor_data.get("exception_info")
         trace_id = oh_data.get("trace_id") or metadata.get("trace_id")
         raw_trace_url = oh_data.get("trace_url") or metadata.get("trace_url")
-        trace_url = (
-            rewrite_trace_url_for_public(str(raw_trace_url)) if raw_trace_url else None
-        )
+        trace_url = rewrite_trace_url_for_public(str(raw_trace_url)) if raw_trace_url else None
 
         score_value: float | None = float(score) if isinstance(score, (int, float)) else None
         agent_duration = _phase_duration(harbor_data.get("agent_execution"))

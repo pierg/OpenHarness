@@ -49,10 +49,7 @@ err_console = Console(stderr=True)
 svc_app = typer.Typer(
     no_args_is_help=False,
     invoke_without_command=True,
-    help=(
-        "Operate the lab's systemd-supervised services "
-        "(web UI + orchestrator daemon)."
-    ),
+    help=("Operate the lab's systemd-supervised services (web UI + orchestrator daemon)."),
 )
 
 
@@ -64,18 +61,18 @@ svc_app = typer.Typer(
 # real key in `labsvc._UNIT_DESC` so we can't accidentally route to
 # an unrelated unit on the host.
 _UNIT_ALIASES: dict[str, list[labsvc.UnitId]] = {
-    "web":     ["openharness-lab"],
-    "webui":   ["openharness-lab"],
-    "ui":      ["openharness-lab"],
-    "daemon":  ["openharness-daemon"],
-    "d":       ["openharness-daemon"],
-    "orch":    ["openharness-daemon"],
-    "all":     ["openharness-lab", "openharness-daemon"],
-    "both":    ["openharness-lab", "openharness-daemon"],
+    "web": ["openharness-lab"],
+    "webui": ["openharness-lab"],
+    "ui": ["openharness-lab"],
+    "daemon": ["openharness-daemon"],
+    "d": ["openharness-daemon"],
+    "orch": ["openharness-daemon"],
+    "all": ["openharness-lab", "openharness-daemon"],
+    "both": ["openharness-lab", "openharness-daemon"],
 }
 
 _PRETTY_NAME: dict[labsvc.UnitId, str] = {
-    "openharness-lab":    "web UI",
+    "openharness-lab": "web UI",
     "openharness-daemon": "orchestrator daemon",
 }
 
@@ -88,9 +85,7 @@ _LOCK_PATH = LAB_RUNS_ROOT / "orchestrator.lock"
 def _resolve_units(arg: str) -> list[labsvc.UnitId]:
     if arg not in _UNIT_ALIASES:
         valid = ", ".join(sorted(set(_UNIT_ALIASES) - {"webui", "ui", "d", "orch", "both"}))
-        err_console.print(
-            f"[red]error:[/red] unknown unit '{arg}' (use: {valid})"
-        )
+        err_console.print(f"[red]error:[/red] unknown unit '{arg}' (use: {valid})")
         raise typer.Exit(2)
     return _UNIT_ALIASES[arg]
 
@@ -126,9 +121,7 @@ def _print_unit_line(s: labsvc.UnitStatus) -> None:
         return
     if s.load_state == "not-found":
         console.print(f"  [yellow]○[/yellow] {pretty:<22}  not installed")
-        console.print(
-            "    [dim]install with:[/dim] bash scripts/systemd/install.sh"
-        )
+        console.print("    [dim]install with:[/dim] bash scripts/systemd/install.sh")
         return
     if s.is_active and s.active_state == "active":
         sub = s.sub_state or "running"
@@ -153,6 +146,7 @@ def _print_unit_line(s: labsvc.UnitStatus) -> None:
 def _port_listening(host: str, port: int) -> bool:
     """Cheap connect-and-close to test whether someone is bound."""
     import socket as _sock
+
     s = _sock.socket(_sock.AF_INET, _sock.SOCK_STREAM)
     s.settimeout(0.5)
     try:
@@ -174,8 +168,10 @@ def _read_lock() -> tuple[Optional[int], Optional[str]]:
         return None, None
     pid = data.get("pid")
     started = data.get("started_at")
-    return (int(pid) if isinstance(pid, int) else None,
-            str(started) if isinstance(started, str) else None)
+    return (
+        int(pid) if isinstance(pid, int) else None,
+        str(started) if isinstance(started, str) else None,
+    )
 
 
 def _pid_alive(pid: int) -> bool:
@@ -193,8 +189,7 @@ def status() -> None:
     """Show health of every supervised service in one screen."""
     if not labsvc.available():
         err_console.print(
-            "[yellow]warn:[/yellow] systemctl not on PATH — "
-            "showing minimal info only."
+            "[yellow]warn:[/yellow] systemctl not on PATH — showing minimal info only."
         )
 
     console.print("[bold]Services[/bold]")
@@ -204,13 +199,9 @@ def status() -> None:
     console.print()
     console.print("[bold]Web UI[/bold]")
     if _port_listening(_WEBUI_HOST, _WEBUI_PORT):
-        console.print(
-            f"  [green]●[/green] listening at http://{_WEBUI_HOST}:{_WEBUI_PORT}/"
-        )
+        console.print(f"  [green]●[/green] listening at http://{_WEBUI_HOST}:{_WEBUI_PORT}/")
     else:
-        console.print(
-            f"  [dim]○[/dim] not reachable at {_WEBUI_HOST}:{_WEBUI_PORT}"
-        )
+        console.print(f"  [dim]○[/dim] not reachable at {_WEBUI_HOST}:{_WEBUI_PORT}")
 
     console.print()
     console.print("[bold]Orchestrator lock[/bold]")
@@ -219,13 +210,10 @@ def status() -> None:
         console.print("  [dim]○[/dim] no lock")
     elif _pid_alive(pid):
         console.print(
-            f"  [green]●[/green] held by pid {pid}"
-            + (f" (since {started})" if started else "")
+            f"  [green]●[/green] held by pid {pid}" + (f" (since {started})" if started else "")
         )
     else:
-        console.print(
-            f"  [red]●[/red] stale (pid {pid} — process gone)"
-        )
+        console.print(f"  [red]●[/red] stale (pid {pid} — process gone)")
         console.print(f"    [dim]clean up:[/dim] rm {_LOCK_PATH}")
 
     console.print()
@@ -255,9 +243,7 @@ def _do_action(action: str, unit_arg: str) -> None:
         console.print(f"[bold]{action}[/bold] {u}")
         rc = subprocess.call([bin_, "--user", action, f"{u}.service"])
         if rc != 0:
-            err_console.print(
-                f"[red]error:[/red] systemctl {action} {u}.service exited {rc}"
-            )
+            err_console.print(f"[red]error:[/red] systemctl {action} {u}.service exited {rc}")
             failures += 1
     if failures:
         raise typer.Exit(1)

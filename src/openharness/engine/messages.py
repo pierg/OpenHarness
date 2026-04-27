@@ -8,38 +8,7 @@ from pathlib import Path
 from typing import Any, Annotated, Literal
 from uuid import uuid4
 
-from pydantic import BaseModel, Field, PlainSerializer, PlainValidator, field_validator
-
-
-def _validate_thought_signature(value: Any) -> bytes | None:
-    """Accept raw bytes, base64 strings, or None."""
-    if value is None:
-        return None
-    if isinstance(value, bytes):
-        return value
-    if isinstance(value, str):
-        try:
-            return base64.b64decode(value, validate=True)
-        except Exception as exc:
-            raise ValueError(f"invalid base64 thought_signature: {exc}") from exc
-    raise TypeError(
-        f"thought_signature must be bytes, base64 str, or None; got {type(value).__name__}"
-    )
-
-
-def _serialize_thought_signature(value: bytes | None) -> str | None:
-    if value is None:
-        return None
-    return base64.b64encode(value).decode("ascii")
-
-
-# Opaque Gemini "thought signature" that must be echoed back on subsequent turns.
-# Raw bytes in memory, base64 in JSON serialization.
-ThoughtSignature = Annotated[
-    bytes | None,
-    PlainValidator(_validate_thought_signature),
-    PlainSerializer(_serialize_thought_signature, when_used="json"),
-]
+from pydantic import BaseModel, Field, field_validator
 
 
 class TextBlock(BaseModel):
@@ -47,11 +16,6 @@ class TextBlock(BaseModel):
 
     type: Literal["text"] = "text"
     text: str
-    # Gemini thought signatures are opaque byte strings that must be echoed back
-    # verbatim on subsequent turns. Stored as raw ``bytes`` in memory; JSON-dumped
-    # as base64 so we get a portable round-trip through messages.jsonl (the raw
-    # bytes are typically not valid UTF-8).
-    thought_signature: ThoughtSignature = None
 
 
 class ImageBlock(BaseModel):
@@ -80,8 +44,6 @@ class ToolUseBlock(BaseModel):
     id: str = Field(default_factory=lambda: f"toolu_{uuid4().hex}")
     name: str
     input: dict[str, Any] = Field(default_factory=dict)
-    # Gemini thought signatures are opaque byte strings (see TextBlock above).
-    thought_signature: ThoughtSignature = None
 
 
 class ToolResultBlock(BaseModel):
@@ -154,12 +116,61 @@ class ConversationMessage(BaseModel):
 def sanitize_conversation_messages(
     messages: list[ConversationMessage],
 ) -> list[ConversationMessage]:
-    """Drop legacy empty assistant messages while preserving other content."""
+    """Normalize restored conversation history into a provider-safe sequence.
+
+    This drops legacy empty assistant messages and trims malformed trailing tool
+    turns, such as an assistant ``tool_use`` message that never received a
+    matching user ``tool_result`` response. Those broken tails can happen when a
+    session is interrupted mid-turn and would later cause OpenAI-compatible
+    providers to reject the resumed conversation.
+    """
     sanitized: list[ConversationMessage] = []
+    pending_tool_use_ids: set[str] = set()
+    pending_tool_use_index: int | None = None
+
     for message in messages:
         if message.role == "assistant" and message.is_effectively_empty():
             continue
+
+        tool_uses = message.tool_uses if message.role == "assistant" else []
+        tool_results = (
+            [block for block in message.content if isinstance(block, ToolResultBlock)]
+            if message.role == "user"
+            else []
+        )
+
+        matched_pending_tool_results = False
+        if pending_tool_use_ids:
+            result_ids = {block.tool_use_id for block in tool_results}
+            if message.role != "user" or not pending_tool_use_ids.issubset(result_ids):
+                if pending_tool_use_index is not None and pending_tool_use_index < len(sanitized):
+                    sanitized.pop(pending_tool_use_index)
+                pending_tool_use_ids = set()
+                pending_tool_use_index = None
+            else:
+                matched_pending_tool_results = True
+                pending_tool_use_ids = set()
+                pending_tool_use_index = None
+
+        if message.role == "user" and tool_results and not matched_pending_tool_results:
+            content = [block for block in message.content if not isinstance(block, ToolResultBlock)]
+            if not content:
+                continue
+            message = ConversationMessage(role="user", content=content)
+
         sanitized.append(message)
+
+        if tool_uses:
+            pending_tool_use_ids = {block.id for block in tool_uses}
+            pending_tool_use_index = len(sanitized) - 1
+
+    if (
+        pending_tool_use_ids
+        and pending_tool_use_index is not None
+        and pending_tool_use_index < len(sanitized)
+    ):
+        sanitized.pop(pending_tool_use_index)
+
     return sanitized
 
 

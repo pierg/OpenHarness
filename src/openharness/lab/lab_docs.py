@@ -112,7 +112,7 @@ def _split_top_sections(text: str, level: int = 2) -> list[tuple[str | None, str
     for line in text.splitlines():
         if line.startswith(prefix) and not line.startswith(prefix + "#"):
             parts.append((cur_heading, "\n".join(cur_lines).strip("\n")))
-            cur_heading = line[len(prefix):].strip()
+            cur_heading = line[len(prefix) :].strip()
             cur_lines = []
         else:
             cur_lines.append(line)
@@ -185,9 +185,7 @@ def _strip_blank(lines: list[str]) -> list[str]:
     return lines
 
 
-def find_idea_entry(
-    text: str, idea_id: str
-) -> tuple[str, IdeaEntry] | None:
+def find_idea_entry(text: str, idea_id: str) -> tuple[str, IdeaEntry] | None:
     parsed = parse_ideas(text)
     for section, entries in parsed.items():
         for entry in entries:
@@ -279,9 +277,7 @@ def move_idea(
         and target_theme is not None
         and target_theme not in VALID_THEMES
     ):
-        raise LabDocError(
-            f"Unknown idea theme: {target_theme!r} (valid: {VALID_THEMES})"
-        )
+        raise LabDocError(f"Unknown idea theme: {target_theme!r} (valid: {VALID_THEMES})")
     path = _ideas_path(lab_root)
     text = _read(path)
     preamble, parsed = _split_ideas_preamble(text)
@@ -333,13 +329,9 @@ def append_idea(
 ) -> str:
     """Append a fresh idea under `## Proposed > <theme>`."""
     if not re.fullmatch(r"[a-z][a-z0-9-]*", idea_id):
-        raise LabDocError(
-            f"Idea id {idea_id!r} must be kebab-case ([a-z][a-z0-9-]*)."
-        )
+        raise LabDocError(f"Idea id {idea_id!r} must be kebab-case ([a-z][a-z0-9-]*).")
     if theme not in VALID_THEMES:
-        raise LabDocError(
-            f"Unknown idea theme: {theme!r} (valid: {VALID_THEMES})"
-        )
+        raise LabDocError(f"Unknown idea theme: {theme!r} (valid: {VALID_THEMES})")
     path = _ideas_path(lab_root)
     text = _read(path)
     preamble, parsed = _split_ideas_preamble(text)
@@ -372,16 +364,12 @@ def append_auto_proposed_idea(
     until they manually promote one to `## Proposed`).
     """
     if not re.fullmatch(r"[a-z][a-z0-9-]*", idea_id):
-        raise LabDocError(
-            f"Idea id {idea_id!r} must be kebab-case ([a-z][a-z0-9-]*)."
-        )
+        raise LabDocError(f"Idea id {idea_id!r} must be kebab-case ([a-z][a-z0-9-]*).")
     path = _ideas_path(lab_root)
     text = _read(path)
 
     if re.search(rf"^####\s+{re.escape(idea_id)}\s*$", text, re.MULTILINE):
-        raise LabDocError(
-            f"Idea id {idea_id!r} already exists somewhere in {path}; pick another."
-        )
+        raise LabDocError(f"Idea id {idea_id!r} already exists somewhere in {path}; pick another.")
 
     if "## Auto-proposed" not in text:
         # Insert a new section at the very bottom so humans see it last.
@@ -473,14 +461,12 @@ def move_roadmap_entry_to_done(
             other.append((heading, body))
     if up_next is None:
         raise LabDocError("No `## Up next` section in roadmap.md")
-    pattern = re.compile(
-        r"(### " + re.escape(slug) + r"\b.*?)(?=\n### |\Z)", re.DOTALL
-    )
+    pattern = re.compile(r"(### " + re.escape(slug) + r"\b.*?)(?=\n### |\Z)", re.DOTALL)
     m = pattern.search(up_next[1])
     if not m:
         raise LabDocError(f"No roadmap entry {slug!r} in `## Up next`")
     entry = m.group(1).rstrip()
-    new_up_body = (up_next[1][: m.start()] + up_next[1][m.end():]).strip() or "_(none)_"
+    new_up_body = (up_next[1][: m.start()] + up_next[1][m.end() :]).strip() or "_(none)_"
     entry += f"\n\n-   **Ran:** {ran_link.strip()}\n-   **Outcome:** {outcome.strip()}"
     done_body = (done[1] if done else "").strip()
     if not done_body or done_body == "_(none)_":
@@ -508,9 +494,7 @@ def move_roadmap_entry(
     """Reorder one ``## Up next > ### <slug>`` entry within the main queue."""
     choices = [bool(before), bool(after), to_top, to_bottom]
     if sum(int(v) for v in choices) != 1:
-        raise LabDocError(
-            "roadmap move requires exactly one of before/after/to_top/to_bottom"
-        )
+        raise LabDocError("roadmap move requires exactly one of before/after/to_top/to_bottom")
     path = _roadmap_path(lab_root)
     text = _read(path)
     parts = _split_top_sections(text, level=2)
@@ -564,9 +548,7 @@ def move_roadmap_entry(
 
 def _entry_pattern(slug: str) -> "re.Pattern[str]":
     return re.compile(
-        r"(?P<header>## \d{4}-\d{2}-\d{2} — "
-        + re.escape(slug)
-        + r"\b.*?)(?=\n## |\Z)",
+        r"(?P<header>## \d{4}-\d{2}-\d{2} — " + re.escape(slug) + r"\b.*?)(?=\n## |\Z)",
         re.DOTALL,
     )
 
@@ -630,9 +612,7 @@ def set_section(
             idx = len(JOURNAL_SECTIONS)
         successor: re.Match | None = None
         for s in JOURNAL_SECTIONS[idx + 1 :]:
-            m = re.search(
-                r"^### " + re.escape(s) + r"\s*$", entry, re.MULTILINE
-            )
+            m = re.search(r"^### " + re.escape(s) + r"\s*$", entry, re.MULTILINE)
             if m:
                 successor = m
                 break
@@ -746,15 +726,10 @@ def set_journal_run_path(
     path = _experiments_path(lab_root)
     text = _read(path)
     start, end, entry = _entry_text(text, slug)
-    rendered = (
-        f"-   **Run:** [`runs/experiments/{instance_id}`]"
-        f"(../runs/experiments/{instance_id})"
-    )
+    rendered = f"-   **Run:** [`runs/experiments/{instance_id}`](../runs/experiments/{instance_id})"
     new_entry, n = _RUN_BULLET_RE.subn(rendered, entry, count=1)
     if n == 0:
-        raise LabDocError(
-            f"No **Run:** bullet found in journal entry for {slug!r}."
-        )
+        raise LabDocError(f"No **Run:** bullet found in journal entry for {slug!r}.")
     new_text = text[:start] + new_entry.rstrip() + "\n" + text[end:]
     _write(path, new_text)
     return new_text
@@ -821,7 +796,7 @@ def set_journal_branch(
                 f"Cannot place Branch bullet in entry {slug!r}: "
                 "no **Run:** bullet found to anchor against."
             )
-        new_entry = entry[: m.end()] + "\n" + rendered + entry[m.end():]
+        new_entry = entry[: m.end()] + "\n" + rendered + entry[m.end() :]
     else:
         new_entry = _BRANCH_BULLET_RE.sub(rendered, entry, count=1)
 
@@ -885,22 +860,26 @@ def tree_snapshot(*, lab_root: Path = LAB_ROOT) -> TreeSnapshot:
     for row in _parse_md_table(parts.get("Rejected", "")):
         if len(row) < 2:
             continue
-        rejected.append(TreeRejected(
-            branch_id=_strip_md_link(row[0]),
-            reason=row[1],
-            evidence=row[2] if len(row) > 2 else None,
-        ))
+        rejected.append(
+            TreeRejected(
+                branch_id=_strip_md_link(row[0]),
+                reason=row[1],
+                evidence=row[2] if len(row) > 2 else None,
+            )
+        )
 
     proposed: list[TreeProposed] = []
     proposed_body = parts.get("Proposed", "")
     for row in _parse_md_table(proposed_body):
         if len(row) < 2:
             continue
-        proposed.append(TreeProposed(
-            branch_id=_strip_md_link(row[0]),
-            sketch=row[1],
-            linked_idea=row[2] if len(row) > 2 else None,
-        ))
+        proposed.append(
+            TreeProposed(
+                branch_id=_strip_md_link(row[0]),
+                sketch=row[1],
+                linked_idea=row[2] if len(row) > 2 else None,
+            )
+        )
 
     return TreeSnapshot(
         operational_baseline_id=operational_baseline_id,
@@ -1050,14 +1029,22 @@ def add_suggested_followup(
         if h == "Up next":
             found_up_next = True
             new_body = _set_or_append_suggested(
-                b, slug=slug, hypothesis=hypothesis, source=source, cost=cost,
+                b,
+                slug=slug,
+                hypothesis=hypothesis,
+                source=source,
+                cost=cost,
             )
             rebuilt.append(f"## Up next\n\n{new_body.rstrip()}")
         else:
             rebuilt.append(f"## {h}\n\n{b.rstrip()}")
     if not found_up_next:
         body = _set_or_append_suggested(
-            "_(none)_", slug=slug, hypothesis=hypothesis, source=source, cost=cost,
+            "_(none)_",
+            slug=slug,
+            hypothesis=hypothesis,
+            source=source,
+            cost=cost,
         )
         rebuilt.append(f"## Up next\n\n{body.rstrip()}")
     new_text = "\n\n".join(c for c in rebuilt if c.strip()).rstrip() + "\n"
@@ -1090,7 +1077,8 @@ def _set_or_append_suggested(
         sug_body = m.group("body").strip()
         # Drop any prior copy of this slug.
         per_slug = re.compile(
-            rf"#### {re.escape(slug)}\b.*?(?=\n#### |\Z)", re.DOTALL,
+            rf"#### {re.escape(slug)}\b.*?(?=\n#### |\Z)",
+            re.DOTALL,
         )
         sug_body = per_slug.sub("", sug_body).strip()
         if sug_body and sug_body != "_(none)_":
@@ -1098,7 +1086,7 @@ def _set_or_append_suggested(
         else:
             sug_body = bullet.rstrip()
         new_block = f"### Suggested\n\n{sug_body.rstrip()}"
-        return up_next_body[: m.start()] + new_block + up_next_body[m.end():]
+        return up_next_body[: m.start()] + new_block + up_next_body[m.end() :]
     # No Suggested subsection yet — append one at the bottom of Up next.
     new_block = f"### Suggested\n\n{bullet.rstrip()}"
     base = up_next_body.rstrip()
@@ -1163,9 +1151,7 @@ def demote_to_suggested(*, slug: str, lab_root: Path = LAB_ROOT) -> str:
         if h == "Up next":
             new_body, demoted = _demote_to_suggested_inplace(b, slug)
             if not demoted:
-                raise LabDocError(
-                    f"No `## Up next > ### {slug}` entry to demote in roadmap.md."
-                )
+                raise LabDocError(f"No `## Up next > ### {slug}` entry to demote in roadmap.md.")
             found = True
             rebuilt.append(f"## Up next\n\n{new_body.rstrip()}")
         else:
@@ -1193,7 +1179,7 @@ def _demote_to_suggested_inplace(up_next_body: str, slug: str) -> tuple[str, boo
     suggested_block = f"#### {slug}\n\n{entry_body}".rstrip()
 
     # Cut the matched ### block out.
-    body_without = (up_next_body[: m.start()] + up_next_body[m.end():]).strip()
+    body_without = (up_next_body[: m.start()] + up_next_body[m.end() :]).strip()
 
     # Find or insert the Suggested subsection.
     suggested_re = re.compile(
@@ -1205,16 +1191,22 @@ def _demote_to_suggested_inplace(up_next_body: str, slug: str) -> tuple[str, boo
         sug_body = sm.group("body").strip()
         if sug_body == "_(none)_":
             sug_body = ""
-        new_sug_body = (sug_body + "\n\n" + suggested_block).strip() if sug_body else suggested_block
+        new_sug_body = (
+            (sug_body + "\n\n" + suggested_block).strip() if sug_body else suggested_block
+        )
         replaced = f"### Suggested\n\n{new_sug_body}"
-        new_up = body_without[: sm.start()].rstrip() + (
-            "\n\n" if body_without[: sm.start()].strip() else ""
-        ) + replaced + body_without[sm.end():]
+        new_up = (
+            body_without[: sm.start()].rstrip()
+            + ("\n\n" if body_without[: sm.start()].strip() else "")
+            + replaced
+            + body_without[sm.end() :]
+        )
     else:
         # No Suggested section yet — append one at the bottom of Up next.
         sep = "\n\n" if body_without.strip() else ""
         new_up = body_without.rstrip() + sep + f"### Suggested\n\n{suggested_block}"
     return new_up.strip(), True
+
 
 def remove_roadmap_entry(
     *,
@@ -1253,9 +1245,7 @@ def remove_roadmap_entry(
         else:
             rebuilt.append(f"## {h}\n\n{b.rstrip()}")
     if not removed:
-        raise LabDocError(
-            f"No roadmap entry matching slug {slug!r} in sections {sections!r}."
-        )
+        raise LabDocError(f"No roadmap entry matching slug {slug!r} in sections {sections!r}.")
     new_text = "\n\n".join(c for c in rebuilt if c.strip()).rstrip() + "\n"
     _write(path, new_text)
     return new_text
@@ -1264,12 +1254,13 @@ def remove_roadmap_entry(
 def _strip_level3_block(body: str, slug: str) -> tuple[str, bool]:
     """Remove `### <slug>` and its body from a section's body."""
     pattern = re.compile(
-        r"(?:^|\n)### " + re.escape(slug) + r"\b.*?(?=\n### |\Z)", re.DOTALL,
+        r"(?:^|\n)### " + re.escape(slug) + r"\b.*?(?=\n### |\Z)",
+        re.DOTALL,
     )
     m = pattern.search(body)
     if not m:
         return body, False
-    return (body[: m.start()] + body[m.end():]).strip(), True
+    return (body[: m.start()] + body[m.end() :]).strip(), True
 
 
 def _move_up_next_entry(
@@ -1291,17 +1282,14 @@ def _move_up_next_entry(
     if suggested_match:
         suggested_block = suggested_match.group(0).strip()
         main_body = (
-            up_next_body[: suggested_match.start()] + up_next_body[suggested_match.end():]
+            up_next_body[: suggested_match.start()] + up_next_body[suggested_match.end() :]
         ).strip()
 
     pattern = re.compile(
         r"^### (?P<slug>(?!Suggested)\S+)\s*\n.*?(?=^### (?!Suggested)|\Z)",
         re.DOTALL | re.MULTILINE,
     )
-    entries = [
-        (m.group("slug"), m.group(0).strip())
-        for m in pattern.finditer(main_body)
-    ]
+    entries = [(m.group("slug"), m.group(0).strip()) for m in pattern.finditer(main_body)]
     if not entries:
         return up_next_body, False
     index_by_slug = {name: i for i, (name, _) in enumerate(entries)}
@@ -1337,12 +1325,13 @@ def _move_up_next_entry(
 def _strip_level4_block(body: str, slug: str) -> tuple[str, bool]:
     """Remove `#### <slug>` and its body from a Suggested section's body."""
     pattern = re.compile(
-        r"(?:^|\n)#### " + re.escape(slug) + r"\b.*?(?=\n#### |\Z)", re.DOTALL,
+        r"(?:^|\n)#### " + re.escape(slug) + r"\b.*?(?=\n#### |\Z)",
+        re.DOTALL,
     )
     m = pattern.search(body)
     if not m:
         return body, False
-    return (body[: m.start()] + body[m.end():]).strip(), True
+    return (body[: m.start()] + body[m.end() :]).strip(), True
 
 
 def _remove_from_up_next(
@@ -1369,7 +1358,7 @@ def _remove_from_up_next(
                     up_next_body[: sm.start()].rstrip()
                     + ("\n\n" if up_next_body[: sm.start()].strip() else "")
                     + replaced
-                    + up_next_body[sm.end():]
+                    + up_next_body[sm.end() :]
                 ).strip(), True
 
     if "Up next" in sections:
@@ -1382,7 +1371,7 @@ def _remove_from_up_next(
         )
         m = pattern.search(up_next_body)
         if m:
-            return (up_next_body[: m.start()] + up_next_body[m.end():]).strip(), True
+            return (up_next_body[: m.start()] + up_next_body[m.end() :]).strip(), True
 
     return up_next_body, False
 
@@ -1397,7 +1386,8 @@ def _promote_suggested_inplace(up_next_body: str, slug: str) -> tuple[str, bool]
         return up_next_body, False
     sug_body = m.group("body").strip()
     per_slug = re.compile(
-        rf"#### {re.escape(slug)}\b(?P<entry>.*?)(?=\n#### |\Z)", re.DOTALL,
+        rf"#### {re.escape(slug)}\b(?P<entry>.*?)(?=\n#### |\Z)",
+        re.DOTALL,
     )
     em = per_slug.search(sug_body)
     if not em:
@@ -1406,7 +1396,7 @@ def _promote_suggested_inplace(up_next_body: str, slug: str) -> tuple[str, bool]
     new_main_block = f"### {slug}\n\n{body}"
     # Strip the suggested entry, then inject the new main block at the
     # top of Up next (above the Suggested subsection).
-    sug_body_after = (sug_body[: em.start()] + sug_body[em.end():]).strip()
+    sug_body_after = (sug_body[: em.start()] + sug_body[em.end() :]).strip()
     if not sug_body_after:
         sug_body_after = "_(none)_"
     suggested_block_new = f"### Suggested\n\n{sug_body_after}"
@@ -1419,6 +1409,6 @@ def _promote_suggested_inplace(up_next_body: str, slug: str) -> tuple[str, bool]
             if up_next_body[: m.start()].strip()
             else suggested_block_new.rstrip()
         )
-        + up_next_body[m.end():]
+        + up_next_body[m.end() :]
     )
     return new_up.strip(), True

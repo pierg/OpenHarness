@@ -17,8 +17,7 @@ from openharness.engine.query import (
     run_query,
 )
 from openharness.engine.stream_events import AssistantTurnComplete, StreamEvent
-from openharness.hooks import HookExecutor
-from openharness.observability import TraceObserver
+from openharness.hooks import HookEvent, HookExecutor
 from openharness.permissions.checker import PermissionChecker
 from openharness.tools.base import ToolRegistry
 
@@ -43,7 +42,6 @@ class QueryEngine:
         ask_user_prompt: AskUserPrompt | None = None,
         hook_executor: HookExecutor | None = None,
         tool_metadata: dict[str, object] | None = None,
-        trace_observer: TraceObserver | None = None,
     ) -> None:
         self._api_client = api_client
         self._tool_registry = tool_registry
@@ -59,7 +57,6 @@ class QueryEngine:
         self._ask_user_prompt = ask_user_prompt
         self._hook_executor = hook_executor
         self._tool_metadata = tool_metadata or {}
-        self._trace_observer = trace_observer
         self._messages: list[ConversationMessage] = []
         self._cost_tracker = CostTracker()
 
@@ -163,6 +160,14 @@ class QueryEngine:
         if user_message.text.strip():
             remember_user_goal(self._tool_metadata, user_message.text)
         self._messages.append(user_message)
+        if self._hook_executor is not None:
+            await self._hook_executor.execute(
+                HookEvent.USER_PROMPT_SUBMIT,
+                {
+                    "event": HookEvent.USER_PROMPT_SUBMIT.value,
+                    "prompt": user_message.text,
+                },
+            )
         context = QueryContext(
             api_client=self._api_client,
             tool_registry=self._tool_registry,
@@ -178,7 +183,6 @@ class QueryEngine:
             ask_user_prompt=self._ask_user_prompt,
             hook_executor=self._hook_executor,
             tool_metadata=self._tool_metadata,
-            trace_observer=self._trace_observer,
         )
         query_messages = list(self._messages)
         coordinator_context = self._build_coordinator_context_message()
@@ -208,7 +212,6 @@ class QueryEngine:
             ask_user_prompt=self._ask_user_prompt,
             hook_executor=self._hook_executor,
             tool_metadata=self._tool_metadata,
-            trace_observer=self._trace_observer,
         )
         async for event, usage in run_query(context, self._messages):
             if usage is not None:

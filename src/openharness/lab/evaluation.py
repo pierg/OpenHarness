@@ -150,8 +150,7 @@ def _evaluation_from_payload(
     verdict = _normalize_verdict(raw_verdict)
     if verdict is None:
         raise ValueError(
-            "experiment-critic output must include verdict "
-            "with one of: accept, reject, no_op"
+            "experiment-critic output must include verdict with one of: accept, reject, no_op"
         )
 
     baseline_leg = _first_str(payload, "baseline_leg")

@@ -69,12 +69,20 @@ idea_app = typer.Typer(no_args_is_help=True, help="Edit lab/ideas.md.")
 exp_app = typer.Typer(no_args_is_help=True, help="Edit lab/experiments.md.")
 roadmap_app = typer.Typer(no_args_is_help=True, help="Edit lab/roadmap.md.")
 daemon_app = typer.Typer(no_args_is_help=True, help="Orchestrator daemon and phase loop.")
-tree_app = typer.Typer(no_args_is_help=True, help="Inspect / mutate the configuration tree (lab/configs.md).")
+tree_app = typer.Typer(
+    no_args_is_help=True, help="Inspect / mutate the configuration tree (lab/configs.md)."
+)
 evaluation_app = typer.Typer(no_args_is_help=True, help="Apply experiment-critic evaluations.")
-baseline_app = typer.Typer(no_args_is_help=True, help="Show / set the operational baseline pointer.")
+baseline_app = typer.Typer(
+    no_args_is_help=True, help="Show / set the operational baseline pointer."
+)
 leaderboard_app = typer.Typer(no_args_is_help=True, help="Show dynamic experiment rankings.")
-components_app = typer.Typer(no_args_is_help=True, help="Inspect / mutate the components catalog (lab/components.md).")
-runs_app = typer.Typer(no_args_is_help=True, help="Manage runs/experiments/<id>/ directories on disk.")
+components_app = typer.Typer(
+    no_args_is_help=True, help="Inspect / mutate the components catalog (lab/components.md)."
+)
+runs_app = typer.Typer(
+    no_args_is_help=True, help="Manage runs/experiments/<id>/ directories on disk."
+)
 preflight_app = typer.Typer(
     no_args_is_help=True,
     help="Git preflight + per-experiment worktree management (Phase 0 of the lab pipeline).",
@@ -84,6 +92,7 @@ phases_app = typer.Typer(
     help="Inspect / reset per-slug pipeline state in runs/lab/state/<slug>/phases.json.",
 )
 from openharness.lab.svc_cli import svc_app  # noqa: E402  (sub-app, imported after `app`)
+
 app.add_typer(idea_app, name="idea")
 app.add_typer(exp_app, name="experiments")
 app.add_typer(roadmap_app, name="roadmap")
@@ -123,9 +132,18 @@ def info() -> None:
         err_console.print("[yellow]No lab DB yet — run `uv run lab init`.[/yellow]")
         raise typer.Exit(0)
     with labdb.reader() as conn:
-        for tbl in ("experiments", "legs", "trials", "trial_critiques",
-                    "comparisons", "experiment_evaluations", "task_features",
-                    "components_perf", "misconfigurations", "spawns"):
+        for tbl in (
+            "experiments",
+            "legs",
+            "trials",
+            "trial_critiques",
+            "comparisons",
+            "experiment_evaluations",
+            "task_features",
+            "components_perf",
+            "misconfigurations",
+            "spawns",
+        ):
             (n,) = conn.execute(f"SELECT count(*) FROM {tbl}").fetchone()
             console.print(f"  [cyan]{tbl}[/cyan]: {n}")
 
@@ -254,7 +272,8 @@ def write_trial_critique_cmd(
         "-", "--json", help="JSON file path, '-' for stdin, or inline JSON string."
     ),
     critic_model: Optional[str] = typer.Option(
-        None, "--critic-model",
+        None,
+        "--critic-model",
         help="Defaults to $OPENHARNESS_CODEX_MODEL set by the codex adapter.",
     ),
 ) -> None:
@@ -264,7 +283,9 @@ def write_trial_critique_cmd(
         err_console.print(f"[red]trial_dir does not exist: {trial_dir}[/red]")
         raise typer.Exit(2)
     path = critic_io.write_trial_critique(
-        trial_dir, payload, critic_model=critic_model,
+        trial_dir,
+        payload,
+        critic_model=critic_model,
     )
     typer.echo(f"write-trial-critique ok: {path}")
 
@@ -315,8 +336,7 @@ def gemini_trial_critic_cmd(
         persist=not no_persist,
     )
     typer.echo(
-        f"gemini-trial-critic exit={result.exit_code} "
-        f"model={result.model} log={result.log_path}"
+        f"gemini-trial-critic exit={result.exit_code} model={result.model} log={result.log_path}"
     )
     if result.last_message:
         typer.echo(result.last_message)
@@ -394,17 +414,19 @@ def trial_critic_shadow_cmd(
         rows_out: list[dict[str, object]] = []
         for result in sorted(results, key=lambda r: r.args[0]):
             payload = result.payload or {}
-            rows_out.append({
-                "trial_dir": result.args[0],
-                "ok": result.ok,
-                "exit_code": result.exit_code,
-                "log_path": str(result.log_path),
-                "outcome": payload.get("outcome"),
-                "confidence": payload.get("confidence"),
-                "root_cause": payload.get("root_cause"),
-                "success_factor": payload.get("success_factor"),
-                "evidence_source": payload.get("evidence_source"),
-            })
+            rows_out.append(
+                {
+                    "trial_dir": result.args[0],
+                    "ok": result.ok,
+                    "exit_code": result.exit_code,
+                    "log_path": str(result.log_path),
+                    "outcome": payload.get("outcome"),
+                    "confidence": payload.get("confidence"),
+                    "root_cause": payload.get("root_cause"),
+                    "success_factor": payload.get("success_factor"),
+                    "evidence_source": payload.get("evidence_source"),
+                }
+            )
         by_model[model] = rows_out
         ok_count = sum(1 for row in rows_out if row["ok"])
         avg_conf = _avg(
@@ -434,9 +456,7 @@ def trial_critic_shadow_cmd(
             "models": [first, second],
             "comparable": comparable,
             "outcome_agreement": outcome_agree,
-            "outcome_agreement_rate": (
-                outcome_agree / comparable if comparable else None
-            ),
+            "outcome_agreement_rate": (outcome_agree / comparable if comparable else None),
         }
 
     out_dir = LAB_RUNS_ROOT / "trial_critic_shadow"
@@ -449,9 +469,7 @@ def trial_critic_shadow_cmd(
 
 @app.command("write-comparison")
 def write_comparison_cmd(
-    run_dir: Path = typer.Argument(
-        ..., help="Absolute path to the experiment run directory."
-    ),
+    run_dir: Path = typer.Argument(..., help="Absolute path to the experiment run directory."),
     task_name: str = typer.Argument(...),
     json_in: str = typer.Option("-", "--json"),
     critic_model: Optional[str] = typer.Option(None, "--critic-model"),
@@ -462,7 +480,10 @@ def write_comparison_cmd(
         err_console.print(f"[red]run_dir does not exist: {run_dir}[/red]")
         raise typer.Exit(2)
     path = critic_io.write_comparison(
-        run_dir, task_name, payload, critic_model=critic_model,
+        run_dir,
+        task_name,
+        payload,
+        critic_model=critic_model,
     )
     typer.echo(f"write-comparison ok: {path}")
 
@@ -479,7 +500,9 @@ def write_experiment_critique_cmd(
         err_console.print(f"[red]run_dir does not exist: {run_dir}[/red]")
         raise typer.Exit(2)
     path = critic_io.write_experiment_critique(
-        run_dir, payload, critic_model=critic_model,
+        run_dir,
+        payload,
+        critic_model=critic_model,
     )
     typer.echo(f"write-experiment-critique ok: {path}")
 
@@ -489,14 +512,17 @@ def write_task_features_cmd(
     task_checksum: str = typer.Argument(...),
     json_in: str = typer.Option("-", "--json"),
     extracted_by: Optional[str] = typer.Option(
-        None, "--extracted-by",
+        None,
+        "--extracted-by",
         help="Defaults to $OPENHARNESS_CODEX_MODEL set by the codex adapter.",
     ),
 ) -> None:
     """Persist task features to `runs/lab/task_features/<checksum>.json`."""
     payload = _expect_dict(_read_json_arg(json_in), "task-features")
     path = critic_io.write_task_features(
-        task_checksum, payload, extracted_by=extracted_by,
+        task_checksum,
+        payload,
+        extracted_by=extracted_by,
     )
     typer.echo(f"write-task-features ok: {path}")
 
@@ -525,7 +551,9 @@ def write_cross_experiment_cmd(
     """Persist a cross-experiment snapshot to `runs/lab/cross_experiment/`."""
     payload = _expect_dict(_read_json_arg(json_in), "cross-experiment")
     path = critic_io.write_cross_experiment(
-        spawn_id, payload, critic_model=critic_model,
+        spawn_id,
+        payload,
+        critic_model=critic_model,
     )
     typer.echo(f"write-cross-experiment ok: {path}")
 
@@ -554,7 +582,8 @@ def ingest_critiques_cmd(
         ),
     ),
     include_lab_wide: bool = typer.Option(
-        True, "--lab-wide/--no-lab-wide",
+        True,
+        "--lab-wide/--no-lab-wide",
         help=(
             "Also load lab-wide artifacts: task_features, components_perf, "
             "spawns. Off if you only want to refresh per-experiment caches."
@@ -563,7 +592,8 @@ def ingest_critiques_cmd(
 ) -> None:
     """Rebuild the DB cache tables from on-disk critic artifacts."""
     summary = labingest.ingest_critiques(
-        run_dirs or None, include_lab_wide=include_lab_wide,
+        run_dirs or None,
+        include_lab_wide=include_lab_wide,
     )
     typer.echo(
         f"ingest-critiques: trial_critiques={summary['trial_critiques']} "
@@ -581,9 +611,10 @@ def dump_critiques_to_files_cmd(
         None, help="Restrict the dump to one instance. Omit for ALL."
     ),
     overwrite: bool = typer.Option(
-        False, "--overwrite",
+        False,
+        "--overwrite",
         help="Overwrite existing critic files. Off by default — preserves any "
-             "newer file already on disk.",
+        "newer file already on disk.",
     ),
 ) -> None:
     """One-shot migration: dump existing DB rows to the file scheme.
@@ -595,7 +626,8 @@ def dump_critiques_to_files_cmd(
     them at any time.
     """
     summary = labingest.dump_db_to_files(
-        instance_id=instance_id, overwrite=overwrite,
+        instance_id=instance_id,
+        overwrite=overwrite,
     )
     typer.echo(
         f"dumped: trial_critiques={summary['trial_critiques']} "
@@ -617,7 +649,8 @@ def cmd_idea_move(
         None, "--cross-ref", help="Bullet to append to the moved entry."
     ),
     target_theme: Optional[str] = typer.Option(
-        None, "--theme",
+        None,
+        "--theme",
         help="Only used when target == proposed (rare).",
     ),
 ) -> None:
@@ -636,17 +669,18 @@ def cmd_idea_move(
 @idea_app.command("append")
 def cmd_idea_append(
     idea_id: str,
-    theme: str = typer.Option(..., "--theme",
-                              help=(
-                                  "Prompting | Architecture | Memory | Tools | Runtime | "
-                                  "Exploration | Test-Time Inference | Model Policy | Evaluation"
-                              )),
+    theme: str = typer.Option(
+        ...,
+        "--theme",
+        help=(
+            "Prompting | Architecture | Memory | Tools | Runtime | "
+            "Exploration | Test-Time Inference | Model Policy | Evaluation"
+        ),
+    ),
     motivation: str = typer.Option(..., "--motivation"),
     sketch: str = typer.Option(..., "--sketch"),
 ) -> None:
-    lab_docs.append_idea(
-        idea_id=idea_id, theme=theme, motivation=motivation, sketch=sketch
-    )
+    lab_docs.append_idea(idea_id=idea_id, theme=theme, motivation=motivation, sketch=sketch)
     typer.echo(f"appended idea {idea_id!r} under ## Proposed > {theme}")
 
 
@@ -655,8 +689,7 @@ def cmd_append_followup_idea(
     idea_id: str,
     motivation: str = typer.Option(..., "--motivation"),
     sketch: str = typer.Option(..., "--sketch"),
-    source: str = typer.Option(..., "--source",
-                               help="e.g. 'cross-experiment-critic@2026-04-18'"),
+    source: str = typer.Option(..., "--source", help="e.g. 'cross-experiment-critic@2026-04-18'"),
 ) -> None:
     """Append a follow-up to `## Auto-proposed` (cross-experiment-critic)."""
     lab_docs.append_auto_proposed_idea(
@@ -677,13 +710,12 @@ def cmd_exp_append_entry(
         "",
         "--baseline",
         help="Operational baseline agent id at run-time (e.g. 'basic'). "
-             "Defaults to `uv run lab baseline show`.",
+        "Defaults to `uv run lab baseline show`.",
     ),
     mutation: Optional[str] = typer.Option(
         None,
         "--mutation",
-        help="One-line description of what differs from the baseline. "
-             "Omit for --type broad-sweep.",
+        help="One-line description of what differs from the baseline. Omit for --type broad-sweep.",
     ),
     hypothesis: str = typer.Option(..., "--hypothesis"),
     run_path: Optional[str] = typer.Option(
@@ -695,8 +727,8 @@ def cmd_exp_append_entry(
         None,
         "--branch",
         help="Experiment branch name (e.g. lab/<slug>). If omitted, "
-             "the entry's Branch bullet is rendered as a placeholder "
-             "and `experiments set-branch` fills it in later.",
+        "the entry's Branch bullet is rendered as a placeholder "
+        "and `experiments set-branch` fills it in later.",
     ),
 ) -> None:
     """Append a new journal entry (tree+journal shape) at the top of
@@ -734,25 +766,25 @@ def cmd_exp_set_branch(
         None,
         "--pr-url",
         help="Canonical experiment PR URL. Renders as "
-             "`Branch: [<branch>](<pr-url>)` and mirrors into "
-             "`experiment_evaluations.pr_url` so the web UI can render the link "
-             "without re-parsing markdown.",
+        "`Branch: [<branch>](<pr-url>)` and mirrors into "
+        "`experiment_evaluations.pr_url` so the web UI can render the link "
+        "without re-parsing markdown.",
     ),
     rejected_reason: Optional[str] = typer.Option(
         None,
         "--rejected-reason",
         help="One-line reason. Without --pr-url this renders as "
-             "`Branch: <branch> — not opened (<reason>)`. With "
-             "--pr-url it becomes a closed experiment PR note for "
-             "reject/no_op outcomes.",
+        "`Branch: <branch> — not opened (<reason>)`. With "
+        "--pr-url it becomes a closed experiment PR note for "
+        "reject/no_op outcomes.",
     ),
     discarded_sha: Optional[str] = typer.Option(
         None,
         "--discarded-sha",
         help="HEAD SHA of the discarded branch (Reject/NoOp paths). "
-             "Recorded in the markdown bullet AND in "
-             "`experiment_evaluations.branch_sha` so the deleted branch can be "
-             "resurrected later via `git fetch origin <sha>:retro/<slug>`.",
+        "Recorded in the markdown bullet AND in "
+        "`experiment_evaluations.branch_sha` so the deleted branch can be "
+        "resurrected later via `git fetch origin <sha>:retro/<slug>`.",
     ),
 ) -> None:
     """Replace the **Branch:** bullet on the journal entry for `slug`.
@@ -806,9 +838,7 @@ def cmd_exp_set_branch(
         typer.echo(f"set Branch bullet for {slug!r} -> PR {pr_url}")
     elif rejected_reason:
         suffix = f"; head={discarded_sha[:7]}" if discarded_sha else ""
-        typer.echo(
-            f"set Branch bullet for {slug!r} -> not opened ({rejected_reason}{suffix})"
-        )
+        typer.echo(f"set Branch bullet for {slug!r} -> not opened ({rejected_reason}{suffix})")
     else:
         typer.echo(f"set Branch bullet for {slug!r} -> {branch}")
 
@@ -836,8 +866,7 @@ def cmd_roadmap_add(
 @roadmap_app.command("done")
 def cmd_roadmap_done(
     slug: str,
-    ran: str = typer.Option(..., "--ran",
-                            help="Markdown link to experiments.md entry."),
+    ran: str = typer.Option(..., "--ran", help="Markdown link to experiments.md entry."),
     outcome: str = typer.Option(..., "--outcome"),
 ) -> None:
     lab_docs.move_roadmap_entry_to_done(slug=slug, ran_link=ran, outcome=outcome)
@@ -962,10 +991,11 @@ def _webui_preflight_check(*, host: str, port: int) -> None:
         # show the friendly hint during the brief `activating` window
         # right after `systemctl restart`. Stopped units fall through
         # to the generic message below.
-        unit_is_ours = (
-            webui_unit.load_state == "loaded"
-            and webui_unit.active_state in {"active", "activating", "reloading"}
-        )
+        unit_is_ours = webui_unit.load_state == "loaded" and webui_unit.active_state in {
+            "active",
+            "activating",
+            "reloading",
+        }
         if unit_is_ours:
             pid_str = (
                 f" (pid {webui_unit.main_pid}"
@@ -983,8 +1013,7 @@ def _webui_preflight_check(*, host: str, port: int) -> None:
                 f"  • visit the running instance:  [cyan]http://{host}:{port}/[/cyan]"
             )
             err_console.print(
-                "  • restart it to pick up code changes:  "
-                "[cyan]uv run lab svc restart web[/cyan]"
+                "  • restart it to pick up code changes:  [cyan]uv run lab svc restart web[/cyan]"
             )
             err_console.print(
                 "  • stop it and run interactively here:  "
@@ -993,8 +1022,7 @@ def _webui_preflight_check(*, host: str, port: int) -> None:
         else:
             err_console.print()
             err_console.print(
-                f"[red]ERROR:[/red] something else is already bound to "
-                f"{host}:{port}. Find it with:"
+                f"[red]ERROR:[/red] something else is already bound to {host}:{port}. Find it with:"
             )
             if shutil.which("ss"):
                 err_console.print(
@@ -1024,36 +1052,51 @@ def analyze(
         help="The experiment instance_id to analyze (matches `experiments.instance_id`).",
     ),
     concurrency: int = typer.Option(
-        4, "--concurrency", "-j", min=1, max=32,
+        4,
+        "--concurrency",
+        "-j",
+        min=1,
+        max=32,
         help="Max parallel codex spawns. Defaults to the codex adapter's pool size.",
     ),
     dry_run: bool = typer.Option(
-        False, "--dry-run",
+        False,
+        "--dry-run",
         help="Print the spawn plan and exit. No codex calls.",
     ),
     limit_trials: Optional[int] = typer.Option(
-        None, "--limit-trials",
+        None,
+        "--limit-trials",
         help="Cap how many trial-critic spawns to run. Useful for smoke tests.",
     ),
     limit_features: Optional[int] = typer.Option(
-        None, "--limit-features",
+        None,
+        "--limit-features",
         help="Cap how many task-features spawns to run.",
     ),
     skip_trial_critic: bool = typer.Option(
-        False, "--skip-trial-critic", help="Skip Phase A trial-critic fan-out.",
+        False,
+        "--skip-trial-critic",
+        help="Skip Phase A trial-critic fan-out.",
     ),
     skip_task_features: bool = typer.Option(
-        False, "--skip-task-features", help="Skip Phase A task-features fan-out.",
+        False,
+        "--skip-task-features",
+        help="Skip Phase A task-features fan-out.",
     ),
     skip_experiment_critic: bool = typer.Option(
-        False, "--skip-experiment-critic", help="Skip Phase B experiment-critic.",
+        False,
+        "--skip-experiment-critic",
+        help="Skip Phase B experiment-critic.",
     ),
     force_experiment_critic: bool = typer.Option(
-        False, "--force-experiment-critic",
+        False,
+        "--force-experiment-critic",
         help="Run experiment-critic even if comparison rows already exist.",
     ),
     include_cross_experiment: bool = typer.Option(
-        False, "--include-cross-experiment",
+        False,
+        "--include-cross-experiment",
         help=(
             "Also run cross-experiment-critic after Phase B. Off by default "
             "because the apex spawn analyzes the WHOLE database, not just "
@@ -1090,10 +1133,14 @@ def analyze(
     )
 
     if not LAB_DB_PATH.exists():
-        err_console.print("[red]No lab DB. Run `uv run lab init` and `uv run lab ingest <run_dir>` first.[/red]")
+        err_console.print(
+            "[red]No lab DB. Run `uv run lab init` and `uv run lab ingest <run_dir>` first.[/red]"
+        )
         raise typer.Exit(1)
     if not instance_exists(instance_id):
-        err_console.print(f"[red]instance_id {instance_id!r} not found in `experiments` table[/red]")
+        err_console.print(
+            f"[red]instance_id {instance_id!r} not found in `experiments` table[/red]"
+        )
         raise typer.Exit(1)
 
     # ---- gather work ------------------------------------------------------
@@ -1116,24 +1163,41 @@ def analyze(
     plan.add_column("count", justify="right")
     plan.add_column("notes")
     plan.add_row(
-        "A", "gemini trial-critic", str(len(trial_jobs)),
-        "skipped" if skip_trial_critic else f"limit={limit_trials}" if limit_trials else "all uncritiqued",
+        "A",
+        "gemini trial-critic",
+        str(len(trial_jobs)),
+        "skipped"
+        if skip_trial_critic
+        else f"limit={limit_trials}"
+        if limit_trials
+        else "all uncritiqued",
     )
     plan.add_row(
-        "A", "task-features", str(len(feature_jobs)),
-        "skipped" if skip_task_features else f"limit={limit_features}" if limit_features else "all unseen checksums",
+        "A",
+        "task-features",
+        str(len(feature_jobs)),
+        "skipped"
+        if skip_task_features
+        else f"limit={limit_features}"
+        if limit_features
+        else "all unseen checksums",
     )
     plan.add_row(
-        "B", "experiment-critic",
+        "B",
+        "experiment-critic",
         "1" if will_run_exp_critic else "0",
-        "skipped" if skip_experiment_critic
-        else "comparison rows already present (use --force-experiment-critic to re-run)" if cmp_already and not force_experiment_critic
+        "skipped"
+        if skip_experiment_critic
+        else "comparison rows already present (use --force-experiment-critic to re-run)"
+        if cmp_already and not force_experiment_critic
         else "would run",
     )
     plan.add_row(
-        "C", "cross-experiment-critic",
+        "C",
+        "cross-experiment-critic",
         "1" if include_cross_experiment else "0",
-        "opt in with --include-cross-experiment" if not include_cross_experiment
+        "opt in with --include-cross-experiment"
+        if not include_cross_experiment
         else "WHOLE DB scope; xhigh, singleton, ~12h cap",
     )
     console.print(plan)
@@ -1182,8 +1246,7 @@ def analyze(
             for r in results_a:
                 if not r.ok:
                     err_console.print(
-                        f"  {r.skill} args={r.args} -> "
-                        f"exit={r.exit_code} log={r.log_path}"
+                        f"  {r.skill} args={r.args} -> exit={r.exit_code} log={r.log_path}"
                     )
     else:
         typer.echo("Phase A: nothing to do.")
@@ -1202,8 +1265,7 @@ def analyze(
         typer.echo("\n=== Phase B: experiment-critic ===")
         r = codex_adapter.run("experiment-critic", [instance_id], cfg=cx)
         typer.echo(
-            f"experiment-critic exit={r.exit_code} log={r.log_path}"
-            f" duration={r.duration_sec:.0f}s"
+            f"experiment-critic exit={r.exit_code} log={r.log_path} duration={r.duration_sec:.0f}s"
         )
 
     if include_cross_experiment:
@@ -1223,12 +1285,10 @@ def analyze(
         [run_dir] if run_dir else None,
         include_lab_wide=True,
     )
-    typer.echo(
-        "ingest-critiques: " + ", ".join(f"{k}={v}" for k, v in cache.items())
-    )
+    typer.echo("ingest-critiques: " + ", ".join(f"{k}={v}" for k, v in cache.items()))
 
     elapsed = (datetime.now(timezone.utc) - started).total_seconds()
-    typer.echo(f"\nanalyze done in {elapsed:.0f}s ({elapsed/60:.1f}m).")
+    typer.echo(f"\nanalyze done in {elapsed:.0f}s ({elapsed / 60:.1f}m).")
 
 
 # ===== evaluations / operational baseline / experiments-synthesize ==========
@@ -1259,7 +1319,8 @@ def _lookup_instance_for_slug(conn: object, slug: str) -> str | None:
     if exact:
         return exact[0]
     cached = conn.execute(  # type: ignore[attr-defined]
-        "SELECT instance_id FROM experiment_evaluations WHERE slug = ?", [slug],
+        "SELECT instance_id FROM experiment_evaluations WHERE slug = ?",
+        [slug],
     ).fetchone()
     if cached and cached[0]:
         return cached[0]
@@ -1280,8 +1341,7 @@ def _lookup_instance_for_slug(conn: object, slug: str) -> str | None:
     if by_eid:
         return by_eid[0]
     rows = conn.execute(  # type: ignore[attr-defined]
-        "SELECT instance_id, experiment_id FROM experiments "
-        "ORDER BY created_at DESC"
+        "SELECT instance_id, experiment_id FROM experiments ORDER BY created_at DESC"
     ).fetchall()
     for inst_id, eid in rows:
         if eid and slug.startswith(f"{eid}-"):
@@ -1303,9 +1363,7 @@ def _resolve_evaluation_for_slug(slug: str):
         instance_id = _lookup_instance_for_slug(conn, slug)
 
     if not instance_id:
-        err_console.print(
-            f"[red]Could not resolve slug {slug!r} to an instance_id.[/red]"
-        )
+        err_console.print(f"[red]Could not resolve slug {slug!r} to an instance_id.[/red]")
         raise typer.Exit(2)
 
     evaluation = _evaluation.load_evaluation(instance_id)
@@ -1317,12 +1375,17 @@ def tree_show(json_out: bool = typer.Option(False, "--json")) -> None:
     """Print the current lab configuration state."""
     snap = lab_docs.tree_snapshot()
     if json_out:
-        typer.echo(json.dumps({
-            "operational_baseline_id": snap.operational_baseline_id,
-            "operational_baseline_anchor": snap.operational_baseline_anchor,
-            "rejected": [asdict(r) for r in snap.rejected],
-            "proposed": [asdict(p) for p in snap.proposed],
-        }, indent=2))
+        typer.echo(
+            json.dumps(
+                {
+                    "operational_baseline_id": snap.operational_baseline_id,
+                    "operational_baseline_anchor": snap.operational_baseline_anchor,
+                    "rejected": [asdict(r) for r in snap.rejected],
+                    "proposed": [asdict(p) for p in snap.proposed],
+                },
+                indent=2,
+            )
+        )
         return
     console.print(f"[bold]Operational baseline:[/bold] [cyan]{snap.operational_baseline_id}[/cyan]")
     if snap.operational_baseline_anchor:
@@ -1341,12 +1404,14 @@ def tree_show(json_out: bool = typer.Option(False, "--json")) -> None:
 def evaluation_apply(
     slug: str = typer.Argument(...),
     instance: Optional[str] = typer.Option(
-        None, "--instance",
+        None,
+        "--instance",
         help="Override: use this instance_id (else resolved from slug).",
     ),
     applied_by: str = typer.Option("auto:cli", "--applied-by"),
     dry_run: bool = typer.Option(
-        False, "--dry-run",
+        False,
+        "--dry-run",
         help="Print the evaluation that would be applied; do not write.",
     ),
 ) -> None:
@@ -1411,11 +1476,13 @@ def baseline_set(
     agent_id: str = typer.Argument(...),
     reason: str = typer.Option(..., "--reason"),
     journal_link: Optional[str] = typer.Option(
-        None, "--journal-link",
+        None,
+        "--journal-link",
         help="e.g. '[`tb2-baseline-full-sweep`](experiments.md#...)'",
     ),
     audit: bool = typer.Option(
-        True, "--audit/--no-audit",
+        True,
+        "--audit/--no-audit",
         help="Deprecated no-op: baseline changes are no longer ranked as best history.",
     ),
 ) -> None:
@@ -1432,10 +1499,14 @@ def baseline_set(
 @leaderboard_app.command("show")
 def leaderboard_show(
     model: Optional[str] = typer.Option(
-        None, "--model", help="Limit to one model id.",
+        None,
+        "--model",
+        help="Limit to one model id.",
     ),
     dataset: Optional[str] = typer.Option(
-        None, "--dataset", help="Limit to one dataset id.",
+        None,
+        "--dataset",
+        help="Limit to one dataset id.",
     ),
     json_out: bool = typer.Option(False, "--json"),
 ) -> None:
@@ -1469,15 +1540,18 @@ def leaderboard_show(
         )
     console.print(table)
 
+
 @exp_app.command("synthesize")
 def cmd_exp_synthesize(
     slug: str = typer.Argument(...),
     instance: Optional[str] = typer.Option(
-        None, "--instance",
+        None,
+        "--instance",
         help="Override: use this instance_id (else looked up from slug).",
     ),
     sections: list[str] = typer.Option(
-        [], "--section",
+        [],
+        "--section",
         help=(
             "Repeat to limit which `### <section>`s are synthesised. "
             "Default: Aggregate, Mutation impact, Failure modes, "
@@ -1501,13 +1575,12 @@ def cmd_exp_synthesize(
         with labdb.reader() as conn:
             instance_id = _lookup_instance_for_slug(conn, slug)
         if not instance_id:
-            err_console.print(
-                f"[red]No experiment matches slug {slug!r}.[/red]"
-            )
+            err_console.print(f"[red]No experiment matches slug {slug!r}.[/red]")
             raise typer.Exit(2)
 
     written = journal_synth.synthesize(
-        slug=slug, instance_id=instance_id,
+        slug=slug,
+        instance_id=instance_id,
         only_sections=sections or None,
     )
     typer.echo(f"synthesized {len(written)} section(s) into {slug!r}:")
@@ -1523,7 +1596,8 @@ def cmd_roadmap_suggest(
     slug: str,
     hypothesis: str = typer.Option(..., "--hypothesis"),
     source: str = typer.Option(
-        ..., "--source",
+        ...,
+        "--source",
         help="e.g. 'cross-experiment-critic@2026-04-18' or 'lab-replan-roadmap'.",
     ),
     cost: Optional[str] = typer.Option(None, "--cost"),
@@ -1534,7 +1608,10 @@ def cmd_roadmap_suggest(
     one to the main queue with `lab roadmap promote <slug>`.
     """
     lab_docs.add_suggested_followup(
-        slug=slug, hypothesis=hypothesis, source=source, cost=cost,
+        slug=slug,
+        hypothesis=hypothesis,
+        source=source,
+        cost=cost,
     )
     typer.echo(f"suggested {slug!r} (source={source})")
 
@@ -1565,9 +1642,9 @@ def cmd_roadmap_demote(slug: str) -> None:
 def cmd_roadmap_remove(
     slug: str,
     section: Optional[str] = typer.Option(
-        None, "--section",
-        help="Restrict to one of: 'up-next' | 'suggested' | 'done'. "
-             "Default scans all three.",
+        None,
+        "--section",
+        help="Restrict to one of: 'up-next' | 'suggested' | 'done'. Default scans all three.",
     ),
 ) -> None:
     """Delete a roadmap entry by slug from any section.
@@ -1604,13 +1681,17 @@ def cmd_idea_auto_propose(
     motivation: str = typer.Option(..., "--motivation"),
     sketch: str = typer.Option(..., "--sketch"),
     source: str = typer.Option(
-        ..., "--source",
+        ...,
+        "--source",
         help="e.g. 'cross-experiment-critic@2026-04-18'.",
     ),
 ) -> None:
     """Append a follow-up to `## Auto-proposed`."""
     lab_docs.append_auto_proposed_idea(
-        idea_id=idea_id, motivation=motivation, sketch=sketch, source=source,
+        idea_id=idea_id,
+        motivation=motivation,
+        sketch=sketch,
+        source=source,
     )
     typer.echo(f"auto-proposed {idea_id!r}")
 
@@ -1621,7 +1702,9 @@ def cmd_idea_auto_propose(
 @components_app.command("show")
 def components_show(
     kind: Optional[str] = typer.Option(
-        None, "--kind", help="Filter to one of Architecture/Runtime/Tools/Prompt/Model.",
+        None,
+        "--kind",
+        help="Filter to one of Architecture/Runtime/Tools/Prompt/Model.",
     ),
     json_out: bool = typer.Option(False, "--json"),
 ) -> None:
@@ -1671,11 +1754,11 @@ def components_show(
 
 def _status_badge(status: str) -> str:
     return {
-        "proposed":     "[dim]proposed[/dim]",
+        "proposed": "[dim]proposed[/dim]",
         "experimental": "[yellow]experimental[/yellow]",
-        "validated":    "[green]validated[/green]",
-        "rejected":     "[red]rejected[/red]",
-        "superseded":   "[magenta]superseded[/magenta]",
+        "validated": "[green]validated[/green]",
+        "rejected": "[red]rejected[/red]",
+        "superseded": "[magenta]superseded[/magenta]",
     }.get(status, status)
 
 
@@ -1685,16 +1768,18 @@ def components_upsert(
     kind: str = typer.Option(..., "--kind", help="Architecture/Runtime/Tools/Prompt/Model."),
     description: Optional[str] = typer.Option(None, "--description"),
     status: Optional[str] = typer.Option(
-        None, "--status",
-        help="proposed/experimental/validated/rejected/superseded "
-             "(forward-only via this command).",
+        None,
+        "--status",
+        help="proposed/experimental/validated/rejected/superseded (forward-only via this command).",
     ),
     used_by: Optional[str] = typer.Option(
-        None, "--used-by",
+        None,
+        "--used-by",
         help="Comma-separated agent ids that include this component.",
     ),
     evidence: Optional[str] = typer.Option(
-        None, "--evidence",
+        None,
+        "--evidence",
         help="Markdown link or short string to append to the Evidence column.",
     ),
 ) -> None:
@@ -1717,9 +1802,12 @@ def components_upsert(
 @components_app.command("set-status")
 def components_set_status(
     component_id: str = typer.Argument(...),
-    status: str = typer.Argument(..., help="One of proposed/experimental/validated/rejected/superseded."),
+    status: str = typer.Argument(
+        ..., help="One of proposed/experimental/validated/rejected/superseded."
+    ),
     evidence: Optional[str] = typer.Option(
-        None, "--evidence",
+        None,
+        "--evidence",
         help="Markdown link or short string to append to the Evidence column.",
     ),
 ) -> None:
@@ -1752,16 +1840,19 @@ def daemon_status() -> None:
 @daemon_app.command("start")
 def daemon_start(
     foreground: bool = typer.Option(
-        True, "--foreground/--background",
+        True,
+        "--foreground/--background",
         help="--background spawns a detached process via tmux if available, "
-             "otherwise nohup. Default --foreground attaches to the terminal.",
+        "otherwise nohup. Default --foreground attaches to the terminal.",
     ),
     once: bool = typer.Option(
-        False, "--once",
+        False,
+        "--once",
         help="Run a single roadmap entry and exit. Useful for smoke tests.",
     ),
     dry_run: bool = typer.Option(
-        False, "--dry-run",
+        False,
+        "--dry-run",
         help="Walk the roadmap but skip codex spawns.",
     ),
 ) -> None:
@@ -1792,10 +1883,13 @@ def daemon_start(
 
     if _shutil.which("tmux"):
         session = "openharness-lab"
-        _sub.run(["tmux", "kill-session", "-t", session],
-                 check=False, stdout=_sub.DEVNULL, stderr=_sub.DEVNULL)
-        _sub.run(["tmux", "new-session", "-d", "-s", session,
-                  " ".join(args)], check=True)
+        _sub.run(
+            ["tmux", "kill-session", "-t", session],
+            check=False,
+            stdout=_sub.DEVNULL,
+            stderr=_sub.DEVNULL,
+        )
+        _sub.run(["tmux", "new-session", "-d", "-s", session, " ".join(args)], check=True)
         typer.echo(f"orchestrator started in tmux session {session!r}")
         typer.echo(f"attach: `tmux attach -t {session}` or `uv run lab daemon attach`")
         return
@@ -1804,7 +1898,10 @@ def daemon_start(
     log_path.parent.mkdir(parents=True, exist_ok=True)
     with open(log_path, "ab") as fh:
         _sub.Popen(
-            args, stdout=fh, stderr=fh, stdin=_sub.DEVNULL,
+            args,
+            stdout=fh,
+            stderr=fh,
+            stdin=_sub.DEVNULL,
             start_new_session=True,
         )
     typer.echo(f"orchestrator detached; logs: {log_path}")
@@ -1857,7 +1954,8 @@ def daemon_mode(
         help="paused | manual | autonomous",
     ),
     actor: str = typer.Option(
-        "human:cli", "--actor",
+        "human:cli",
+        "--actor",
         help="Recorded as last_updated_by in daemon-state.json.",
     ),
 ) -> None:
@@ -1873,9 +1971,7 @@ def daemon_mode(
     from openharness.lab import daemon_state as _ds
 
     if new_mode not in _VALID_MODES:
-        err_console.print(
-            f"[red]invalid mode '{new_mode}' (use: {' | '.join(_VALID_MODES)})[/red]"
-        )
+        err_console.print(f"[red]invalid mode '{new_mode}' (use: {' | '.join(_VALID_MODES)})[/red]")
         raise typer.Exit(2)
     state = _ds.set_mode(new_mode, actor=actor)  # type: ignore[arg-type]
     woke = _ds.notify_daemon()
@@ -1897,8 +1993,7 @@ def daemon_approve(
     state = _ds.approve(slug, actor=actor)
     woke = _ds.notify_daemon()
     typer.echo(
-        f"approved {slug!r}; queue: {state.approved_slugs}"
-        + (" (daemon notified)" if woke else "")
+        f"approved {slug!r}; queue: {state.approved_slugs}" + (" (daemon notified)" if woke else "")
     )
 
 
@@ -1913,8 +2008,7 @@ def daemon_revoke(
     state = _ds.revoke(slug, actor=actor)
     woke = _ds.notify_daemon()
     typer.echo(
-        f"revoked {slug!r}; queue: {state.approved_slugs}"
-        + (" (daemon notified)" if woke else "")
+        f"revoked {slug!r}; queue: {state.approved_slugs}" + (" (daemon notified)" if woke else "")
     )
 
 
@@ -1942,16 +2036,14 @@ def daemon_pause_after(
 
     if phase not in _VALID_PIPELINE_PHASES:
         err_console.print(
-            f"[red]invalid phase '{phase}' "
-            f"(use: {' | '.join(_VALID_PIPELINE_PHASES)})[/red]"
+            f"[red]invalid phase '{phase}' (use: {' | '.join(_VALID_PIPELINE_PHASES)})[/red]"
         )
         raise typer.Exit(2)
     state = _ds.set_pause_after(phase, slug=slug, actor=actor)  # type: ignore[arg-type]
     woke = _ds.notify_daemon()
     scope = f" for {state.pause_after_slug}" if state.pause_after_slug else ""
     typer.echo(
-        f"pause-after → {state.pause_after_phase}{scope}"
-        + (" (daemon notified)" if woke else "")
+        f"pause-after → {state.pause_after_phase}{scope}" + (" (daemon notified)" if woke else "")
     )
 
 
@@ -2014,6 +2106,7 @@ def daemon_cancel(
     with _ds.mutate(actor=actor) as st:
         if st.active_tick is not None:
             from datetime import datetime as _dt, timezone as _tz
+
             now = _dt.now(_tz.utc)
             st.history.append(
                 _ds.TickHistoryEntry(
@@ -2045,10 +2138,7 @@ def daemon_reset_failures(
 
     _ds.reset_failures(slug, actor=actor)
     woke = _ds.notify_daemon()
-    typer.echo(
-        f"failure counter cleared for {slug!r}"
-        + (" (daemon notified)" if woke else "")
-    )
+    typer.echo(f"failure counter cleared for {slug!r}" + (" (daemon notified)" if woke else ""))
 
 
 @daemon_app.command("reset-all-failures")
@@ -2065,10 +2155,7 @@ def daemon_reset_all_failures(
 
     _, cleared = _ds.reset_all_failures(actor=actor)
     woke = _ds.notify_daemon()
-    typer.echo(
-        f"cleared {cleared} failure counter(s)"
-        + (" (daemon notified)" if woke else "")
-    )
+    typer.echo(f"cleared {cleared} failure counter(s)" + (" (daemon notified)" if woke else ""))
 
 
 @daemon_app.command("clear-history")
@@ -2086,8 +2173,7 @@ def daemon_clear_history(
     _, removed = _ds.clear_history(actor=actor)
     woke = _ds.notify_daemon()
     typer.echo(
-        f"cleared {removed} tick-history entry(ies)"
-        + (" (daemon notified)" if woke else "")
+        f"cleared {removed} tick-history entry(ies)" + (" (daemon notified)" if woke else "")
     )
 
 
@@ -2119,7 +2205,9 @@ def daemon_state_show(
         for slug, rec in state.entry_failures.items():
             typer.echo(f"  {slug}: count={rec.count} last={rec.last_outcome}")
     if state.history:
-        typer.echo(f"history:    {len(state.history)} entries (newest: {state.history[-1].slug} / {state.history[-1].outcome})")
+        typer.echo(
+            f"history:    {len(state.history)} entries (newest: {state.history[-1].slug} / {state.history[-1].outcome})"
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -2149,6 +2237,7 @@ def _experiments_root() -> Path:
     # the ``isolated_lab`` fixture) see the override. The cost is
     # negligible: a module attribute lookup, not an actual re-import.
     from openharness.lab import paths as _paths
+
     return _paths.REPO_ROOT / "runs" / "experiments"
 
 
@@ -2169,14 +2258,15 @@ def _is_prunable_run_dir(d: Path, *, age_hours: float) -> tuple[bool, str]:
     except OSError as e:
         return False, f"stat failed: {e}"
     if age_s < age_hours * 3600:
-        return False, f"too recent ({age_s/3600:.2f}h < {age_hours}h)"
-    return True, f"orphan, age={age_s/3600:.1f}h"
+        return False, f"too recent ({age_s / 3600:.2f}h < {age_hours}h)"
+    return True, f"orphan, age={age_s / 3600:.1f}h"
 
 
 @runs_app.command("list")
 def runs_list(
     age_hours: float = typer.Option(
-        1.0, "--age-hours",
+        1.0,
+        "--age-hours",
         help="Minimum age before a dir is eligible. Default 1h.",
     ),
 ) -> None:
@@ -2201,7 +2291,8 @@ def runs_list(
 @runs_app.command("prune")
 def runs_prune(
     age_hours: float = typer.Option(
-        1.0, "--age-hours",
+        1.0,
+        "--age-hours",
         help=(
             "Minimum age (hours since last write) before a dir is "
             "eligible. Default 1h prevents racing a live run; pass 0 "
@@ -2209,11 +2300,13 @@ def runs_prune(
         ),
     ),
     dry_run: bool = typer.Option(
-        False, "--dry-run",
+        False,
+        "--dry-run",
         help="List what would be deleted without touching the disk.",
     ),
     force: bool = typer.Option(
-        False, "--force",
+        False,
+        "--force",
         help="Required when --age-hours is below 1.",
     ),
     actor: str = typer.Option("human:cli", "--actor"),
@@ -2263,29 +2356,34 @@ def runs_prune(
 @runs_app.command("push-gcs")
 def runs_push_gcs(
     uri: Optional[str] = typer.Option(
-        None, "--uri",
+        None,
+        "--uri",
         help=(
             "Portable-artifact mirror root, e.g. gs://my-bucket/openharness/runs. "
             f"Defaults to ${gcs_sync.GCS_URI_ENV}."
         ),
     ),
     instance_id: Optional[str] = typer.Option(
-        None, "--instance-id",
+        None,
+        "--instance-id",
         help="Restrict the upload to one runs/experiments/<id>/ directory.",
     ),
     include_lab_wide: bool = typer.Option(
-        True, "--lab-wide/--no-lab-wide",
+        True,
+        "--lab-wide/--no-lab-wide",
         help=(
             "Also sync portable lab-wide file artifacts (task_features, "
             "cross_experiment, components_perf, auto_proposed, spawns)."
         ),
     ),
     dry_run: bool = typer.Option(
-        False, "--dry-run",
+        False,
+        "--dry-run",
         help="Print what rsync would do without mutating GCS.",
     ),
     delete_unmatched: bool = typer.Option(
-        False, "--delete-unmatched",
+        False,
+        "--delete-unmatched",
         help=(
             "Delete GCS objects absent locally. Off by default because a shared "
             "bucket is typically a merge target, not a destructive mirror."
@@ -2313,36 +2411,42 @@ def runs_push_gcs(
 @runs_app.command("pull-gcs")
 def runs_pull_gcs(
     uri: Optional[str] = typer.Option(
-        None, "--uri",
+        None,
+        "--uri",
         help=(
             "Portable-artifact mirror root, e.g. gs://my-bucket/openharness/runs. "
             f"Defaults to ${gcs_sync.GCS_URI_ENV}."
         ),
     ),
     instance_id: Optional[str] = typer.Option(
-        None, "--instance-id",
+        None,
+        "--instance-id",
         help="Restrict the download to one runs/experiments/<id>/ directory.",
     ),
     include_lab_wide: bool = typer.Option(
-        True, "--lab-wide/--no-lab-wide",
+        True,
+        "--lab-wide/--no-lab-wide",
         help=(
             "Also pull portable lab-wide file artifacts (task_features, "
             "cross_experiment, components_perf, auto_proposed, spawns)."
         ),
     ),
     refresh_cache: bool = typer.Option(
-        True, "--refresh-cache/--no-refresh-cache",
+        True,
+        "--refresh-cache/--no-refresh-cache",
         help=(
             "Rebuild runs/lab/trials.duckdb from the pulled portable files after "
             "download. Recommended on laptops; skip if another local writer is active."
         ),
     ),
     dry_run: bool = typer.Option(
-        False, "--dry-run",
+        False,
+        "--dry-run",
         help="Print what rsync would do without writing local files.",
     ),
     delete_unmatched: bool = typer.Option(
-        False, "--delete-unmatched",
+        False,
+        "--delete-unmatched",
         help=(
             "Delete local files absent from GCS. Off by default to preserve "
             "machine-local artifacts outside the shared mirror."
@@ -2388,12 +2492,13 @@ def runs_pull_gcs(
 def cmd_preflight_run(
     slug: str,
     base_branch: Optional[str] = typer.Option(
-        None, "--base-branch",
-        help="Branch to base the worktree on. Defaults to the parent "
-             "repo's current HEAD branch.",
+        None,
+        "--base-branch",
+        help="Branch to base the worktree on. Defaults to the parent repo's current HEAD branch.",
     ),
     auto_push: bool = typer.Option(
-        False, "--auto-push",
+        False,
+        "--auto-push",
         help="Push any unpushed commits on the base branch first.",
     ),
 ) -> None:
@@ -2404,9 +2509,12 @@ def cmd_preflight_run(
     to Up next.
     """
     from openharness.lab import preflight as preflight_mod
+
     try:
         result = preflight_mod.run_preflight(
-            slug, base_branch=base_branch, auto_push=auto_push,
+            slug,
+            base_branch=base_branch,
+            auto_push=auto_push,
             allow_lab_markdown_dirty=False,
         )
     except preflight_mod.PreflightError as exc:
@@ -2421,14 +2529,18 @@ def cmd_preflight_run(
 def cmd_preflight_remove(
     slug: str,
     keep_branch: bool = typer.Option(
-        False, "--keep-branch",
+        False,
+        "--keep-branch",
         help="Don't delete the lab/<slug> branch after removing the worktree.",
     ),
 ) -> None:
     """Tear down the worktree (and branch) for `slug` (idempotent)."""
     from openharness.lab import preflight as preflight_mod
+
     removed = preflight_mod.remove_worktree(
-        slug, delete_branch=not keep_branch, force=True,
+        slug,
+        delete_branch=not keep_branch,
+        force=True,
     )
     typer.echo("removed" if removed else "(nothing to remove)")
 
@@ -2437,6 +2549,7 @@ def cmd_preflight_remove(
 def cmd_preflight_list() -> None:
     """List every git worktree the parent repo currently knows about."""
     from openharness.lab import preflight as preflight_mod
+
     paths = preflight_mod.list_worktrees()
     for p in paths:
         typer.echo(str(p))
@@ -2454,13 +2567,17 @@ def cmd_phases_show(
 ) -> None:
     """Print the phase status for `slug` (or list all known slugs)."""
     from openharness.lab import phase_state
+
     if slug is None:
         for s in phase_state.all_slugs():
             state = phase_state.load(s)
             if state is None:
                 continue
-            done = sum(1 for p in phase_state.PHASE_ORDER
-                       if p in state.phases and state.phases[p].status in ("ok", "skipped"))
+            done = sum(
+                1
+                for p in phase_state.PHASE_ORDER
+                if p in state.phases and state.phases[p].status in ("ok", "skipped")
+            )
             current = state.first_unfinished() or "done"
             typer.echo(f"  {s:50s} {done}/{len(phase_state.PHASE_ORDER)}  next={current}")
         return
@@ -2490,22 +2607,23 @@ def cmd_phases_show(
 def cmd_phases_reset(
     slug: str,
     phase: Optional[str] = typer.Option(
-        None, "--phase",
+        None,
+        "--phase",
         help="Reset only this phase (preflight | design | implement | "
-             "run | critique | replan | finalize). Omit to delete the entire "
-             "phases.json.",
+        "run | critique | replan | finalize). Omit to delete the entire "
+        "phases.json.",
     ),
 ) -> None:
     """Reset (drop) one phase's record, or the whole document."""
     from openharness.lab import phase_state
+
     if phase is None:
         phase_state.reset_all(slug)
         typer.echo(f"reset all phases for {slug!r}")
         return
     if phase not in phase_state.PHASE_ORDER:
         typer.echo(
-            f"[red]unknown phase {phase!r}; valid: "
-            f"{', '.join(phase_state.PHASE_ORDER)}[/red]"
+            f"[red]unknown phase {phase!r}; valid: {', '.join(phase_state.PHASE_ORDER)}[/red]"
         )
         raise typer.Exit(2)
     phase_state.reset_phase(slug, phase)  # type: ignore[arg-type]

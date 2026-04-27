@@ -6,6 +6,7 @@ import os
 import re
 from dataclasses import dataclass, field
 from typing import Optional
+from xml.sax.saxutils import escape, unescape
 
 from openharness.coordinator.agent_definitions import (
     filter_agents_by_mcp_requirements,
@@ -114,12 +115,12 @@ def format_task_notification(n: TaskNotification) -> str:
     """Serialize a TaskNotification to the canonical XML envelope."""
     parts = [
         "<task-notification>",
-        f"<task-id>{n.task_id}</task-id>",
-        f"<status>{n.status}</status>",
-        f"<summary>{n.summary}</summary>",
+        f"<task-id>{escape(n.task_id)}</task-id>",
+        f"<status>{escape(n.status)}</status>",
+        f"<summary>{escape(n.summary)}</summary>",
     ]
     if n.result is not None:
-        parts.append(f"<result>{n.result}</result>")
+        parts.append(f"<result>{escape(n.result)}</result>")
     if n.usage:
         parts.append("<usage>")
         for key in _USAGE_FIELDS:
@@ -135,7 +136,7 @@ def parse_task_notification(xml: str) -> TaskNotification:
 
     def _extract(tag: str) -> Optional[str]:
         m = re.search(rf"<{tag}>(.*?)</{tag}>", xml, re.DOTALL)
-        return m.group(1).strip() if m else None
+        return unescape(m.group(1).strip()) if m else None
 
     task_id = _extract("task-id") or ""
     status = _extract("status") or ""

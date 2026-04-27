@@ -379,9 +379,7 @@ def test_rewrite_trace_url_uses_env(monkeypatch):
     from openharness.observability.langfuse import rewrite_trace_url_for_public
 
     monkeypatch.setenv("LANGFUSE_PUBLIC_HOST", "http://localhost:3010")
-    rewritten = rewrite_trace_url_for_public(
-        "http://10.0.0.4:3010/project/demo/traces/abc"
-    )
+    rewritten = rewrite_trace_url_for_public("http://10.0.0.4:3010/project/demo/traces/abc")
     assert rewritten.startswith("http://localhost:3010/")
 
 

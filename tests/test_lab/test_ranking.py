@@ -212,9 +212,18 @@ def test_rejected_conceptual_target_uses_candidate_leg_for_eligibility() -> None
     conn.execute(
         "INSERT INTO legs VALUES (?, ?, ?, ?), (?, ?, ?, ?), (?, ?, ?, ?)",
         [
-            "reject-2", "basic_30_8192", "basic", "model-x",
-            "reject-2", "basic_60_16384", "basic", "model-x",
-            "reject-2", "basic_120_32768", "basic", "model-x",
+            "reject-2",
+            "basic_30_8192",
+            "basic",
+            "model-x",
+            "reject-2",
+            "basic_60_16384",
+            "basic",
+            "model-x",
+            "reject-2",
+            "basic_120_32768",
+            "basic",
+            "model-x",
         ],
     )
     conn.executemany(

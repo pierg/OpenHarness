@@ -76,7 +76,9 @@ def test_apply_accept_records_evaluation_without_baseline_mutation(
     with patch.object(tree_mod, "labdb") as mock_db:
         mock_db.writer.side_effect = RuntimeError("no DB in test")
         result = tree_mod.apply_evaluation(
-            slug="accept-planner", evaluation=evaluation, lab_root=lab_root,
+            slug="accept-planner",
+            evaluation=evaluation,
+            lab_root=lab_root,
         )
 
     assert result.applied is True
@@ -106,7 +108,9 @@ def test_apply_reject_appends_to_rejected(lab_root: Path) -> None:
     with patch.object(tree_mod, "labdb") as mock_db:
         mock_db.writer.side_effect = RuntimeError("no DB in test")
         result = tree_mod.apply_evaluation(
-            slug="rej-x", evaluation=evaluation, lab_root=lab_root,
+            slug="rej-x",
+            evaluation=evaluation,
+            lab_root=lab_root,
         )
 
     assert result.applied is True
@@ -130,7 +134,9 @@ def test_apply_no_op_writes_journal_only(lab_root: Path) -> None:
     with patch.object(tree_mod, "labdb") as mock_db:
         mock_db.writer.side_effect = RuntimeError("no DB in test")
         result = tree_mod.apply_evaluation(
-            slug="noop-x", evaluation=evaluation, lab_root=lab_root,
+            slug="noop-x",
+            evaluation=evaluation,
+            lab_root=lab_root,
         )
 
     assert result.applied is True

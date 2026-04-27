@@ -66,12 +66,8 @@ _ROADMAP_SECTIONS = re.compile(r"^(?:up-next|suggested|done)$")
 # characters and a leading hyphen (so the value can't be misread as a
 # CLI flag by Click downstream). Length cap is generous but bounded so
 # nobody can paste 10 MB of binary into the CLI.
-_SAFE_TEXT = re.compile(
-    r"(?!-)[^\x00-\x08\x0b\x0c\x0e-\x1f\x7f]{1,512}"
-)
-_SAFE_LONG_TEXT = re.compile(
-    r"(?!-)[^\x00-\x08\x0b\x0c\x0e-\x1f\x7f]{1,4096}"
-)
+_SAFE_TEXT = re.compile(r"(?!-)[^\x00-\x08\x0b\x0c\x0e-\x1f\x7f]{1,512}")
+_SAFE_LONG_TEXT = re.compile(r"(?!-)[^\x00-\x08\x0b\x0c\x0e-\x1f\x7f]{1,4096}")
 # Constrained vocabularies enforced by the CLI itself; we duplicate them
 # here so the form gets a fast 400 instead of waiting for ``uv run`` to
 # spin up and Typer to reject.
@@ -80,13 +76,9 @@ _IDEA_THEME = re.compile(
     r"Test-Time Inference|Model Policy|Evaluation)$"
 )
 _COMPONENT_KIND = re.compile(r"^(?:Architecture|Runtime|Tools|Prompt|Model)$")
-_COMPONENT_STATUS = re.compile(
-    r"^(?:proposed|experimental|validated|rejected|superseded)$"
-)
+_COMPONENT_STATUS = re.compile(r"^(?:proposed|experimental|validated|rejected|superseded)$")
 # Comma-separated list of agent ids; each entry is a SAFE_TOKEN.
-_USED_BY = re.compile(
-    r"^[A-Za-z0-9][A-Za-z0-9_.\-]{0,127}(?:,[A-Za-z0-9][A-Za-z0-9_.\-]{0,127})*$"
-)
+_USED_BY = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.\-]{0,127}(?:,[A-Za-z0-9][A-Za-z0-9_.\-]{0,127})*$")
 # Whitelisted systemd unit ids the web UI may operate on. Hard-coded
 # (not user-supplied) so the action stays "restart THIS unit"; never
 # "restart whatever the operator typed". Matches keys in
@@ -96,9 +88,7 @@ _UNIT_ID = re.compile(r"^(?:openharness-lab|openharness-daemon)$")
 _PID_RE = re.compile(r"^[0-9]{1,7}$")
 # Daemon operating modes, must match :data:`openharness.lab.daemon_state.DaemonMode`.
 _DAEMON_MODE = re.compile(r"^(?:paused|manual|autonomous)$")
-_PIPELINE_PHASE = re.compile(
-    r"^(?:preflight|design|implement|run|critique|replan|finalize)$"
-)
+_PIPELINE_PHASE = re.compile(r"^(?:preflight|design|implement|run|critique|replan|finalize)$")
 
 
 @dataclass(eq=False, slots=True)
@@ -192,8 +182,7 @@ COMMANDS: dict[str, CommandSpec] = {
         cmd_id="roadmap-promote",
         label="Promote to roadmap",
         description=(
-            "Move a `### Suggested > #### <slug>` entry into the main "
-            "`## Up next` queue."
+            "Move a `### Suggested > #### <slug>` entry into the main `## Up next` queue."
         ),
         argv_template=["roadmap", "promote", "{slug}"],
         params=[
@@ -417,10 +406,15 @@ COMMANDS: dict[str, CommandSpec] = {
             "structured — write prose."
         ),
         argv_template=[
-            "idea", "append", "{idea_id}",
-            "--theme", "{theme}",
-            "--motivation", "{motivation}",
-            "--sketch", "{sketch}",
+            "idea",
+            "append",
+            "{idea_id}",
+            "--theme",
+            "{theme}",
+            "--motivation",
+            "{motivation}",
+            "--sketch",
+            "{sketch}",
         ],
         params=[
             ParamSpec(
@@ -464,9 +458,13 @@ COMMANDS: dict[str, CommandSpec] = {
             "daemon/critic suggestions."
         ),
         argv_template=[
-            "roadmap", "add", "{slug}",
-            "--hypothesis", "{hypothesis}",
-            "--plan", "{plan}",
+            "roadmap",
+            "add",
+            "{slug}",
+            "--hypothesis",
+            "{hypothesis}",
+            "--plan",
+            "{plan}",
             ["--idea", "{idea}"],
             ["--depends-on", "{depends_on}"],
             ["--cost", "{cost}"],
@@ -525,9 +523,13 @@ COMMANDS: dict[str, CommandSpec] = {
             "Humans then promote one to the main queue."
         ),
         argv_template=[
-            "roadmap", "suggest", "{slug}",
-            "--hypothesis", "{hypothesis}",
-            "--source", "{source}",
+            "roadmap",
+            "suggest",
+            "{slug}",
+            "--hypothesis",
+            "{hypothesis}",
+            "--source",
+            "{source}",
             ["--cost", "{cost}"],
         ],
         params=[
@@ -568,7 +570,10 @@ COMMANDS: dict[str, CommandSpec] = {
             "forward-only bump lattice that `upsert` enforces)."
         ),
         argv_template=[
-            "components", "set-status", "{component_id}", "{status}",
+            "components",
+            "set-status",
+            "{component_id}",
+            "{status}",
             ["--evidence", "{evidence}"],
         ],
         params=[
@@ -602,8 +607,11 @@ COMMANDS: dict[str, CommandSpec] = {
             "`component-set-status` for the unsafe bypass."
         ),
         argv_template=[
-            "components", "upsert", "{component_id}",
-            "--kind", "{kind}",
+            "components",
+            "upsert",
+            "{component_id}",
+            "--kind",
+            "{kind}",
             ["--description", "{description}"],
             ["--status", "{status}"],
             ["--used-by", "{used_by}"],
@@ -730,9 +738,12 @@ COMMANDS: dict[str, CommandSpec] = {
             "leaves the next phase pending."
         ),
         argv_template=[
-            "daemon", "pause-after", "{phase}",
+            "daemon",
+            "pause-after",
+            "{phase}",
             ["--slug", "{slug}"],
-            "--actor", "{actor}",
+            "--actor",
+            "{actor}",
         ],
         params=[
             ParamSpec(
@@ -904,8 +915,7 @@ COMMANDS: dict[str, CommandSpec] = {
             ),
         ],
         confirm_text=(
-            "Re-run this phase on the next tick? "
-            "Earlier OK phases stay; later phases re-run too."
+            "Re-run this phase on the next tick? Earlier OK phases stay; later phases re-run too."
         ),
         events=["lab-daemon-state-changed"],
     ),
@@ -945,9 +955,12 @@ COMMANDS: dict[str, CommandSpec] = {
             "the CLI directly."
         ),
         argv_template=[
-            "runs", "prune",
-            "--age-hours", "{age_hours}",
-            "--actor", "{actor}",
+            "runs",
+            "prune",
+            "--age-hours",
+            "{age_hours}",
+            "--actor",
+            "{actor}",
         ],
         params=[
             ParamSpec(
@@ -960,8 +973,7 @@ COMMANDS: dict[str, CommandSpec] = {
                 default="1",
                 placeholder="1",
                 help_text=(
-                    "Dirs younger than this stay. Use the CLI with "
-                    "--force for anything below 1h."
+                    "Dirs younger than this stay. Use the CLI with --force for anything below 1h."
                 ),
             ),
             ParamSpec(
@@ -1017,9 +1029,7 @@ def _precheck_kill_process(params: dict[str, str]) -> None:
     daemon_status = labsvc.status("openharness-daemon")
     daemon_pid = daemon_status.main_pid
     if daemon_pid is None:
-        raise CommandError(
-            "orchestrator daemon is not running; nothing to clean up"
-        )
+        raise CommandError("orchestrator daemon is not running; nothing to clean up")
 
     if pid == daemon_pid:
         raise CommandError(
@@ -1033,9 +1043,7 @@ def _precheck_kill_process(params: dict[str, str]) -> None:
     except psutil.NoSuchProcess as exc:
         raise CommandError(f"pid {pid} does not exist") from exc
     except psutil.AccessDenied as exc:
-        raise CommandError(
-            f"insufficient permissions to inspect pid {pid}"
-        ) from exc
+        raise CommandError(f"insufficient permissions to inspect pid {pid}") from exc
 
     if daemon_pid not in ancestors:
         raise CommandError(
@@ -1202,9 +1210,7 @@ def run_command(
     # 127 rather than a FileNotFoundError leaking past the route. The
     # rest of argv_prefix passes through verbatim.
     if not spec.argv_prefix:
-        raise CommandError(
-            f"spec {cmd_id!r} has empty argv_prefix; refusing to spawn"
-        )
+        raise CommandError(f"spec {cmd_id!r} has empty argv_prefix; refusing to spawn")
     bin_name = spec.argv_prefix[0]
     bin_path = shutil.which(bin_name) or bin_name
     argv = [bin_path, *spec.argv_prefix[1:], *cli_args]
@@ -1232,9 +1238,8 @@ def run_command(
         exit_code = 124  # GNU timeout's convention
         stdout = e.stdout.decode("utf-8", "replace") if e.stdout else ""
         stderr = (
-            (e.stderr.decode("utf-8", "replace") if e.stderr else "")
-            + f"\n[web] command timed out after {timeout_s}s"
-        )
+            e.stderr.decode("utf-8", "replace") if e.stderr else ""
+        ) + f"\n[web] command timed out after {timeout_s}s"
     except FileNotFoundError as e:
         # Binary not on PATH inside the server env. Surface, don't crash.
         exit_code = 127

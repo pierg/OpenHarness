@@ -23,7 +23,7 @@ _FACT_PATTERNS: list[tuple[str, str, re.Pattern]] = [
     ("conda_env", "Conda environment", re.compile(r"conda\s+activate\s+(\S+)")),
     ("python_env", "Python version", re.compile(r"[Pp]ython\s*(3\.\d+(?:\.\d+)?)")),
     ("api_endpoint", "API endpoint", re.compile(r"(https?://\S+/v\d+/?)\b")),
-    ("env_var", "Environment variable", re.compile(r"export\s+([A-Z][A-Z0-9_]+=\S+)")),
+    ("env_var", "Environment variable", re.compile(r"export\s+([A-Z][A-Z0-9_]+)(?:=\S+)?")),
     ("git_remote", "Git remote", re.compile(r"(?:github|gitlab)\.com[:/](\S+?)(?:\.git)?")),
     (
         "ray_cluster",

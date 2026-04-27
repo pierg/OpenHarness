@@ -53,8 +53,10 @@ def isolated_lab(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 
     # Force reimport so module-level paths bind to the override.
     import openharness.lab.paths as paths
+
     importlib.reload(paths)
     import openharness.lab.daemon_state as ds
+
     importlib.reload(ds)
 
     return repo
@@ -100,21 +102,31 @@ def test_save_then_load_roundtrips_all_fields(isolated_lab: Path) -> None:
         pause_after_slug="x",
         pause_after_requested_at=now,
         active_tick=ds.ActiveTick(
-            slug="x", phase="running", started_at=now,
-            spawn_pid=1234, log_path="/tmp/x.log",
-            worktree_path="/tmp/wt", note="hello",
+            slug="x",
+            phase="running",
+            started_at=now,
+            spawn_pid=1234,
+            log_path="/tmp/x.log",
+            worktree_path="/tmp/wt",
+            note="hello",
         ),
         entry_failures={
-            "y": ds.FailureRecord(count=2, last_error="boom",
-                                  last_outcome="refuse",
-                                  last_failed_at=now - timedelta(minutes=5)),
+            "y": ds.FailureRecord(
+                count=2,
+                last_error="boom",
+                last_outcome="refuse",
+                last_failed_at=now - timedelta(minutes=5),
+            ),
         },
         history=[
             ds.TickHistoryEntry(
-                slug="z", started_at=now - timedelta(minutes=10),
+                slug="z",
+                started_at=now - timedelta(minutes=10),
                 ended_at=now - timedelta(minutes=9),
-                outcome="ok", phase_reached="done",
-                duration_sec=60.0, summary="ok run",
+                outcome="ok",
+                phase_reached="done",
+                duration_sec=60.0,
+                summary="ok run",
                 log_path="/tmp/z.log",
             ),
         ],
@@ -169,10 +181,13 @@ def test_history_ring_caps_at_50(isolated_lab: Path) -> None:
     import openharness.lab.daemon_state as ds
 
     for i in range(ds.HISTORY_LIMIT + 5):
-        ds.begin_tick(ds.ActiveTick(
-            slug=f"slug-{i:02d}", phase="spawning",
-            started_at=datetime.now(timezone.utc),
-        ))
+        ds.begin_tick(
+            ds.ActiveTick(
+                slug=f"slug-{i:02d}",
+                phase="spawning",
+                started_at=datetime.now(timezone.utc),
+            )
+        )
         ds.end_tick(outcome="ok")
 
     history = ds.load().history
@@ -186,16 +201,18 @@ def test_failure_counter_increments_then_resets_on_success(isolated_lab: Path) -
     import openharness.lab.daemon_state as ds
 
     for _ in range(2):
-        ds.begin_tick(ds.ActiveTick(slug="bad", phase="spawning",
-                                    started_at=datetime.now(timezone.utc)))
+        ds.begin_tick(
+            ds.ActiveTick(slug="bad", phase="spawning", started_at=datetime.now(timezone.utc))
+        )
         _, rec = ds.end_tick(outcome="refuse", summary="no creds")
         assert rec is not None
 
     assert ds.load().entry_failures["bad"].count == 2
 
     # Success resets.
-    ds.begin_tick(ds.ActiveTick(slug="bad", phase="spawning",
-                                started_at=datetime.now(timezone.utc)))
+    ds.begin_tick(
+        ds.ActiveTick(slug="bad", phase="spawning", started_at=datetime.now(timezone.utc))
+    )
     _, rec = ds.end_tick(outcome="ok")
     assert rec is None
     assert "bad" not in ds.load().entry_failures
@@ -204,11 +221,13 @@ def test_failure_counter_increments_then_resets_on_success(isolated_lab: Path) -
 def test_paused_tick_does_not_increment_failure_counter(isolated_lab: Path) -> None:
     import openharness.lab.daemon_state as ds
 
-    ds.begin_tick(ds.ActiveTick(
-        slug="alpha",
-        phase="run",
-        started_at=datetime.now(timezone.utc),
-    ))
+    ds.begin_tick(
+        ds.ActiveTick(
+            slug="alpha",
+            phase="run",
+            started_at=datetime.now(timezone.utc),
+        )
+    )
     _, rec = ds.end_tick(outcome="paused", summary="paused after run")
 
     state = ds.load()
@@ -237,8 +256,9 @@ def test_clear_active_tick_does_not_record_history(isolated_lab: Path) -> None:
     """Signal-handler shutdown should drop in-flight tick without faking a history row."""
     import openharness.lab.daemon_state as ds
 
-    ds.begin_tick(ds.ActiveTick(slug="abandoned", phase="running",
-                                started_at=datetime.now(timezone.utc)))
+    ds.begin_tick(
+        ds.ActiveTick(slug="abandoned", phase="running", started_at=datetime.now(timezone.utc))
+    )
     ds.clear_active_tick()
     s = ds.load()
     assert s.active_tick is None
@@ -378,8 +398,13 @@ def test_idle_wait_blocks_full_duration_when_no_signal(
 
 def _entry(slug: str):
     from openharness.lab.runner import RoadmapEntry
+
     return RoadmapEntry(
-        slug=slug, body="", idea_id=None, hypothesis="", depends_on=[],
+        slug=slug,
+        body="",
+        idea_id=None,
+        hypothesis="",
+        depends_on=[],
     )
 
 
@@ -399,8 +424,9 @@ def test_select_next_entry_autonomous_picks_first(isolated_lab: Path) -> None:
     ready = [_entry("a"), _entry("b")]
     state = ds.DaemonState(mode="autonomous", approved_slugs=["b"])
     chosen = _select_next_entry(ready, state)
-    assert chosen is not None and chosen.slug == "a", \
+    assert chosen is not None and chosen.slug == "a", (
         "autonomous must ignore approval list and pick top of queue"
+    )
 
 
 def test_select_next_entry_skips_failure_blocked_slugs(isolated_lab: Path) -> None:
@@ -446,7 +472,8 @@ def test_select_next_entry_manual_no_approvals_picks_nothing(
 
 
 def test_loop_blocks_without_mutating_roadmap(
-    isolated_lab: Path, monkeypatch: pytest.MonkeyPatch,
+    isolated_lab: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """The failure gate must not dirty lab/roadmap.md on main."""
     import openharness.lab.daemon_state as ds
@@ -577,12 +604,15 @@ def test_daemon_partials_round_trip(client) -> None:
     # on earlier stateful tests in this module it may show the empty
     # state or the most recently touched slug.
     body = client.get("/_hx/daemon-pipeline").text
-    assert any(token in body for token in (
-        "No pipeline yet",
-        "Reset all phases",
-        "last seen",
-        "running",
-    ))
+    assert any(
+        token in body
+        for token in (
+            "No pipeline yet",
+            "Reset all phases",
+            "last seen",
+            "running",
+        )
+    )
 
 
 def test_whitelist_includes_all_daemon_commands(client) -> None:
@@ -592,6 +622,7 @@ def test_whitelist_includes_all_daemon_commands(client) -> None:
     daemon_state but never wired into the web whitelist.
     """
     from openharness.lab.web.commands import COMMANDS
+
     expected = {
         "daemon-mode",
         "daemon-approve",
@@ -648,8 +679,9 @@ def test_log_endpoint_rejects_path_traversal(client) -> None:
     check is implicit but covered by code review."""
     for bad in ("../etc/passwd", "..%2Fetc%2Fpasswd", "log;rm -rf .log"):
         resp = client.get(f"/_hx/daemon-log/{bad}")
-        assert resp.status_code in (400, 404), \
+        assert resp.status_code in (400, 404), (
             f"expected 400/404 for {bad!r}, got {resp.status_code}"
+        )
 
 
 def test_log_endpoint_404s_on_missing_file(client) -> None:
@@ -871,9 +903,7 @@ def test_runs_prune_refuses_subhour_without_force(
     assert "force" in result.output.lower()
 
 
-def test_journal_endpoint_returns_pre_block(
-    client, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_journal_endpoint_returns_pre_block(client, monkeypatch: pytest.MonkeyPatch) -> None:
     """`/_hx/daemon-journal` calls ``services.journal`` and renders.
 
     Stubs the subprocess so the test doesn't require a real
@@ -895,9 +925,7 @@ def test_journal_endpoint_returns_pre_block(
     assert "openharness-daemon" in resp.text
 
 
-def test_journal_endpoint_clamps_lines_param(
-    client, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_journal_endpoint_clamps_lines_param(client, monkeypatch: pytest.MonkeyPatch) -> None:
     """Out-of-range ``lines`` is clamped to the [50, 2000] window.
 
     Defends against a rogue caller asking for 10M lines and OOMing
@@ -961,7 +989,8 @@ def test_compact_journal_passes_unknown_lines_through() -> None:
 
 
 def test_active_spawn_endpoint_falls_back_to_newest_log(
-    client, isolated_lab: Path,
+    client,
+    isolated_lab: Path,
 ) -> None:
     """With no active tick, the panel renders the newest spawn log."""
     logs_dir = isolated_lab / "runs" / "lab" / "logs"
@@ -984,7 +1013,8 @@ def test_active_spawn_endpoint_falls_back_to_newest_log(
 
 
 def test_active_spawn_endpoint_prefers_active_tick_log(
-    client, isolated_lab: Path,
+    client,
+    isolated_lab: Path,
 ) -> None:
     """When daemon_state has an active tick, its log path wins."""
     from openharness.lab import daemon_state as ds
@@ -1090,9 +1120,7 @@ def test_api_cmd_validates_mode_param(client) -> None:
     assert resp.status_code == 400, resp.text
 
     # Good mode → subprocess invoked with the right argv.
-    with mock.patch(
-        "openharness.lab.web.commands.subprocess.run"
-    ) as m:
+    with mock.patch("openharness.lab.web.commands.subprocess.run") as m:
         m.return_value = mock.Mock(returncode=0, stdout="mode → manual\n", stderr="")
         resp = client.post(
             "/api/cmd",

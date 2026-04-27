@@ -14,7 +14,7 @@ import os
 import re
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any
 
 from pydantic import BaseModel, Field
 
@@ -227,9 +227,18 @@ def default_provider_profiles() -> dict[str, ProviderProfile]:
         "gemini": ProviderProfile(
             label="Google Gemini",
             provider="gemini",
-            api_format="google",
+            api_format="openai",
             auth_source="gemini_api_key",
-            default_model="gemini-3.1-flash-lite-preview",
+            default_model="gemini-2.5-flash",
+            base_url="https://generativelanguage.googleapis.com/v1beta/openai",
+        ),
+        "minimax": ProviderProfile(
+            label="MiniMax",
+            provider="minimax",
+            api_format="openai",
+            auth_source="minimax_api_key",
+            default_model="MiniMax-M2.7",
+            base_url="https://api.minimax.io/v1",
         ),
     }
 
@@ -286,8 +295,6 @@ def resolve_model_setting(
             )
         if is_claude_family_provider(provider):
             return _CLAUDE_ALIAS_TARGETS["sonnet"]
-        if provider == "gemini":
-            return "gemini-3.1-flash-lite-preview"
         return "gpt-5.4"
 
     if is_claude_family_provider(provider):
@@ -311,7 +318,6 @@ def auth_source_provider_name(auth_source: str) -> str:
     """Map an auth source to the storage/runtime provider name."""
     mapping = {
         "anthropic_api_key": "anthropic",
-        "gemini_api_key": "gemini",
         "openai_api_key": "openai",
         "codex_subscription": "openai_codex",
         "claude_subscription": "anthropic_claude",
@@ -320,6 +326,8 @@ def auth_source_provider_name(auth_source: str) -> str:
         "bedrock_api_key": "bedrock",
         "vertex_api_key": "vertex",
         "moonshot_api_key": "moonshot",
+        "gemini_api_key": "gemini",
+        "minimax_api_key": "minimax",
     }
     return mapping.get(auth_source, auth_source)
 
@@ -345,8 +353,6 @@ def default_auth_source_for_provider(provider: str, api_format: str | None = Non
     """Infer the default auth source for a provider/backend."""
     if provider == "anthropic_claude":
         return "claude_subscription"
-    if provider == "gemini" or api_format == "google":
-        return "gemini_api_key"
     if provider == "openai_codex":
         return "codex_subscription"
     if provider == "copilot":
@@ -361,6 +367,8 @@ def default_auth_source_for_provider(provider: str, api_format: str | None = Non
         return "moonshot_api_key"
     if provider == "gemini":
         return "gemini_api_key"
+    if provider == "minimax":
+        return "minimax_api_key"
     if provider == "openai" or api_format == "openai":
         return "openai_api_key"
     return "anthropic_api_key"
@@ -453,10 +461,6 @@ class Settings(BaseModel):
     profiles: dict[str, ProviderProfile] = Field(default_factory=default_provider_profiles)
     max_turns: int = 200
 
-    # Vertex AI / Google Cloud configuration (used when model is a Gemini variant)
-    vertex_project: str | None = None
-    vertex_location: str | None = None
-
     # Behavior
     system_prompt: str | None = None
     permission: PermissionSettings = Field(default_factory=PermissionSettings)
@@ -464,6 +468,7 @@ class Settings(BaseModel):
     memory: MemorySettings = Field(default_factory=MemorySettings)
     sandbox: SandboxSettings = Field(default_factory=SandboxSettings)
     enabled_plugins: dict[str, bool] = Field(default_factory=dict)
+    allow_project_plugins: bool = False
     mcp_servers: dict[str, McpServerConfig] = Field(default_factory=dict)
 
     # UI
@@ -475,16 +480,6 @@ class Settings(BaseModel):
     effort: str = "medium"
     passes: int = 1
     verbose: bool = False
-
-    # Execution mode. ``"interactive"`` (default) renders the full
-    # CLI-oriented system prompt (mentions of "the user", permission
-    # prompts, delegation guidance, host CLAUDE.md / memory / skills).
-    # ``"autonomous"`` renders a slimmed prompt for unattended trial /
-    # batch execution (e.g. Harbor, experiments) where there is no
-    # human to interact with — drops user-facing language and the
-    # host-machine personalization sections that would otherwise leak
-    # into the trial container's prompt.
-    session_mode: Literal["interactive", "autonomous"] = "interactive"
 
     def merged_profiles(self) -> dict[str, ProviderProfile]:
         """Return the saved profiles merged over the built-in catalog."""
@@ -593,15 +588,12 @@ class Settings(BaseModel):
         )
 
     def resolve_api_key(self) -> str:
-        """Resolve the API key appropriate for the configured model.
+        """Resolve API key with precedence: instance value > env var > empty.
 
-        Precedence (highest first):
-        1. ``api_key`` field set directly on this instance or via ``OPENHARNESS_API_KEY``
-        2. Provider-specific environment variable (``GOOGLE_API_KEY`` /
-           ``GEMINI_API_KEY`` / ``VERTEX_AI_API_KEY`` for Gemini models;
-           ``ANTHROPIC_API_KEY`` for all others)
+        For ``copilot`` api_format the key is managed separately via
+        ``oh auth copilot-login`` and this method is not called.
 
-        Raises ``ValueError`` when no key can be resolved.
+        Returns the API key string. Raises ValueError if no key is found.
         """
         profile_name, profile = self.resolve_profile()
         del profile_name
@@ -619,28 +611,14 @@ class Settings(BaseModel):
         if self.api_key:
             return self.api_key
 
-        if "gemini" in self.model.lower():
-            env_key = (
-                os.environ.get("GOOGLE_API_KEY")
-                or os.environ.get("GEMINI_API_KEY")
-                or os.environ.get("VERTEX_AI_API_KEY", "")
-            )
-            if env_key:
-                return env_key
-            raise ValueError(
-                "No API key found for Gemini model. "
-                "Set GOOGLE_API_KEY, GEMINI_API_KEY, or VERTEX_AI_API_KEY, "
-                "or configure api_key in ~/.openharness/settings.json"
-            )
-
         env_key = os.environ.get("ANTHROPIC_API_KEY", "")
         if env_key:
             return env_key
 
-        if profile.api_format == "openai":
-            openai_key = os.environ.get("OPENAI_API_KEY", "")
-            if openai_key:
-                return openai_key
+        # Also check OPENAI_API_KEY for openai-format providers
+        openai_key = os.environ.get("OPENAI_API_KEY", "")
+        if openai_key:
+            return openai_key
 
         raise ValueError(
             "No API key found. Set ANTHROPIC_API_KEY (or OPENAI_API_KEY for openai-format "
@@ -696,9 +674,10 @@ class Settings(BaseModel):
                 state="configured",
             )
 
+        storage_provider = auth_source_provider_name(auth_source)
+
         from openharness.auth.storage import load_credential
 
-        storage_provider = credential_storage_provider_name(profile_name, profile)
         if profile.credential_slot:
             scoped_storage_provider = f"profile:{profile.credential_slot}"
             scoped = load_credential(scoped_storage_provider, "api_key", use_keyring=False)
@@ -712,21 +691,17 @@ class Settings(BaseModel):
                     source=f"file:{scoped_storage_provider}",
                     state="configured",
                 )
-            raise ValueError(
-                f"No credentials found for profile-scoped auth source '{auth_source}'. "
-                f"Configure a key for profile '{profile_name}' first."
-            )
 
         storage_provider = credential_storage_provider_name(profile_name, profile)
 
-        env_vars = {
-            "anthropic_api_key": ("ANTHROPIC_API_KEY",),
-            "gemini_api_key": ("GOOGLE_API_KEY", "GEMINI_API_KEY", "VERTEX_AI_API_KEY"),
-            "openai_api_key": ("OPENAI_API_KEY",),
-            "dashscope_api_key": ("DASHSCOPE_API_KEY",),
-            "moonshot_api_key": ("MOONSHOT_API_KEY",),
-        }.get(auth_source, ())
-        for env_var in env_vars:
+        env_var = {
+            "anthropic_api_key": "ANTHROPIC_API_KEY",
+            "openai_api_key": "OPENAI_API_KEY",
+            "dashscope_api_key": "DASHSCOPE_API_KEY",
+            "moonshot_api_key": "MOONSHOT_API_KEY",
+            "minimax_api_key": "MINIMAX_API_KEY",
+        }.get(auth_source)
+        if env_var:
             env_value = os.environ.get(env_var, "")
             if env_value:
                 return ResolvedAuth(
@@ -793,47 +768,42 @@ class Settings(BaseModel):
 def _apply_env_overrides(settings: Settings) -> Settings:
     """Apply supported environment variable overrides over loaded settings.
 
-    Note: provider-specific API keys (``ANTHROPIC_API_KEY``, ``GEMINI_API_KEY``,
-    ``VERTEX_AI_API_KEY``) are intentionally **not** loaded into the ``api_key``
-    field here.  They are resolved lazily and model-aware by ``resolve_api_key()``.
-    Use ``OPENHARNESS_API_KEY`` only if you need to pin an explicit key regardless
-    of the model.
+    Provider-scoped env vars (``ANTHROPIC_BASE_URL``, ``ANTHROPIC_MODEL``,
+    ``OPENAI_BASE_URL``) only apply when the active profile does *not*
+    explicitly configure the corresponding field.  ``OPENHARNESS_*`` env vars
+    always override (explicit user intent).
     """
     updates: dict[str, Any] = {}
 
-    model = os.environ.get("ANTHROPIC_MODEL") or os.environ.get("OPENHARNESS_MODEL")
-    if model:
-        # Strip ANSI escape sequences that may be present if the environment
-        # variable was set with terminal formatting (e.g., bold text)
-        updates["model"] = strip_ansi_escape_sequences(model)
+    # Resolve the active profile to check for explicit settings.
+    _, active_profile = settings.resolve_profile()
+    profile_has_base_url = active_profile.base_url is not None
+    profile_explicit_model = (active_profile.last_model or "").strip()
+    profile_has_explicit_model = bool(
+        profile_explicit_model
+    ) and profile_explicit_model.lower() not in {"", "default"}
 
-    base_url = (
-        os.environ.get("ANTHROPIC_BASE_URL")
-        or os.environ.get("OPENAI_BASE_URL")
-        or os.environ.get("OPENHARNESS_BASE_URL")
-    )
-    if base_url:
-        updates["base_url"] = base_url
+    # --- model ---
+    openharness_model = os.environ.get("OPENHARNESS_MODEL")
+    if openharness_model:
+        updates["model"] = strip_ansi_escape_sequences(openharness_model)
+    elif not profile_has_explicit_model:
+        anthropic_model = os.environ.get("ANTHROPIC_MODEL")
+        if anthropic_model:
+            updates["model"] = strip_ansi_escape_sequences(anthropic_model)
+
+    # --- base_url ---
+    openharness_base = os.environ.get("OPENHARNESS_BASE_URL")
+    if openharness_base:
+        updates["base_url"] = openharness_base
+    elif not profile_has_base_url:
+        generic_base = os.environ.get("ANTHROPIC_BASE_URL") or os.environ.get("OPENAI_BASE_URL")
+        if generic_base:
+            updates["base_url"] = generic_base
 
     max_tokens = os.environ.get("OPENHARNESS_MAX_TOKENS")
     if max_tokens:
         updates["max_tokens"] = int(max_tokens)
-
-    # Explicit key override — use this only to pin a key unconditionally.
-    # Model-specific keys (ANTHROPIC_API_KEY, GEMINI_API_KEY, etc.) are
-    # resolved lazily by Settings.resolve_api_key() so they never clobber
-    # each other when switching providers.
-    api_key = os.environ.get("OPENHARNESS_API_KEY")
-    if api_key:
-        updates["api_key"] = api_key
-
-    vertex_project = os.environ.get("VERTEX_PROJECT") or os.environ.get("GOOGLE_CLOUD_PROJECT")
-    if vertex_project:
-        updates["vertex_project"] = vertex_project
-
-    vertex_location = os.environ.get("VERTEX_LOCATION") or os.environ.get("GOOGLE_CLOUD_LOCATION")
-    if vertex_location:
-        updates["vertex_location"] = vertex_location
 
     timeout = os.environ.get("OPENHARNESS_TIMEOUT")
     if timeout:
@@ -850,6 +820,11 @@ def _apply_env_overrides(settings: Settings) -> Settings:
     auto_compact_threshold_tokens = os.environ.get("OPENHARNESS_AUTO_COMPACT_THRESHOLD_TOKENS")
     if auto_compact_threshold_tokens:
         updates["auto_compact_threshold_tokens"] = int(auto_compact_threshold_tokens)
+
+    api_key = os.environ.get("ANTHROPIC_API_KEY") or os.environ.get("OPENAI_API_KEY")
+    if api_key:
+        updates["api_key"] = api_key
+
     api_format = os.environ.get("OPENHARNESS_API_FORMAT")
     if api_format:
         updates["api_format"] = api_format

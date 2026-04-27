@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, Literal, Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Literal, Protocol, runtime_checkable
 
 if TYPE_CHECKING:
     pass
@@ -273,11 +273,11 @@ class TeammateSpawnConfig:
     parent_session_id: str
     """Parent session ID (for transcript correlation)."""
 
-    description: str | None = None
-    """Short operator-facing description of the delegated work."""
-
     model: str | None = None
     """Model override for this teammate."""
+
+    command: str | None = None
+    """Optional explicit command override for subprocess-backed teammates."""
 
     system_prompt: str | None = None
     """System prompt resolved from workflow config."""
@@ -306,41 +306,11 @@ class TeammateSpawnConfig:
     session_id: str | None = None
     """Explicit session ID (generated if not provided)."""
 
-    run_id: str | None = None
-    """Top-level OpenHarness run ID used for shared observability grouping."""
-
-    run_root: str | None = None
-    """Top-level OpenHarness run directory used for shared artifacts."""
-
     subscriptions: list[str] = field(default_factory=list)
     """Event topics this teammate subscribes to."""
 
-    runner: Literal["prompt_native", "yaml_workflow", "harbor"] = "prompt_native"
-    """Execution substrate for this teammate."""
-
-    agent_config_name: str | None = None
-    """YAML config name when ``runner`` is ``yaml_workflow`` or ``harbor``."""
-
-    agent_architecture: str | None = None
-    """Architecture label for diagnostics/UI."""
-
-    permission_mode: str | None = None
-    """Coordinator-level permission mode hint."""
-
-    allowed_tools: list[str] | None = None
-    """Explicit tool allow-list for prompt-native teammates."""
-
-    disallowed_tools: list[str] | None = None
-    """Explicit tool deny-list for prompt-native teammates."""
-
-    initial_prompt: str | None = None
-    """Extra task prelude inserted before the first user prompt."""
-
-    max_turns: int | None = None
-    """Optional per-teammate turn cap override."""
-
-    task_payload: dict[str, Any] = field(default_factory=dict)
-    """Opaque task payload forwarded to YAML workflow runners."""
+    task_type: Literal["local_agent", "remote_agent", "in_process_teammate"] = "local_agent"
+    """Background task type recorded for subprocess-backed teammates."""
 
 
 # ---------------------------------------------------------------------------
@@ -374,9 +344,6 @@ class TeammateMessage:
 
     text: str
     from_agent: str
-    message_id: str | None = None
-    correlation_id: str | None = None
-    reply_to: str | None = None
     color: str | None = None
     timestamp: str | None = None
     summary: str | None = None

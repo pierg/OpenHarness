@@ -191,9 +191,7 @@ class OpenHarnessHarborAgent(BaseAgent):
             trace_tags = _build_trace_tags(
                 experiment_context, task_name, resolved_model, run_context.run_id
             )
-            session_id = (
-                experiment_context.get("instance_id") or job_run_id or uuid4().hex[:12]
-            )
+            session_id = experiment_context.get("instance_id") or job_run_id or uuid4().hex[:12]
 
             trace_observer = create_trace_observer(
                 session_id=session_id,
@@ -434,9 +432,7 @@ def _validate_model_id(value: object, field_name: str) -> str:
     return value.strip()
 
 
-def _build_trace_name(
-    experiment_context: dict[str, str], task_name: str, run_id: str
-) -> str:
+def _build_trace_name(experiment_context: dict[str, str], task_name: str, run_id: str) -> str:
     """Use the trial ``run_id`` as the Langfuse trace name.
 
     Keeping the trace name aligned with ``run_id`` (e.g. ``regex-log__bNt7WXD``)

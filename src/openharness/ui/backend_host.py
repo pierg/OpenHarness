@@ -758,6 +758,13 @@ class ReactBackendHost:
                     ("gemini-3.1-flash-lite-preview", "Gemini Flash"),
                 ]
             )
+        elif provider_name == "minimax":
+            families.extend(
+                [
+                    ("MiniMax-M2.7", "MiniMax flagship"),
+                    ("MiniMax-M2.7-highspeed", "MiniMax fast"),
+                ]
+            )
 
         seen: set[str] = set()
         options: list[dict[str, object]] = []

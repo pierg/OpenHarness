@@ -46,8 +46,10 @@ def isolated_lab(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     monkeypatch.setenv("OPENHARNESS_REPO_ROOT", str(repo))
 
     import openharness.lab.paths as paths
+
     importlib.reload(paths)
     import openharness.lab.phase_state as ps
+
     importlib.reload(ps)
 
     return repo
@@ -164,6 +166,7 @@ def test_repair_args_empty_on_first_attempt(isolated_lab: Path) -> None:
     """No prior failures → no ``--repair-*`` flags injected."""
     import openharness.lab.phase_state as ps
     import openharness.lab.runner as runner
+
     importlib.reload(runner)
 
     ps.mark_running("alpha", "implement")
@@ -175,6 +178,7 @@ def test_repair_args_emits_flags_after_failure(isolated_lab: Path) -> None:
     """One prior failure → exactly two flags + a markdown file on disk."""
     import openharness.lab.phase_state as ps
     import openharness.lab.runner as runner
+
     importlib.reload(runner)
 
     ps.mark_failed("alpha", "implement", error="REFUSE; cannot find slice")
@@ -199,6 +203,7 @@ def test_repair_context_orders_failures_newest_first(isolated_lab: Path) -> None
     """Most recent failure goes at the top of the prompt context."""
     import openharness.lab.phase_state as ps
     import openharness.lab.runner as runner
+
     importlib.reload(runner)
 
     ps.mark_failed("alpha", "implement", error="oldest boom")
@@ -216,6 +221,7 @@ def test_repair_args_attempt_number_grows_with_failures(isolated_lab: Path) -> N
     """1-indexed attempt number = failure_count + 1."""
     import openharness.lab.phase_state as ps
     import openharness.lab.runner as runner
+
     importlib.reload(runner)
 
     ps.mark_failed("alpha", "design", error="boom-1")
@@ -233,7 +239,8 @@ def test_repair_args_attempt_number_grows_with_failures(isolated_lab: Path) -> N
 
 
 def test_process_entry_short_circuits_when_repair_budget_exhausted(
-    isolated_lab: Path, monkeypatch: pytest.MonkeyPatch,
+    isolated_lab: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Once failure_count > MAX_REPAIRS_PER_PHASE, we return error without spawning.
 
@@ -243,16 +250,23 @@ def test_process_entry_short_circuits_when_repair_budget_exhausted(
     """
     import openharness.lab.phase_state as ps
     import openharness.lab.runner as runner
+
     importlib.reload(runner)
 
     # Force budget = 0 so a single prior failure already exhausts repairs.
     monkeypatch.setattr(ps, "MAX_REPAIRS_PER_PHASE", 0)
 
     # Mark preflight ok so first_unfinished() lands on `design`.
-    ps.mark_ok("alpha", "preflight", payload={
-        "worktree": "/tmp/wt", "branch": "lab/alpha",
-        "base_sha": "abc", "base_branch": "main",
-    })
+    ps.mark_ok(
+        "alpha",
+        "preflight",
+        payload={
+            "worktree": "/tmp/wt",
+            "branch": "lab/alpha",
+            "base_sha": "abc",
+            "base_branch": "main",
+        },
+    )
     ps.mark_failed("alpha", "design", error="REFUSE; bad")
 
     spawned: list[str] = []
@@ -264,7 +278,10 @@ def test_process_entry_short_circuits_when_repair_budget_exhausted(
     monkeypatch.setattr(runner.codex_adapter, "run", _fake_run)
 
     entry = runner.RoadmapEntry(
-        slug="alpha", body="", idea_id="some-idea", hypothesis="h",
+        slug="alpha",
+        body="",
+        idea_id="some-idea",
+        hypothesis="h",
     )
     cfg = runner.OrchestratorConfig(once=True)
     result = runner._process_entry(entry, cfg)
@@ -281,11 +298,13 @@ def test_process_entry_short_circuits_when_repair_budget_exhausted(
 
 
 def test_process_entry_retries_failed_preflight_after_host_cleanup(
-    isolated_lab: Path, monkeypatch: pytest.MonkeyPatch,
+    isolated_lab: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Preflight failures are host-state dependent, so stale failures retry."""
     import openharness.lab.phase_state as ps
     import openharness.lab.runner as runner
+
     importlib.reload(runner)
 
     monkeypatch.setattr(ps, "MAX_REPAIRS_PER_PHASE", 0)
@@ -296,19 +315,26 @@ def test_process_entry_retries_failed_preflight_after_host_cleanup(
 
     def _preflight(entry, _state, _cfg):
         calls.append(entry.slug)
-        ps.mark_ok("alpha", "preflight", payload={
-            "worktree": "/tmp/wt",
-            "branch": "lab/alpha",
-            "base_sha": "abc",
-            "base_branch": "main",
-        })
+        ps.mark_ok(
+            "alpha",
+            "preflight",
+            payload={
+                "worktree": "/tmp/wt",
+                "branch": "lab/alpha",
+                "base_sha": "abc",
+                "base_branch": "main",
+            },
+        )
         return None
 
     monkeypatch.setattr(runner, "_PHASE_DISPATCH", (("preflight", _preflight),))
 
     result = runner._process_entry(
         runner.RoadmapEntry(
-            slug="alpha", body="", idea_id="some-idea", hypothesis="h",
+            slug="alpha",
+            body="",
+            idea_id="some-idea",
+            hypothesis="h",
         ),
         runner.OrchestratorConfig(once=True),
     )
@@ -319,11 +345,13 @@ def test_process_entry_retries_failed_preflight_after_host_cleanup(
 
 
 def test_process_entry_retries_timed_out_run_when_summary_lands_late(
-    isolated_lab: Path, monkeypatch: pytest.MonkeyPatch,
+    isolated_lab: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A detached run can complete after the daemon's timeout window."""
     import openharness.lab.phase_state as ps
     import openharness.lab.runner as runner
+
     importlib.reload(runner)
 
     monkeypatch.setattr(ps, "MAX_REPAIRS_PER_PHASE", 0)
@@ -331,18 +359,27 @@ def test_process_entry_retries_timed_out_run_when_summary_lands_late(
     (run_dir / "results").mkdir(parents=True)
     (run_dir / "results" / "summary.md").write_text("ok\n")
 
-    ps.mark_ok("alpha", "preflight", payload={
-        "worktree": "/tmp/wt",
-        "branch": "lab/alpha",
-        "base_sha": "abc",
-        "base_branch": "main",
-    })
+    ps.mark_ok(
+        "alpha",
+        "preflight",
+        payload={
+            "worktree": "/tmp/wt",
+            "branch": "lab/alpha",
+            "base_sha": "abc",
+            "base_branch": "main",
+        },
+    )
     ps.mark_ok("alpha", "design")
     ps.mark_ok("alpha", "implement", payload={"spec_name": "alpha"})
-    ps.mark_failed("alpha", "run", error="timeout", payload={
-        "instance_id": "late-run",
-        "run_dir": str(run_dir),
-    })
+    ps.mark_failed(
+        "alpha",
+        "run",
+        error="timeout",
+        payload={
+            "instance_id": "late-run",
+            "run_dir": str(run_dir),
+        },
+    )
     ps.mark_failed("alpha", "run", error="timeout again")
 
     calls: list[str] = []
@@ -356,7 +393,10 @@ def test_process_entry_retries_timed_out_run_when_summary_lands_late(
 
     result = runner._process_entry(
         runner.RoadmapEntry(
-            slug="alpha", body="", idea_id="some-idea", hypothesis="h",
+            slug="alpha",
+            body="",
+            idea_id="some-idea",
+            hypothesis="h",
         ),
         runner.OrchestratorConfig(once=True),
     )
@@ -375,27 +415,40 @@ def test_phase_finalize_retries_unmerged_finalize_json(
     """A stale ``merged: false`` contract must not short-circuit repairs."""
     import openharness.lab.phase_state as ps
     import openharness.lab.runner as runner
+
     importlib.reload(runner)
 
     worktree = isolated_lab / "worktree"
     worktree.mkdir()
-    ps.mark_ok("alpha", "preflight", payload={
-        "worktree": str(worktree),
-        "branch": "lab/alpha",
-        "base_sha": "abc",
-        "base_branch": "main",
-    })
-    ps.mark_ok("alpha", "run", payload={
-        "instance_id": "alpha-20260426-000000",
-        "lab_commits": ["1111111"],
-        "baseline_at_runtime": "basic",
-    })
-    ps.mark_ok("alpha", "critique", payload={
-        "instance_id": "alpha-20260426-000000",
-        "verdict_kind": "no_op",
-        "verdict_target": "basic_retry",
-        "verdict_rationale": "no_op after inconclusive slice",
-    })
+    ps.mark_ok(
+        "alpha",
+        "preflight",
+        payload={
+            "worktree": str(worktree),
+            "branch": "lab/alpha",
+            "base_sha": "abc",
+            "base_branch": "main",
+        },
+    )
+    ps.mark_ok(
+        "alpha",
+        "run",
+        payload={
+            "instance_id": "alpha-20260426-000000",
+            "lab_commits": ["1111111"],
+            "baseline_at_runtime": "basic",
+        },
+    )
+    ps.mark_ok(
+        "alpha",
+        "critique",
+        payload={
+            "instance_id": "alpha-20260426-000000",
+            "verdict_kind": "no_op",
+            "verdict_target": "basic_retry",
+            "verdict_rationale": "no_op after inconclusive slice",
+        },
+    )
     ps.mark_ok("alpha", "replan", payload={"lab_commits": ["2222222"]})
     ps.mark_failed(
         "alpha",
@@ -403,28 +456,36 @@ def test_phase_finalize_retries_unmerged_finalize_json(
         error="finalize did not sync the experiment outcome back to main",
     )
     finalize_path = ps.slug_dir("alpha") / "finalize.json"
-    finalize_path.write_text(json.dumps({
-        "merged": False,
-        "reason": "previous PR creation failed",
-    }))
+    finalize_path.write_text(
+        json.dumps(
+            {
+                "merged": False,
+                "reason": "previous PR creation failed",
+            }
+        )
+    )
 
     spawned: list[list[str]] = []
 
     def _fake_run(skill: str, args: list[str], **_kwargs: object) -> object:
         spawned.append([skill, *args])
-        finalize_path.write_text(json.dumps({
-            "merged": True,
-            "cleanup_worktree": False,
-            "experiment_pr_url": "https://github.com/pierg/OpenHarness/pull/99",
-            "experiment_pr_state": "closed",
-            "metadata_pr_url": "https://github.com/pierg/OpenHarness/pull/100",
-            "pr_url": "https://github.com/pierg/OpenHarness/pull/99",
-            "pr_urls": [
-                "https://github.com/pierg/OpenHarness/pull/99",
-                "https://github.com/pierg/OpenHarness/pull/100",
-            ],
-            "discarded_sha": "deadbeef",
-        }))
+        finalize_path.write_text(
+            json.dumps(
+                {
+                    "merged": True,
+                    "cleanup_worktree": False,
+                    "experiment_pr_url": "https://github.com/pierg/OpenHarness/pull/99",
+                    "experiment_pr_state": "closed",
+                    "metadata_pr_url": "https://github.com/pierg/OpenHarness/pull/100",
+                    "pr_url": "https://github.com/pierg/OpenHarness/pull/99",
+                    "pr_urls": [
+                        "https://github.com/pierg/OpenHarness/pull/99",
+                        "https://github.com/pierg/OpenHarness/pull/100",
+                    ],
+                    "discarded_sha": "deadbeef",
+                }
+            )
+        )
         return SimpleNamespace(
             ok=True,
             exit_code=0,
@@ -453,8 +514,7 @@ def test_phase_finalize_retries_unmerged_finalize_json(
     assert spawned[0][0] == "lab-finalize-pr"
     assert "--repair-attempt=2" in spawned[0]
     assert any(
-        path.name.startswith("finalize.unmerged-")
-        for path in ps.slug_dir("alpha").iterdir()
+        path.name.startswith("finalize.unmerged-") for path in ps.slug_dir("alpha").iterdir()
     )
     rec = ps.load("alpha").get("finalize")
     assert rec.status == "ok"
@@ -465,31 +525,40 @@ def test_phase_finalize_retries_unmerged_finalize_json(
 
 
 def test_process_entry_pauses_after_requested_phase(
-    isolated_lab: Path, monkeypatch: pytest.MonkeyPatch,
+    isolated_lab: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A pause-after barrier stops the tick only after a clean phase boundary."""
     import openharness.lab.daemon_state as ds
     import openharness.lab.phase_state as ps
     import openharness.lab.runner as runner
+
     importlib.reload(runner)
 
     ds.set_mode("autonomous")
     ds.set_pause_after("preflight", slug="alpha")
 
     def _preflight(entry, _state, _cfg):
-        ps.mark_ok(entry.slug, "preflight", payload={
-            "worktree": "/tmp/wt",
-            "branch": "lab/alpha",
-            "base_sha": "abc",
-            "base_branch": "main",
-        })
+        ps.mark_ok(
+            entry.slug,
+            "preflight",
+            payload={
+                "worktree": "/tmp/wt",
+                "branch": "lab/alpha",
+                "base_sha": "abc",
+                "base_branch": "main",
+            },
+        )
         return None
 
     monkeypatch.setattr(runner, "_PHASE_DISPATCH", (("preflight", _preflight),))
 
     result = runner._process_entry(
         runner.RoadmapEntry(
-            slug="alpha", body="", idea_id="some-idea", hypothesis="h",
+            slug="alpha",
+            body="",
+            idea_id="some-idea",
+            hypothesis="h",
         ),
         runner.OrchestratorConfig(once=True),
     )

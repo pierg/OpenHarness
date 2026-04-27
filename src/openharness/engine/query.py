@@ -1,18 +1,10 @@
-"""Core tool-aware query loop.
-
-Two entry points:
-
-- ``run_single_turn`` executes one LLM call plus tool execution and returns a
-  ``TurnResult``. Used by ``Conversation.step()``.
-- ``run_query`` is the streaming multi-turn loop used by the interactive
-  runtime and kept for compatibility.
-"""
+"""Core tool-aware query loop."""
 
 from __future__ import annotations
 
 import asyncio
-import json
 import logging
+import re
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -26,7 +18,7 @@ from openharness.api.client import (
     SupportsStreamingMessages,
 )
 from openharness.api.usage import UsageSnapshot
-from openharness.engine.messages import ConversationMessage, ToolResultBlock, ToolUseBlock
+from openharness.engine.messages import ConversationMessage, ToolResultBlock
 from openharness.engine.stream_events import (
     AssistantTextDelta,
     AssistantTurnComplete,
@@ -38,9 +30,8 @@ from openharness.engine.stream_events import (
     ToolExecutionStarted,
 )
 from openharness.hooks import HookEvent, HookExecutor
-from openharness.observability import NullTraceObserver, TraceObserver
 from openharness.permissions.checker import PermissionChecker
-from openharness.tools.base import ToolExecutionContext, ToolResult
+from openharness.tools.base import ToolExecutionContext
 from openharness.tools.base import ToolRegistry
 
 AUTO_COMPACT_STATUS_MESSAGE = "Auto-compacting conversation memory to keep things fast and focused."
@@ -55,11 +46,11 @@ AskUserPrompt = Callable[[str], Awaitable[str]]
 MAX_TRACKED_READ_FILES = 6
 MAX_TRACKED_SKILLS = 8
 MAX_TRACKED_ASYNC_AGENT_EVENTS = 8
+MAX_TRACKED_ASYNC_AGENT_TASKS = 12
 MAX_TRACKED_WORK_LOG = 10
 MAX_TRACKED_USER_GOALS = 5
 MAX_TRACKED_ACTIVE_ARTIFACTS = 8
 MAX_TRACKED_VERIFIED_WORK = 10
-_TRACE_TEXT_LIMIT = 4000
 
 
 def _is_prompt_too_long_error(exc: Exception) -> bool:
@@ -86,18 +77,6 @@ class MaxTurnsExceeded(RuntimeError):
         self.max_turns = max_turns
 
 
-@dataclass(frozen=True)
-class TurnResult:
-    """What happened in a single LLM turn."""
-
-    message: ConversationMessage
-    text: str
-    tool_calls: tuple[ToolUseBlock, ...]
-    tool_results: tuple[ToolResultBlock, ...]
-    usage: UsageSnapshot
-    is_final: bool
-
-
 @dataclass
 class QueryContext:
     """Context shared across a query run."""
@@ -116,7 +95,6 @@ class QueryContext:
     max_turns: int | None = 200
     hook_executor: HookExecutor | None = None
     tool_metadata: dict[str, object] | None = None
-    trace_observer: TraceObserver | None = None
 
 
 def _append_capped_unique(bucket: list[Any], value: Any, *, limit: int) -> None:
@@ -287,6 +265,55 @@ def _remember_async_agent_activity(
         del bucket[:-MAX_TRACKED_ASYNC_AGENT_EVENTS]
 
 
+def _parse_spawned_agent_identity(
+    output: str,
+    metadata: dict[str, object] | None = None,
+) -> tuple[str, str] | None:
+    if isinstance(metadata, dict):
+        agent_id = str(metadata.get("agent_id") or "").strip()
+        task_id = str(metadata.get("task_id") or "").strip()
+        if agent_id and task_id:
+            return agent_id, task_id
+    match = re.search(r"Spawned agent (.+?) \(task_id=(\S+?)(?:[,)]|$)", output.strip())
+    if match is None:
+        return None
+    return match.group(1).strip(), match.group(2).strip()
+
+
+def _remember_async_agent_task(
+    tool_metadata: dict[str, object] | None,
+    *,
+    tool_name: str,
+    tool_input: dict[str, object],
+    output: str,
+    result_metadata: dict[str, object] | None = None,
+) -> None:
+    if tool_name != "agent":
+        return
+    identity = _parse_spawned_agent_identity(output, result_metadata)
+    if identity is None:
+        return
+    agent_id, task_id = identity
+    bucket = _tool_metadata_bucket(tool_metadata, "async_agent_tasks")
+    description = str(tool_input.get("description") or tool_input.get("prompt") or "").strip()
+    entry = {
+        "agent_id": agent_id,
+        "task_id": task_id,
+        "description": description[:240],
+        "status": "spawned",
+        "notification_sent": False,
+        "spawned_at": time.time(),
+    }
+    bucket[:] = [
+        existing
+        for existing in bucket
+        if not isinstance(existing, dict) or str(existing.get("task_id") or "") != task_id
+    ]
+    bucket.append(entry)
+    if len(bucket) > MAX_TRACKED_ASYNC_AGENT_TASKS:
+        del bucket[:-MAX_TRACKED_ASYNC_AGENT_TASKS]
+
+
 def _remember_work_log(
     tool_metadata: dict[str, object] | None,
     *,
@@ -313,6 +340,7 @@ def _record_tool_carryover(
     tool_name: str,
     tool_input: dict[str, object],
     tool_output: str,
+    tool_result_metadata: dict[str, object] | None,
     is_error: bool,
     resolved_file_path: str | None,
 ) -> None:
@@ -349,6 +377,13 @@ def _record_tool_carryover(
             tool_name=tool_name,
             tool_input=tool_input,
             output=tool_output,
+        )
+        _remember_async_agent_task(
+            context.tool_metadata,
+            tool_name=tool_name,
+            tool_input=tool_input,
+            output=tool_output,
+            result_metadata=tool_result_metadata,
         )
         description = str(
             tool_input.get("description") or tool_input.get("prompt") or tool_name
@@ -420,74 +455,6 @@ def _record_tool_carryover(
         _remember_work_log(context.tool_metadata, entry="Entered plan mode")
     elif tool_name == "exit_plan_mode":
         _remember_work_log(context.tool_metadata, entry="Exited plan mode")
-
-
-async def run_single_turn(
-    context: QueryContext,
-    messages: list[ConversationMessage],
-) -> TurnResult:
-    """Execute one LLM call and any requested tools, mutating *messages* in place."""
-    final_message: ConversationMessage | None = None
-    usage = UsageSnapshot()
-    observer = context.trace_observer or NullTraceObserver()
-
-    with observer.model_call(
-        model=context.model,
-        input=_trace_model_input(context.system_prompt, messages),
-        metadata=_trace_model_metadata(messages),
-        model_parameters={
-            "max_tokens": context.max_tokens,
-            "max_turns": context.max_turns,
-        },
-    ) as model_handle:
-        async for event in context.api_client.stream_message(
-            ApiMessageRequest(
-                model=context.model,
-                messages=messages,
-                system_prompt=context.system_prompt,
-                max_tokens=context.max_tokens,
-                tools=context.tool_registry.to_api_schema(),
-            )
-        ):
-            if isinstance(event, ApiMessageCompleteEvent):
-                final_message = event.message
-                usage = event.usage
-
-        if final_message is None:
-            raise RuntimeError("Model stream finished without a final message")
-
-        model_handle.update(
-            output=_trace_model_output(final_message),
-            usage_details=_trace_usage_details(usage),
-            cost_details=_trace_cost_details(context.model, usage),
-            metadata={
-                "tool_calls": _trace_tool_calls(final_message.tool_uses) or None,
-            },
-        )
-
-    messages.append(final_message)
-    tool_calls = final_message.tool_uses
-    if not tool_calls:
-        return TurnResult(
-            message=final_message,
-            text=final_message.text.strip(),
-            tool_calls=(),
-            tool_results=(),
-            usage=usage,
-            is_final=True,
-        )
-
-    tool_results = await _execute_tools(context, tool_calls)
-    messages.append(ConversationMessage(role="user", content=list(tool_results)))
-
-    return TurnResult(
-        message=final_message,
-        text=final_message.text.strip(),
-        tool_calls=tuple(tool_calls),
-        tool_results=tuple(tool_results),
-        usage=usage,
-        is_final=False,
-    )
 
 
 async def run_query(
@@ -562,61 +529,35 @@ async def run_query(
 
         final_message: ConversationMessage | None = None
         usage = UsageSnapshot()
-        observer = context.trace_observer or NullTraceObserver()
 
         try:
-            with observer.model_call(
-                model=context.model,
-                input=_trace_model_input(context.system_prompt, messages),
-                metadata={
-                    **_trace_model_metadata(messages),
-                    "turn_index": turn_count,
-                    "was_compacted": was_compacted,
-                },
-                model_parameters={
-                    "max_tokens": context.max_tokens,
-                    "max_turns": context.max_turns,
-                },
-            ) as model_handle:
-                async for event in context.api_client.stream_message(
-                    ApiMessageRequest(
-                        model=context.model,
-                        messages=messages,
-                        system_prompt=context.system_prompt,
-                        max_tokens=context.max_tokens,
-                        tools=context.tool_registry.to_api_schema(),
-                    )
-                ):
-                    if isinstance(event, ApiTextDeltaEvent):
-                        yield AssistantTextDelta(text=event.text), None
-                        continue
-                    if isinstance(event, ApiRetryEvent):
-                        yield (
-                            StatusEvent(
-                                message=(
-                                    f"Request failed; retrying in {event.delay_seconds:.1f}s "
-                                    f"(attempt {event.attempt + 1} of {event.max_attempts}): {event.message}"
-                                )
-                            ),
-                            None,
-                        )
-                        continue
-
-                    if isinstance(event, ApiMessageCompleteEvent):
-                        final_message = event.message
-                        usage = event.usage
-
-                if final_message is None:
-                    raise RuntimeError("Model stream finished without a final message")
-
-                model_handle.update(
-                    output=_trace_model_output(final_message),
-                    usage_details=_trace_usage_details(usage),
-                    cost_details=_trace_cost_details(context.model, usage),
-                    metadata={
-                        "tool_calls": _trace_tool_calls(final_message.tool_uses) or None,
-                    },
+            async for event in context.api_client.stream_message(
+                ApiMessageRequest(
+                    model=context.model,
+                    messages=messages,
+                    system_prompt=context.system_prompt,
+                    max_tokens=context.max_tokens,
+                    tools=context.tool_registry.to_api_schema(),
                 )
+            ):
+                if isinstance(event, ApiTextDeltaEvent):
+                    yield AssistantTextDelta(text=event.text), None
+                    continue
+                if isinstance(event, ApiRetryEvent):
+                    yield (
+                        StatusEvent(
+                            message=(
+                                f"Request failed; retrying in {event.delay_seconds:.1f}s "
+                                f"(attempt {event.attempt + 1} of {event.max_attempts}): {event.message}"
+                            )
+                        ),
+                        None,
+                    )
+                    continue
+
+                if isinstance(event, ApiMessageCompleteEvent):
+                    final_message = event.message
+                    usage = event.usage
         except Exception as exc:
             error_msg = str(exc)
             if not reactive_compact_attempted and _is_prompt_too_long_error(exc):
@@ -641,6 +582,9 @@ async def run_query(
             else:
                 yield ErrorEvent(message=f"API error: {error_msg}"), None
             return
+
+        if final_message is None:
+            raise RuntimeError("Model stream finished without a final message")
 
         coordinator_context_message: ConversationMessage | None = None
         if context.system_prompt.startswith("You are a **coordinator**."):
@@ -671,6 +615,14 @@ async def run_query(
             messages.append(coordinator_context_message)
 
         if not final_message.tool_uses:
+            if context.hook_executor is not None:
+                await context.hook_executor.execute(
+                    HookEvent.STOP,
+                    {
+                        "event": HookEvent.STOP.value,
+                        "stop_reason": "tool_uses_empty",
+                    },
+                )
             return
 
         tool_calls = final_message.tool_uses
@@ -737,336 +689,144 @@ async def run_query(
     raise RuntimeError("Query loop exited without a max_turns limit or final response")
 
 
-async def _execute_tools(
-    context: QueryContext,
-    tool_calls: list[ToolUseBlock],
-) -> tuple[ToolResultBlock, ...]:
-    """Execute tool calls concurrently when more than one tool is requested."""
-    if len(tool_calls) == 1:
-        tc = tool_calls[0]
-        return (await _execute_tool_call(context, tc.name, tc.id, tc.input),)
-
-    results = await asyncio.gather(
-        *[_execute_tool_call(context, tc.name, tc.id, tc.input) for tc in tool_calls]
-    )
-    return tuple(results)
-
-
 async def _execute_tool_call(
     context: QueryContext,
     tool_name: str,
     tool_use_id: str,
     tool_input: dict[str, object],
 ) -> ToolResultBlock:
-    observer = context.trace_observer or NullTraceObserver()
-    with observer.tool_call(
-        tool_name=tool_name,
-        tool_input=tool_input,
-        metadata={
-            "cwd": str(context.cwd),
-            "tool_use_id": tool_use_id,
-        },
-    ) as tool_handle:
-        if context.hook_executor is not None:
-            pre_hooks = await context.hook_executor.execute(
-                HookEvent.PRE_TOOL_USE,
-                {
-                    "tool_name": tool_name,
-                    "tool_input": tool_input,
-                    "event": HookEvent.PRE_TOOL_USE.value,
-                },
-            )
-            if pre_hooks.blocked:
-                reason = pre_hooks.reason or f"pre_tool_use hook blocked {tool_name}"
-                tool_handle.update(output=reason, metadata={"blocked_by_hook": True})
-                return ToolResultBlock(
-                    tool_use_id=tool_use_id,
-                    content=reason,
-                    is_error=True,
-                )
-
-        log.debug("tool_call start: %s id=%s", tool_name, tool_use_id)
-
-        tool = context.tool_registry.get(tool_name)
-        if tool is None:
-            log.warning("unknown tool: %s", tool_name)
-            tool_handle.update(
-                output=f"Unknown tool: {tool_name}",
-                metadata={"is_error": True},
-            )
-            return ToolResultBlock(
-                tool_use_id=tool_use_id,
-                content=f"Unknown tool: {tool_name}",
-                is_error=True,
-            )
-
-        try:
-            parsed_input = tool.input_model.model_validate(tool_input)
-        except Exception as exc:
-            log.warning("invalid input for %s: %s", tool_name, exc)
-            tool_handle.update(
-                output=f"Invalid input for {tool_name}: {exc}",
-                metadata={"is_error": True},
-            )
-            return ToolResultBlock(
-                tool_use_id=tool_use_id,
-                content=f"Invalid input for {tool_name}: {exc}",
-                is_error=True,
-            )
-
-        # Normalize common tool inputs before permission checks so path rules apply
-        # consistently across built-in tools that use `file_path`, `path`, or
-        # directory-scoped roots such as `glob`/`grep`.
-        _file_path = _resolve_permission_file_path(context.cwd, tool_input, parsed_input)
-        _command = _extract_permission_command(tool_input, parsed_input)
-        log.debug(
-            "permission check: %s read_only=%s path=%s cmd=%s",
-            tool_name,
-            tool.is_read_only(parsed_input),
-            _file_path,
-            _command and _command[:80],
-        )
-        decision = context.permission_checker.evaluate(
-            tool_name,
-            is_read_only=tool.is_read_only(parsed_input),
-            file_path=_file_path,
-            command=_command,
-        )
-        if not decision.allowed:
-            if decision.requires_confirmation and context.permission_prompt is not None:
-                log.debug("permission prompt for %s: %s", tool_name, decision.reason)
-                confirmed = await context.permission_prompt(tool_name, decision.reason)
-                if not confirmed:
-                    log.debug("permission denied by user for %s", tool_name)
-                    output = decision.reason or f"Permission denied for {tool_name}"
-                    tool_handle.update(
-                        output=output,
-                        metadata={"is_error": True, "permission_reason": decision.reason},
-                    )
-                    return ToolResultBlock(
-                        tool_use_id=tool_use_id,
-                        content=output,
-                        is_error=True,
-                    )
-            else:
-                log.debug("permission blocked for %s: %s", tool_name, decision.reason)
-                output = decision.reason or f"Permission denied for {tool_name}"
-                tool_handle.update(
-                    output=output,
-                    metadata={"is_error": True, "permission_reason": decision.reason},
-                )
-                return ToolResultBlock(
-                    tool_use_id=tool_use_id,
-                    content=output,
-                    is_error=True,
-                )
-
-        log.debug("executing %s ...", tool_name)
-        t0 = time.monotonic()
-        try:
-            result = await tool.execute(
-                parsed_input,
-                ToolExecutionContext(
-                    cwd=context.cwd,
-                    metadata={
-                        "tool_registry": context.tool_registry,
-                        "ask_user_prompt": context.ask_user_prompt,
-                        "trace_observer": context.trace_observer,
-                        **(context.tool_metadata or {}),
-                    },
-                ),
-            )
-        except Exception as exc:
-            log.exception(
-                "tool execution raised: name=%s id=%s",
-                tool_name,
-                tool_use_id,
-                exc_info=exc,
-            )
-            result = ToolResult(
-                output=f"Tool {tool_name} failed: {type(exc).__name__}: {exc}",
-                is_error=True,
-            )
-        elapsed = time.monotonic() - t0
-        log.debug(
-            "executed %s in %.2fs err=%s output_len=%d",
-            tool_name,
-            elapsed,
-            result.is_error,
-            len(result.output or ""),
-        )
-        tool_result = ToolResultBlock(
-            tool_use_id=tool_use_id,
-            content=result.output,
-            is_error=result.is_error,
-        )
-        _record_tool_carryover(
-            context,
-            tool_name=tool_name,
-            tool_input=tool_input,
-            tool_output=tool_result.content,
-            is_error=tool_result.is_error,
-            resolved_file_path=_file_path,
-        )
-        if context.hook_executor is not None:
-            await context.hook_executor.execute(
-                HookEvent.POST_TOOL_USE,
-                {
-                    "tool_name": tool_name,
-                    "tool_input": tool_input,
-                    "tool_output": tool_result.content,
-                    "tool_is_error": tool_result.is_error,
-                    "event": HookEvent.POST_TOOL_USE.value,
-                },
-            )
-        tool_handle.update(
-            output=_truncate_trace_text(result.output),
-            metadata={
-                "is_error": result.is_error,
-                **(result.metadata or {}),
+    if context.hook_executor is not None:
+        pre_hooks = await context.hook_executor.execute(
+            HookEvent.PRE_TOOL_USE,
+            {
+                "tool_name": tool_name,
+                "tool_input": tool_input,
+                "event": HookEvent.PRE_TOOL_USE.value,
             },
         )
-        return tool_result
-
-
-def _trace_model_input(
-    system_prompt: str, messages: list[ConversationMessage]
-) -> list[dict[str, Any]]:
-    history: list[dict[str, Any]] = []
-    if system_prompt:
-        history.append({"role": "system", "content": _truncate_trace_text(system_prompt)})
-    history.extend(_trace_history_entries(messages))
-    return history
-
-
-def _trace_model_metadata(messages: list[ConversationMessage]) -> dict[str, Any]:
-    history = _trace_history_entries(messages)
-    latest = history[-1] if history else None
-    metadata: dict[str, Any] = {
-        "message_count": len(messages),
-        "history_entry_count": len(history),
-    }
-    if latest is not None:
-        metadata["latest_role"] = latest.get("role")
-        if latest.get("role") == "tool":
-            metadata["latest_input_kind"] = "tool_result"
-            metadata["latest_tool_name"] = latest.get("name")
-        else:
-            metadata["latest_input_kind"] = "message"
-    return metadata
-
-
-def _trace_history_entries(messages: list[ConversationMessage]) -> list[dict[str, Any]]:
-    entries: list[dict[str, Any]] = []
-    for message in messages:
-        text = _truncate_trace_text(message.text)
-        tool_results = [block for block in message.content if isinstance(block, ToolResultBlock)]
-        tool_uses = [block for block in message.content if isinstance(block, ToolUseBlock)]
-
-        if message.role == "user" and text:
-            entries.append({"role": "user", "content": text})
-
-        if message.role == "assistant":
-            entry: dict[str, Any] = {"role": "assistant", "content": text}
-            rendered_tool_calls = _trace_tool_calls(tool_uses)
-            if rendered_tool_calls:
-                entry["tool_calls"] = rendered_tool_calls
-            if text or rendered_tool_calls:
-                entries.append(entry)
-
-        for result in tool_results:
-            entries.append(
-                {
-                    "role": "tool",
-                    "name": _tool_name_for_result(messages, result.tool_use_id)
-                    or result.tool_use_id,
-                    "content": _truncate_trace_text(result.content),
-                    "is_error": result.is_error,
-                }
+        if pre_hooks.blocked:
+            return ToolResultBlock(
+                tool_use_id=tool_use_id,
+                content=pre_hooks.reason or f"pre_tool_use hook blocked {tool_name}",
+                is_error=True,
             )
 
-        if not text and message.role == "user" and not tool_results:
-            entries.append(
-                {
-                    "role": "user",
-                    "content": f"[non-text blocks: {', '.join(block.type for block in message.content)}]",
-                }
-            )
+    log.debug("tool_call start: %s id=%s", tool_name, tool_use_id)
 
-    return entries
-
-
-def _trace_model_output(message: ConversationMessage) -> dict[str, Any]:
-    return {
-        "content": _truncate_trace_text(message.text.strip()),
-        "tool_calls": _trace_tool_calls(message.tool_uses) or None,
-    }
-
-
-def _trace_usage_details(usage: UsageSnapshot) -> dict[str, int] | None:
-    """Convert ``UsageSnapshot`` to Langfuse's native ``usage_details`` shape.
-
-    Langfuse uses these field names for token rollups in the UI; passing them
-    inside ``metadata`` instead silently disables the cost/token aggregations
-    surfaced at the trace and session level.
-    """
-    if usage.input_tokens == 0 and usage.output_tokens == 0:
-        return None
-    return {
-        "input": usage.input_tokens,
-        "output": usage.output_tokens,
-        "total": usage.input_tokens + usage.output_tokens,
-    }
-
-
-def _trace_cost_details(model: str, usage: UsageSnapshot) -> dict[str, float] | None:
-    """Estimate per-call cost and shape it for Langfuse ``cost_details``."""
-    if usage.input_tokens == 0 and usage.output_tokens == 0:
-        return None
-    try:
-        from openharness.observability.cost import estimate_cost  # noqa: PLC0415
-
-        total = estimate_cost(
-            model=model,
-            input_tokens=usage.input_tokens,
-            output_tokens=usage.output_tokens,
+    tool = context.tool_registry.get(tool_name)
+    if tool is None:
+        log.warning("unknown tool: %s", tool_name)
+        return ToolResultBlock(
+            tool_use_id=tool_use_id,
+            content=f"Unknown tool: {tool_name}",
+            is_error=True,
         )
-    except Exception:
-        return None
-    if total is None:
-        return None
-    return {"total": float(total)}
 
+    try:
+        parsed_input = tool.input_model.model_validate(tool_input)
+    except Exception as exc:
+        log.warning("invalid input for %s: %s", tool_name, exc)
+        return ToolResultBlock(
+            tool_use_id=tool_use_id,
+            content=f"Invalid input for {tool_name}: {exc}",
+            is_error=True,
+        )
 
-def _trace_tool_calls(tool_uses: list[ToolUseBlock]) -> list[dict[str, Any]]:
-    return [
-        {
-            "name": tool_use.name,
-            "arguments": _coerce_trace_tool_arguments(tool_use.input),
-        }
-        for tool_use in tool_uses
-    ]
+    # Normalize common tool inputs before permission checks so path rules apply
+    # consistently across built-in tools that use `file_path`, `path`, or
+    # directory-scoped roots such as `glob`/`grep`.
+    _file_path = _resolve_permission_file_path(context.cwd, tool_input, parsed_input)
+    _command = _extract_permission_command(tool_input, parsed_input)
+    log.debug(
+        "permission check: %s read_only=%s path=%s cmd=%s",
+        tool_name,
+        tool.is_read_only(parsed_input),
+        _file_path,
+        _command and _command[:80],
+    )
+    decision = context.permission_checker.evaluate(
+        tool_name,
+        is_read_only=tool.is_read_only(parsed_input),
+        file_path=_file_path,
+        command=_command,
+    )
+    if not decision.allowed:
+        if decision.requires_confirmation and context.permission_prompt is not None:
+            log.debug("permission prompt for %s: %s", tool_name, decision.reason)
+            if context.hook_executor is not None:
+                await context.hook_executor.execute(
+                    HookEvent.NOTIFICATION,
+                    {
+                        "event": HookEvent.NOTIFICATION.value,
+                        "notification_type": "permission_prompt",
+                        "tool_name": tool_name,
+                        "reason": decision.reason,
+                    },
+                )
+            confirmed = await context.permission_prompt(tool_name, decision.reason)
+            if not confirmed:
+                log.debug("permission denied by user for %s", tool_name)
+                return ToolResultBlock(
+                    tool_use_id=tool_use_id,
+                    content=decision.reason or f"Permission denied for {tool_name}",
+                    is_error=True,
+                )
+        else:
+            log.debug("permission blocked for %s: %s", tool_name, decision.reason)
+            return ToolResultBlock(
+                tool_use_id=tool_use_id,
+                content=decision.reason or f"Permission denied for {tool_name}",
+                is_error=True,
+            )
 
-
-def _coerce_trace_tool_arguments(arguments: dict[str, Any]) -> dict[str, Any]:
-    return {
-        str(key): _truncate_trace_text(json.dumps(value) if not isinstance(value, str) else value)
-        for key, value in arguments.items()
-    }
-
-
-def _truncate_trace_text(text: str, *, limit: int = _TRACE_TEXT_LIMIT) -> str:
-    if len(text) <= limit:
-        return text
-    return f"{text[: limit - 16]}...[truncated]..."
-
-
-def _tool_name_for_result(messages: list[ConversationMessage], tool_use_id: str) -> str | None:
-    for message in reversed(messages):
-        for block in message.content:
-            if isinstance(block, ToolUseBlock) and block.id == tool_use_id:
-                return block.name
-    return None
+    log.debug("executing %s ...", tool_name)
+    t0 = time.monotonic()
+    result = await tool.execute(
+        parsed_input,
+        ToolExecutionContext(
+            cwd=context.cwd,
+            metadata={
+                "tool_registry": context.tool_registry,
+                "ask_user_prompt": context.ask_user_prompt,
+                **(context.tool_metadata or {}),
+            },
+            hook_executor=context.hook_executor,
+        ),
+    )
+    elapsed = time.monotonic() - t0
+    log.debug(
+        "executed %s in %.2fs err=%s output_len=%d",
+        tool_name,
+        elapsed,
+        result.is_error,
+        len(result.output or ""),
+    )
+    tool_result = ToolResultBlock(
+        tool_use_id=tool_use_id,
+        content=result.output,
+        is_error=result.is_error,
+    )
+    _record_tool_carryover(
+        context,
+        tool_name=tool_name,
+        tool_input=tool_input,
+        tool_output=tool_result.content,
+        tool_result_metadata=result.metadata,
+        is_error=tool_result.is_error,
+        resolved_file_path=_file_path,
+    )
+    if context.hook_executor is not None:
+        await context.hook_executor.execute(
+            HookEvent.POST_TOOL_USE,
+            {
+                "tool_name": tool_name,
+                "tool_input": tool_input,
+                "tool_output": tool_result.content,
+                "tool_is_error": tool_result.is_error,
+                "event": HookEvent.POST_TOOL_USE.value,
+            },
+        )
+    return tool_result
 
 
 def _resolve_permission_file_path(

@@ -22,15 +22,9 @@ from openharness.lab import lab_docs
 @pytest.fixture
 def lab_root(tmp_path: Path) -> Path:
     """Build a minimal lab/ directory the helpers can mutate."""
-    (tmp_path / "experiments.md").write_text(
-        "# Experiments\n\nPreamble.\n"
-    )
-    (tmp_path / "configs.md").write_text(
-        "# Configs\n\nPreamble.\n"
-    )
-    (tmp_path / "components.md").write_text(
-        "# Components\n\nPreamble.\n"
-    )
+    (tmp_path / "experiments.md").write_text("# Experiments\n\nPreamble.\n")
+    (tmp_path / "configs.md").write_text("# Configs\n\nPreamble.\n")
+    (tmp_path / "components.md").write_text("# Components\n\nPreamble.\n")
     (tmp_path / "roadmap.md").write_text(
         "# Roadmap\n\n## Up next\n\n_(none)_\n\n## Done\n\n_(none)_\n"
     )
@@ -83,37 +77,50 @@ def test_append_journal_entry_rejects_duplicate(lab_root: Path) -> None:
 
 def test_set_section_inserts_in_canonical_order(lab_root: Path) -> None:
     lab_docs.append_journal_entry(
-        slug="x", type_="paired", baseline_at_runtime="basic",
-        mutation=None, hypothesis="h", run_path=None,
-        on_date=date(2026, 4, 18), lab_root=lab_root,
+        slug="x",
+        type_="paired",
+        baseline_at_runtime="basic",
+        mutation=None,
+        hypothesis="h",
+        run_path=None,
+        on_date=date(2026, 4, 18),
+        lab_root=lab_root,
     )
     lab_docs.set_section(
-        slug="x", section="Experiment evaluation",
+        slug="x",
+        section="Experiment evaluation",
         body="-   **Verdict:** accept",
         lab_root=lab_root,
     )
-    body = lab_docs.get_section(
-        slug="x", section="Experiment evaluation", lab_root=lab_root
-    )
+    body = lab_docs.get_section(slug="x", section="Experiment evaluation", lab_root=lab_root)
     assert body is not None
     assert "**Verdict:** accept" in body
 
 
 def test_set_section_replaces_existing(lab_root: Path) -> None:
     lab_docs.append_journal_entry(
-        slug="x", type_="paired", baseline_at_runtime="basic",
-        mutation=None, hypothesis="h", run_path=None,
-        on_date=date(2026, 4, 18), lab_root=lab_root,
+        slug="x",
+        type_="paired",
+        baseline_at_runtime="basic",
+        mutation=None,
+        hypothesis="h",
+        run_path=None,
+        on_date=date(2026, 4, 18),
+        lab_root=lab_root,
     )
     lab_docs.set_section(
-        slug="x", section="Aggregate", body="first", lab_root=lab_root,
+        slug="x",
+        section="Aggregate",
+        body="first",
+        lab_root=lab_root,
     )
     lab_docs.set_section(
-        slug="x", section="Aggregate", body="second", lab_root=lab_root,
+        slug="x",
+        section="Aggregate",
+        body="second",
+        lab_root=lab_root,
     )
-    body = lab_docs.get_section(
-        slug="x", section="Aggregate", lab_root=lab_root
-    )
+    body = lab_docs.get_section(slug="x", section="Aggregate", lab_root=lab_root)
     assert body == "second"
     assert (lab_root / "experiments.md").read_text().count("### Aggregate") == 1
 
@@ -121,7 +128,10 @@ def test_set_section_replaces_existing(lab_root: Path) -> None:
 def test_set_section_missing_entry_raises(lab_root: Path) -> None:
     with pytest.raises(lab_docs.LabDocError):
         lab_docs.set_section(
-            slug="nope", section="Aggregate", body="x", lab_root=lab_root,
+            slug="nope",
+            section="Aggregate",
+            body="x",
+            lab_root=lab_root,
         )
 
 
@@ -144,7 +154,10 @@ def test_set_operational_baseline_then_snapshot_roundtrips(lab_root: Path) -> No
     )
     snap = lab_docs.tree_snapshot(lab_root=lab_root)
     assert snap.operational_baseline_id == "planner_executor"
-    assert snap.operational_baseline_anchor and "best on multi-file tasks" in snap.operational_baseline_anchor
+    assert (
+        snap.operational_baseline_anchor
+        and "best on multi-file tasks" in snap.operational_baseline_anchor
+    )
 
 
 def test_add_rejected_appears_in_snapshot(lab_root: Path) -> None:
@@ -207,10 +220,16 @@ def test_repository_ideas_use_known_proposed_themes() -> None:
 
 def test_add_suggested_replaces_existing_slug(lab_root: Path) -> None:
     lab_docs.add_suggested_followup(
-        slug="x", hypothesis="first", source="a", lab_root=lab_root,
+        slug="x",
+        hypothesis="first",
+        source="a",
+        lab_root=lab_root,
     )
     lab_docs.add_suggested_followup(
-        slug="x", hypothesis="second", source="b", lab_root=lab_root,
+        slug="x",
+        hypothesis="second",
+        source="b",
+        lab_root=lab_root,
     )
     text = (lab_root / "roadmap.md").read_text()
     assert text.count("#### x") == 1

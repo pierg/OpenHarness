@@ -36,8 +36,24 @@ def _seed_legs(
             ingested_at
         ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
         """,
-        [instance_id, instance_id, "test", None, None, None, False,
-         "host", "0", "0", "3.13", now, now, None, f"/tmp/{instance_id}", now],
+        [
+            instance_id,
+            instance_id,
+            "test",
+            None,
+            None,
+            None,
+            False,
+            "host",
+            "0",
+            "0",
+            "3.13",
+            now,
+            now,
+            None,
+            f"/tmp/{instance_id}",
+            now,
+        ],
     )
     for leg_id, agent_id in legs.items():
         conn.execute(
@@ -49,8 +65,23 @@ def _seed_legs(
                 finished_at, duration_sec
             ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
             """,
-            [instance_id, leg_id, agent_id, None, "test-model", 30, None, "[]",
-             None, None, "completed", "ok", now, now, 0.0],
+            [
+                instance_id,
+                leg_id,
+                agent_id,
+                None,
+                "test-model",
+                30,
+                None,
+                "[]",
+                None,
+                None,
+                "completed",
+                "ok",
+                now,
+                now,
+                0.0,
+            ],
         )
 
 

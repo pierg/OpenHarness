@@ -103,14 +103,16 @@ def read_catalog(*, lab_root: Path = LAB_ROOT) -> ComponentsCatalog:
             description = (row[2] or "").strip()
             used_by = _split_csv(row[3]) if len(row) > 3 else []
             evidence = _split_evidence(row[4]) if len(row) > 4 else []
-            by_kind[kind].append(ComponentEntry(
-                component_id=cid,
-                kind=kind,
-                status=status,
-                description=description,
-                used_by=used_by,
-                evidence=evidence,
-            ))
+            by_kind[kind].append(
+                ComponentEntry(
+                    component_id=cid,
+                    kind=kind,
+                    status=status,
+                    description=description,
+                    used_by=used_by,
+                    evidence=evidence,
+                )
+            )
     return ComponentsCatalog(by_kind=by_kind)
 
 
@@ -140,9 +142,7 @@ def _render_kind_table(entries: list[ComponentEntry]) -> str:
     for e in entries:
         used = ", ".join(f"`{u}`" for u in e.used_by) if e.used_by else "—"
         ev = ", ".join(e.evidence) if e.evidence else "—"
-        lines.append(
-            f"| `{e.component_id}` | {e.status} | {e.description} | {used} | {ev} |"
-        )
+        lines.append(f"| `{e.component_id}` | {e.status} | {e.description} | {used} | {ev} |")
     return "\n".join(lines)
 
 
@@ -170,13 +170,9 @@ def upsert(
         state — that requires a manual ``set-status``.
     """
     if kind not in CATALOG_KINDS:
-        raise LabDocError(
-            f"Unknown component kind {kind!r}; expected one of {CATALOG_KINDS}"
-        )
+        raise LabDocError(f"Unknown component kind {kind!r}; expected one of {CATALOG_KINDS}")
     if status is not None and status not in ALL_STATUSES:
-        raise LabDocError(
-            f"Unknown status {status!r}; expected one of {sorted(ALL_STATUSES)}"
-        )
+        raise LabDocError(f"Unknown status {status!r}; expected one of {sorted(ALL_STATUSES)}")
     catalog = read_catalog(lab_root=lab_root)
     existing = catalog.find(component_id)
     if existing is None:
@@ -223,9 +219,7 @@ def bump_status(
     catalog = read_catalog(lab_root=lab_root)
     entry = catalog.find(component_id)
     if entry is None:
-        raise LabDocError(
-            f"Component {component_id!r} not found in lab/components.md."
-        )
+        raise LabDocError(f"Component {component_id!r} not found in lab/components.md.")
     entry.status = _bumped(entry.status, target)
     if evidence and evidence not in entry.evidence:
         entry.evidence.append(evidence)
@@ -242,15 +236,11 @@ def set_status(
 ) -> ComponentEntry:
     """Unconditional status set (humans only — bypasses the bump lattice)."""
     if status not in ALL_STATUSES:
-        raise LabDocError(
-            f"Unknown status {status!r}; expected one of {sorted(ALL_STATUSES)}"
-        )
+        raise LabDocError(f"Unknown status {status!r}; expected one of {sorted(ALL_STATUSES)}")
     catalog = read_catalog(lab_root=lab_root)
     entry = catalog.find(component_id)
     if entry is None:
-        raise LabDocError(
-            f"Component {component_id!r} not found in lab/components.md."
-        )
+        raise LabDocError(f"Component {component_id!r} not found in lab/components.md.")
     entry.status = status
     if evidence and evidence not in entry.evidence:
         entry.evidence.append(evidence)
@@ -268,9 +258,7 @@ def add_used_by(
     catalog = read_catalog(lab_root=lab_root)
     entry = catalog.find(component_id)
     if entry is None:
-        raise LabDocError(
-            f"Component {component_id!r} not found in lab/components.md."
-        )
+        raise LabDocError(f"Component {component_id!r} not found in lab/components.md.")
     for a in agent_ids:
         if a not in entry.used_by:
             entry.used_by.append(a)

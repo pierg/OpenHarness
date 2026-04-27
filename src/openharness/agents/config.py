@@ -129,9 +129,7 @@ class AgentConfig(BaseModel):
         return _JINJA_ENV.from_string(template).render(**kwargs)
 
 
-def _validate_no_benchmark_oracle_extras(
-    extras: dict[str, Any], *, config_name: str
-) -> None:
+def _validate_no_benchmark_oracle_extras(extras: dict[str, Any], *, config_name: str) -> None:
     router = extras.get("model_router")
     if router is None:
         return

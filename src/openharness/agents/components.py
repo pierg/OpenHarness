@@ -72,14 +72,10 @@ class ComponentSpec:
         if not isinstance(cid, str) or not cid:
             raise ComponentError(f"{path}: missing string `id`")
         if cid != path.stem:
-            raise ComponentError(
-                f"{path}: id {cid!r} must match filename {path.stem!r}"
-            )
+            raise ComponentError(f"{path}: id {cid!r} must match filename {path.stem!r}")
         status = raw.get("status", "proposed")
         if status not in VALID_STATUSES:
-            raise ComponentError(
-                f"{path}: status {status!r} not in {sorted(VALID_STATUSES)}"
-            )
+            raise ComponentError(f"{path}: status {status!r} not in {sorted(VALID_STATUSES)}")
         applies_to = raw.get("applies_to") or {}
         provides = raw.get("provides") or {}
         wires = raw.get("wires") or {}
@@ -137,9 +133,7 @@ def _validate_conflict_graph(registry: dict[str, ComponentSpec]) -> None:
     for cid, spec in registry.items():
         for other in spec.conflicts_with:
             if other not in registry:
-                issues.append(
-                    f"{cid}: conflicts_with unknown component {other!r}"
-                )
+                issues.append(f"{cid}: conflicts_with unknown component {other!r}")
                 continue
             if cid not in registry[other].conflicts_with:
                 issues.append(
@@ -181,8 +175,7 @@ def apply_components(
         seen.add(cid)
         if cid not in reg:
             raise ComponentError(
-                f"agent {agent_name!r}: unknown component {cid!r}. "
-                f"Known: {sorted(reg)}"
+                f"agent {agent_name!r}: unknown component {cid!r}. Known: {sorted(reg)}"
             )
         spec = reg[cid]
         if spec.applies_to_architectures and architecture not in spec.applies_to_architectures:
@@ -242,10 +235,12 @@ def apply_components(
 
 def _cli(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Components registry tools.")
-    parser.add_argument("--validate", action="store_true",
-                        help="Load every component and run conflict checks.")
-    parser.add_argument("--list", action="store_true",
-                        help="Print one line per registered component.")
+    parser.add_argument(
+        "--validate", action="store_true", help="Load every component and run conflict checks."
+    )
+    parser.add_argument(
+        "--list", action="store_true", help="Print one line per registered component."
+    )
     args = parser.parse_args(argv)
 
     try:
@@ -256,7 +251,9 @@ def _cli(argv: list[str] | None = None) -> int:
 
     if args.list:
         for cid, spec in sorted(registry.items()):
-            print(f"{cid}\t{spec.status}\tv{spec.version}\t{spec.description.splitlines()[0] if spec.description else ''}")
+            print(
+                f"{cid}\t{spec.status}\tv{spec.version}\t{spec.description.splitlines()[0] if spec.description else ''}"
+            )
 
     if args.validate:
         print(f"OK: validated {len(registry)} component(s).")

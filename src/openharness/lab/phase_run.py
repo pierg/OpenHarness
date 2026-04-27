@@ -132,7 +132,8 @@ def append_journal_stub(
         return
     baseline_md = (
         f"[`{operational_baseline_id}`](../src/openharness/agents/configs/{operational_baseline_id}.yaml)"
-        if not operational_baseline_id.startswith("[") else operational_baseline_id
+        if not operational_baseline_id.startswith("[")
+        else operational_baseline_id
     )
     lab_docs.append_journal_entry(
         slug=slug,
@@ -188,9 +189,14 @@ def _spawn_exec(
     the worktree. See module docstring for rationale.
     """
     args: list[str] = [
-        "uv", "run", "exec", spec_name,
-        "--instance-id", instance_id,
-        "--root", str(run_dir),
+        "uv",
+        "run",
+        "exec",
+        spec_name,
+        "--instance-id",
+        instance_id,
+        "--root",
+        str(run_dir),
     ]
     if profile:
         args += ["--profile", profile]
@@ -214,7 +220,10 @@ def _spawn_exec(
         log_fp.close()
     logger.info(
         "launched exec pid=%d in %s; logging to %s; run_dir=%s",
-        proc.pid, worktree, log_path, run_dir,
+        proc.pid,
+        worktree,
+        log_path,
+        run_dir,
     )
     return proc
 
@@ -326,9 +335,7 @@ def _validate_complete_run(run_dir: Path) -> None:
                 f"result_status={leg.get('result_status')!r} trials={len(trials)}"
             )
     if bad_legs:
-        raise PhaseRunError(
-            f"run {run_dir.name} has incomplete legs: " + "; ".join(bad_legs)
-        )
+        raise PhaseRunError(f"run {run_dir.name} has incomplete legs: " + "; ".join(bad_legs))
 
 
 # ---------------------------------------------------------------------------
@@ -372,8 +379,12 @@ def run_experiment(
 
     if not resume_instance_id:
         _spawn_exec(
-            spec_name=spec, profile=profile, instance_id=instance_id,
-            worktree=worktree, run_dir=run_dir, log_path=log_path,
+            spec_name=spec,
+            profile=profile,
+            instance_id=instance_id,
+            worktree=worktree,
+            run_dir=run_dir,
+            log_path=log_path,
         )
         if on_launch is not None:
             on_launch(

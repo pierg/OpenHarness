@@ -21,20 +21,24 @@ def test_exec_env_drops_parent_virtualenv(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.setenv("VIRTUAL_ENV_PROMPT", "OpenHarness")
     monkeypatch.setenv(
         "PATH",
-        os.pathsep.join([
-            str(parent_venv_bin),
-            "/usr/local/bin",
-            str(worktree_venv_bin),
-            "/usr/bin",
-        ]),
+        os.pathsep.join(
+            [
+                str(parent_venv_bin),
+                "/usr/local/bin",
+                str(worktree_venv_bin),
+                "/usr/bin",
+            ]
+        ),
     )
     monkeypatch.setenv(
         "PYTHONPATH",
-        os.pathsep.join([
-            str(parent / "src"),
-            "/opt/other",
-            str(worktree / "src"),
-        ]),
+        os.pathsep.join(
+            [
+                str(parent / "src"),
+                "/opt/other",
+                str(worktree / "src"),
+            ]
+        ),
     )
     (worktree / "src").mkdir()
 
@@ -88,24 +92,28 @@ def test_validate_complete_run_rejects_no_trial_leg(tmp_path: Path) -> None:
 
     run_dir = tmp_path / "runs" / "experiments" / "bad-run"
     run_dir.mkdir(parents=True)
-    (run_dir / "experiment.json").write_text(json.dumps({
-        "legs": [
+    (run_dir / "experiment.json").write_text(
+        json.dumps(
             {
-                "leg_id": "control",
-                "status": "succeeded",
-                "result_status": "partial",
-                "trials": [{"trial_id": "t1"}],
-                "aggregate": {"n_trials": 1},
-            },
-            {
-                "leg_id": "treatment",
-                "status": "failed",
-                "result_status": "no_trials",
-                "trials": [],
-                "aggregate": None,
-            },
-        ],
-    }))
+                "legs": [
+                    {
+                        "leg_id": "control",
+                        "status": "succeeded",
+                        "result_status": "partial",
+                        "trials": [{"trial_id": "t1"}],
+                        "aggregate": {"n_trials": 1},
+                    },
+                    {
+                        "leg_id": "treatment",
+                        "status": "failed",
+                        "result_status": "no_trials",
+                        "trials": [],
+                        "aggregate": None,
+                    },
+                ],
+            }
+        )
+    )
 
     with pytest.raises(phase_run.PhaseRunError, match="treatment"):
         phase_run._validate_complete_run(run_dir)
@@ -116,17 +124,21 @@ def test_validate_complete_run_accepts_partial_leg_with_trials(tmp_path: Path) -
 
     run_dir = tmp_path / "runs" / "experiments" / "ok-run"
     run_dir.mkdir(parents=True)
-    (run_dir / "experiment.json").write_text(json.dumps({
-        "legs": [
+    (run_dir / "experiment.json").write_text(
+        json.dumps(
             {
-                "leg_id": "control",
-                "status": "succeeded",
-                "result_status": "partial",
-                "trials": [{"trial_id": "t1", "error": {"phase": "agent"}}],
-                "aggregate": {"n_trials": 1, "n_errored": 1},
+                "legs": [
+                    {
+                        "leg_id": "control",
+                        "status": "succeeded",
+                        "result_status": "partial",
+                        "trials": [{"trial_id": "t1", "error": {"phase": "agent"}}],
+                        "aggregate": {"n_trials": 1, "n_errored": 1},
+                    }
+                ],
             }
-        ],
-    }))
+        )
+    )
 
     phase_run._validate_complete_run(run_dir)
 
@@ -157,14 +169,20 @@ def test_run_experiment_records_launch_before_polling(monkeypatch, tmp_path: Pat
         run_dir.mkdir(parents=True)
         (run_dir / "results").mkdir()
         (run_dir / "results" / "summary.md").write_text("ok\n")
-        (run_dir / "experiment.json").write_text(json.dumps({
-            "legs": [{
-                "leg_id": "basic",
-                "status": "succeeded",
-                "trials": [{"trial_id": "t1"}],
-                "aggregate": {"n_trials": 1},
-            }],
-        }))
+        (run_dir / "experiment.json").write_text(
+            json.dumps(
+                {
+                    "legs": [
+                        {
+                            "leg_id": "basic",
+                            "status": "succeeded",
+                            "trials": [{"trial_id": "t1"}],
+                            "aggregate": {"n_trials": 1},
+                        }
+                    ],
+                }
+            )
+        )
         return DummyProc()
 
     monkeypatch.setattr(phase_run, "_spawn_exec", fake_spawn)

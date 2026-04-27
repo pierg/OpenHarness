@@ -143,10 +143,12 @@ def _summarize_step(step: dict[str, Any]) -> dict[str, Any]:
     for call in step.get("tool_calls") or []:
         if not isinstance(call, dict):
             continue
-        tool_calls.append({
-            "name": call.get("function_name") or call.get("name"),
-            "arguments": _truncate(_jsonish(call.get("arguments"))),
-        })
+        tool_calls.append(
+            {
+                "name": call.get("function_name") or call.get("name"),
+                "arguments": _truncate(_jsonish(call.get("arguments"))),
+            }
+        )
     observation = step.get("observation")
     return {
         "step_id": step.get("step_id"),
@@ -221,11 +223,13 @@ def _repeated_tool_calls(steps: list[dict[str, Any]]) -> list[dict[str, Any]]:
         if count < 2:
             continue
         call = examples[key]
-        repeated.append({
-            "count": count,
-            "name": call.get("function_name") or call.get("name"),
-            "arguments": _truncate(_jsonish(call.get("arguments")), limit=800),
-        })
+        repeated.append(
+            {
+                "count": count,
+                "name": call.get("function_name") or call.get("name"),
+                "arguments": _truncate(_jsonish(call.get("arguments")), limit=800),
+            }
+        )
     return repeated
 
 
@@ -300,11 +304,15 @@ def _summarize_verifier(result: dict[str, Any], trial_dir: Path) -> dict[str, An
             if status in ("passed", "pass", "ok"):
                 passed_tests += 1
             elif status:
-                failed_tests.append({
-                    "name": test.get("name") or test.get("id"),
-                    "status": status,
-                    "message": _truncate(_text(test.get("message") or test.get("error")), limit=800),
-                })
+                failed_tests.append(
+                    {
+                        "name": test.get("name") or test.get("id"),
+                        "status": status,
+                        "message": _truncate(
+                            _text(test.get("message") or test.get("error")), limit=800
+                        ),
+                    }
+                )
     run_log = trial_dir / "verifier" / "run.log"
     if not run_log.is_file():
         run_log = trial_dir / "trial.log"
@@ -391,7 +399,11 @@ def _ambiguity_flags(
         flags.append("missing_trajectory")
     if result.get("exception_info") and not steps:
         flags.append("agent_errored_without_trajectory")
-    if result.get("verifier") and not verifier.get("failed_tests") and verifier.get("reward") in (0, 0.0):
+    if (
+        result.get("verifier")
+        and not verifier.get("failed_tests")
+        and verifier.get("reward") in (0, 0.0)
+    ):
         flags.append("failed_without_failed_test_details")
     if not result.get("verifier") and not result.get("exception_info"):
         flags.append("missing_verifier_and_exception")

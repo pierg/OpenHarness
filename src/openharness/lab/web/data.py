@@ -1495,12 +1495,16 @@ class LabReader:
         from openharness.lab import daemon_state as _ds
         from openharness.lab.web import commands as _labcmd
 
-        wanted = set(kinds) if kinds else {
-            "cmd",
-            "tick",
-            "spawn",
-            "verdict",
-        }
+        wanted = (
+            set(kinds)
+            if kinds
+            else {
+                "cmd",
+                "tick",
+                "spawn",
+                "verdict",
+            }
+        )
         out: list[ActivityLogEntry] = []
 
         if "cmd" in wanted:

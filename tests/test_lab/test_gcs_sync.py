@@ -21,10 +21,13 @@ def isolated_repo(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     monkeypatch.setenv("OPENHARNESS_REPO_ROOT", str(repo))
 
     import openharness.lab.paths as paths
+
     importlib.reload(paths)
     import openharness.lab.ingest as ingest
+
     importlib.reload(ingest)
     import openharness.lab.gcs_sync as gcs_sync
+
     importlib.reload(gcs_sync)
 
     return repo
@@ -35,10 +38,7 @@ def test_portable_targets_only_include_safe_subtrees(isolated_repo: Path) -> Non
     import openharness.lab.gcs_sync as gcs_sync
 
     targets = gcs_sync.portable_targets(include_lab_wide=True)
-    rel_paths = {
-        target.local_path.relative_to(isolated_repo).as_posix()
-        for target in targets
-    }
+    rel_paths = {target.local_path.relative_to(isolated_repo).as_posix() for target in targets}
 
     assert rel_paths == {
         "runs/experiments",

@@ -108,8 +108,14 @@ def test_preview_evaluation_known_slug_shape() -> None:
         if out is None:
             return
         # Canonical evaluation fields.
-        for field in ("verdict", "target_id", "rationale",
-                      "confidence", "evidence_paths", "cluster_evidence"):
+        for field in (
+            "verdict",
+            "target_id",
+            "rationale",
+            "confidence",
+            "evidence_paths",
+            "cluster_evidence",
+        ):
             assert field in out, f"preview_evaluation missing evaluation field {field!r}"
         # Web-only echo fields.
         assert out["slug"] == instance_id
