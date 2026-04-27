@@ -379,12 +379,6 @@ def instance_exists(instance_id: str) -> bool:
     return int(n) > 0
 
 
-# Back-compat aliases so existing call sites keep working until they
-# migrate to the public names above.
-_trials_needing_critique = trials_needing_critique
-_checksums_needing_features = checksums_needing_features
-
-
 def _completed_runs_count() -> int:
     with labdb.reader() as conn:
         (n,) = conn.execute("SELECT count(*) FROM experiments").fetchone()
@@ -396,9 +390,7 @@ class TickResult:
     """Outcome of one full ``_process_entry`` call.
 
     ``loop`` consults ``outcome`` to decide what to record in
-    history and whether to fire the failure gate. The legacy
-    boolean return path is retained for callers (smoke tests) that
-    only care about success.
+    history and whether to fire the failure gate.
     """
 
     ok: bool
@@ -1033,7 +1025,7 @@ def _phase_run(
     # it at run-time rather than design-time so accepted experiments
     # that landed while this entry was queued are reflected.
     snap = lab_docs.tree_snapshot()
-    trunk_id = snap.current_best_id or "unknown"
+    current_best_id = snap.current_best_id or "unknown"
 
     # Decide journal entry type. Baselines are broad-sweep; everything
     # else defaults to paired-ablation. The implement payload may
@@ -1050,7 +1042,7 @@ def _phase_run(
         phase_run_mod.append_journal_stub(
             slug=entry.slug,
             type_=journal_type,
-            trunk_id=trunk_id,
+            current_best_id=current_best_id,
             mutation=mutation,
             hypothesis=entry.hypothesis,
             branch=pre["branch"],
@@ -1091,7 +1083,7 @@ def _phase_run(
                 "run_dir": str(outcome.run_dir),
                 "spec_name": outcome.spec_name,
                 "log_path": str(outcome.log_path),
-                "trunk_at_runtime": trunk_id,
+                "current_best_at_runtime": current_best_id,
             },
         )
 
@@ -1142,7 +1134,7 @@ def _phase_run(
         "run_dir": str(outcome.run_dir),
         "spec_name": outcome.spec_name,
         "log_path": str(outcome.log_path),
-        "trunk_at_runtime": trunk_id,
+        "current_best_at_runtime": current_best_id,
     })
     phase_state.mark_ok(entry.slug, "run", payload=run_payload)
     gcs_sync.maybe_auto_push(
@@ -1275,12 +1267,12 @@ def _phase_critique(
             lab_root=lab_root,
             mark_applied=False,
         )
-        verdict_kind = decision.kind
+        verdict_kind = decision.verdict
         verdict_target = decision.target_id
         verdict_branch_applied = result.applied
         logger.info(
-            "decision apply %s: kind=%s branch_applied=%s target=%s",
-            entry.slug, decision.kind, result.applied, decision.target_id,
+            "decision apply %s: verdict=%s branch_applied=%s target=%s",
+            entry.slug, decision.verdict, result.applied, decision.target_id,
         )
     except Exception:
         logger.exception("decision apply failed for %s", entry.slug)
@@ -1468,7 +1460,7 @@ def _phase_finalize(
             # Best-effort recovery: synthesize a minimal record so we
             # don't loop forever.
             finalize_data = {
-                "cleanup_worktree": verdict_kind in ("reject", "no_op", "noop"),
+                "cleanup_worktree": verdict_kind in ("reject", "no_op"),
                 "reason": "(finalize skill returned OK without writing finalize.json)",
             }
             finalize_path.write_text(json.dumps(finalize_data, indent=2))
@@ -1492,19 +1484,14 @@ def _phase_finalize(
             return TickResult(ok=False, outcome="error", summary=_summary_truncate(msg))
 
         try:
-            labtree.mark_diff_merged(
-                slug=entry.slug,
+            labtree.mark_decision_merged(
                 instance_id=str(instance_id or ""),
-                kind=str(verdict_kind),
-                target_id=str(crit.get("verdict_target") or ""),
                 applied_by="auto:finalize",
-                rationale=str(crit.get("verdict_rationale") or ""),
-                from_id=str(run_payload.get("trunk_at_runtime") or "") or None,
                 pr_url=str(finalize_data.get("pr_url") or "") or None,
                 branch_sha=str(finalize_data.get("discarded_sha") or "") or None,
             )
         except Exception:
-            logger.exception("failed to mark merged diff for %s", entry.slug)
+            logger.exception("failed to mark merged decision for %s", entry.slug)
 
     # Worktree cleanup (deterministic, this module).
     if finalize_data.get("cleanup_worktree", True):

@@ -58,7 +58,7 @@ from openharness.lab.web.models import (
     TrialCritique,
     TrialDetail,
     TrialRow,
-    TrunkChangeRow,
+    CurrentBestChangeRow,
     TurnCard,
     UsageSummaryRow,
     VerifierReport,
@@ -142,8 +142,8 @@ class LabReader:
             "components_perf",
             "misconfigurations",
             "spawns",
-            "tree_diffs",
-            "trunk_changes",
+            "decisions",
+            "current_best_changes",
         ):
             try:
                 (n,) = self._q(f"SELECT count(*) FROM {tbl}")[0]
@@ -412,7 +412,7 @@ class LabReader:
         Walks ``psutil.Process(daemon_pid).children(recursive=True)``
         and rebuilds them as a tree. Returns an empty list if the
         daemon isn't running (under either the systemd unit or the
-        legacy lock file). One root node — the daemon itself — sits
+        lock file). One root node — the daemon itself — sits
         at the top so the operator sees the full picture.
 
         Why include the daemon root: gives a single visual anchor
@@ -425,12 +425,11 @@ class LabReader:
         except ImportError:
             return []
 
-        # Prefer systemd's view (it's authoritative when the unit is
-        # installed); fall back to the lock file for the legacy
-        # ad-hoc backgrounding path so this still works in dev.
+        # Prefer systemd's view when the unit is installed; fall back
+        # to the lock file so this also works for direct dev runs.
         unit_pid = labsvc.status("openharness-daemon").main_pid
-        legacy_pid = self.daemon_status().pid
-        daemon_pid = unit_pid or legacy_pid
+        lock_pid = self.daemon_status().pid
+        daemon_pid = unit_pid or lock_pid
         if daemon_pid is None:
             return []
 
@@ -670,7 +669,7 @@ class LabReader:
         else:
             rows = self._qd(sql)
 
-        verdicts = {r["instance_id"]: _row_to_diff(r) for r in self._qd("SELECT * FROM tree_diffs")}
+        verdicts = {r["instance_id"]: _row_to_decision(r) for r in self._qd("SELECT * FROM decisions")}
         return [
             ExperimentSummary(
                 instance_id=str(r["instance_id"]),
@@ -786,20 +785,20 @@ class LabReader:
     def components(self) -> ComponentsCatalog:
         return read_catalog()
 
-    def trunk_history(self, limit: int = 50) -> list[TrunkChangeRow]:
+    def current_best_history(self, limit: int = 50) -> list[CurrentBestChangeRow]:
         if not self._db_available:
             return []
         rows = self._qd(
             """
             SELECT at_ts, from_id, to_id, reason, applied_by, instance_id
-            FROM trunk_changes
+            FROM current_best_changes
             ORDER BY at_ts DESC
             LIMIT ?
             """,
             [limit],
         )
         return [
-            TrunkChangeRow(
+            CurrentBestChangeRow(
                 at_ts=_to_dt(r["at_ts"]) or datetime.now(timezone.utc),
                 from_id=_opt_str(r.get("from_id")),
                 to_id=str(r["to_id"]),
@@ -832,7 +831,7 @@ class LabReader:
         if rows:
             return str(rows[0][0])
 
-        rows = self._q("SELECT instance_id FROM tree_diffs WHERE slug = ?", [slug])
+        rows = self._q("SELECT instance_id FROM decisions WHERE slug = ?", [slug])
         if rows and rows[0][0]:
             return str(rows[0][0])
 
@@ -863,8 +862,8 @@ class LabReader:
                 return str(inst_id)
         return None
 
-    def experiments_without_diff(self, limit: int = 20) -> list[ExperimentSummary]:
-        """Recent experiments that have no row in ``tree_diffs``.
+    def experiments_without_decision(self, limit: int = 20) -> list[ExperimentSummary]:
+        """Recent experiments that have no row in ``decisions``.
 
         These are the typical "rescue" candidates for the decision
         apply button: the daemon either failed at the verdict step or
@@ -878,7 +877,7 @@ class LabReader:
         # lab typically holds a few dozen).
         return [e for e in self.experiments(limit=None) if e.verdict is None][:limit]
 
-    def preview_diff(self, slug: str) -> dict[str, object] | None:
+    def preview_decision(self, slug: str) -> dict[str, object] | None:
         """Load the experiment decision for ``slug`` without applying it.
 
         Returns ``None`` when the slug doesn't resolve to any known
@@ -894,32 +893,32 @@ class LabReader:
         if instance_id is None:
             return None
         try:
-            diff = _tree_ops.load_decision(instance_id, db_conn=self._conn)
+            decision = _tree_ops.load_decision(instance_id, db_conn=self._conn)
         except (FileNotFoundError, ValueError):
             return None
-        out = diff.to_dict()
+        out = decision.to_dict()
         # Echo the slug + resolved instance_id so the template doesn't
         # need to thread them in separately.
         out["slug"] = slug
         out["resolved_instance_id"] = instance_id
         return out
 
-    def tree_diffs(
-        self, *, applied: bool | None = None, kind: str | None = None, limit: int = 100
+    def decisions(
+        self, *, applied: bool | None = None, verdict: str | None = None, limit: int = 100
     ) -> list[DecisionRow]:
         if not self._db_available:
             return []
-        sql = "SELECT * FROM tree_diffs WHERE 1=1"
+        sql = "SELECT * FROM decisions WHERE 1=1"
         params: list[object] = []
         if applied is not None:
             sql += " AND applied = ?"
             params.append(applied)
-        if kind is not None:
-            sql += " AND kind = ?"
-            params.append(kind)
+        if verdict is not None:
+            sql += " AND verdict = ?"
+            params.append(verdict)
         sql += " ORDER BY applied_at DESC NULLS LAST LIMIT ?"
         params.append(limit)
-        return [_row_to_diff(r) for r in self._qd(sql, params)]
+        return [_row_to_decision(r) for r in self._qd(sql, params)]
 
     # ---- markdown surfaces ---------------------------------------------
 
@@ -1299,7 +1298,7 @@ class LabReader:
     ) -> list[PRStateRow]:
         """Snapshot of every experiment PR known to the lab.
 
-        Joins ``tree_diffs.pr_url`` (cheap, always present once
+        Joins ``decisions.pr_url`` (cheap, always present once
         :func:`cli.set_branch` has run) with cached ``gh pr view``
         output. The cache TTL matches the runner's
         ``_PR_MERGE_CACHE_TTL_SEC`` (90 s) so the daemon and the web
@@ -1318,10 +1317,10 @@ class LabReader:
         placeholders = ",".join("?" for _ in kinds)
         rows = self._qd(
             f"""
-            SELECT slug, instance_id, kind, pr_url
-            FROM tree_diffs
+            SELECT slug, instance_id, verdict, pr_url
+            FROM decisions
             WHERE pr_url IS NOT NULL
-              AND kind IN ({placeholders})
+              AND verdict IN ({placeholders})
             ORDER BY applied_at DESC NULLS LAST
             """,
             list(kinds),
@@ -1337,7 +1336,7 @@ class LabReader:
                 PRStateRow(
                     slug=str(r["slug"]),
                     instance_id=str(r["instance_id"]),
-                    kind=str(r["kind"]),
+                    verdict=str(r["verdict"]),
                     pr_url=url,
                     pr_number=number,
                     state=cached.state,
@@ -1461,8 +1460,7 @@ class LabReader:
 
         Folds together ``runs/lab/web_commands.jsonl`` (web commands),
         ``daemon_state.history`` (tick outcomes), DuckDB ``spawns``
-        (codex skill spawns), DuckDB ``tree_diffs`` (verdicts), and
-        DuckDB ``trunk_changes`` (current-best history).
+        (codex skill spawns), experiment decisions, and current-best history.
 
         Sorted newest-first. ``kinds`` filters by row type.
         """
@@ -1533,13 +1531,13 @@ class LabReader:
                 )
 
         if "verdict" in wanted and self._db_available:
-            for d in self.tree_diffs(limit=limit):
+            for d in self.decisions(limit=limit):
                 out.append(
                     ActivityLogEntry(
                         at_ts=d.applied_at or datetime.now(timezone.utc),
                         kind="verdict",
                         actor=d.applied_by or "?",
-                        title=f"{d.slug}: {d.kind}",
+                        title=f"{d.slug}: {d.verdict}",
                         detail=(
                             ("pending merge" if not d.applied else "merged to main")
                             + (f" → {d.target_id}" if d.target_id else "")
@@ -1551,7 +1549,7 @@ class LabReader:
                 )
 
         if "current-best" in wanted:
-            for tc in self.trunk_history(limit=limit):
+            for tc in self.current_best_history(limit=limit):
                 out.append(
                     ActivityLogEntry(
                         at_ts=tc.at_ts,
@@ -1693,7 +1691,7 @@ class LabReader:
                     node_id=p.branch_id,
                     role="proposed",
                     sketch=p.sketch,
-                    use_when=p.linked_idea,
+                    linked_idea=p.linked_idea,
                 )
             )
         return nodes
@@ -2025,7 +2023,7 @@ def _parse_journal(text: str) -> list[JournalEntryView]:
         bullets = _parse_bullets(header_body)
         run_link = bullets.get("Run")
         type_ = bullets.get("Type")
-        trunk = bullets.get("Trunk at run-time")
+        current_best = bullets.get("Current best at run-time")
         mutation = bullets.get("Mutation")
         hypothesis = bullets.get("Hypothesis")
 
@@ -2049,7 +2047,7 @@ def _parse_journal(text: str) -> list[JournalEntryView]:
                 slug=slug,
                 date=date,
                 type_=type_,
-                trunk_at_runtime=trunk,
+                current_best_at_runtime=current_best,
                 mutation=mutation,
                 hypothesis=hypothesis,
                 run_link=run_link,
@@ -2109,14 +2107,13 @@ def _row_to_usage(r: dict[str, object]) -> UsageSummaryRow:
     )
 
 
-def _row_to_diff(r: dict[str, object]) -> DecisionRow:
+def _row_to_decision(r: dict[str, object]) -> DecisionRow:
     return DecisionRow(
         instance_id=str(r["instance_id"]),
         slug=str(r.get("slug") or ""),
-        kind=str(r.get("kind") or ""),
+        verdict=str(r.get("verdict") or ""),
         target_id=str(r.get("target_id") or ""),
         rationale=_opt_str(r.get("rationale")),
-        use_when=_decode_json(r.get("use_when")),
         confidence=_opt_float(r.get("confidence")),
         applied=bool(r.get("applied")),
         applied_by=_opt_str(r.get("applied_by")),

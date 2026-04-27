@@ -141,8 +141,6 @@ def create_app() -> FastAPI:
 
     @app.get("/pending", response_class=HTMLResponse)
     def pending(request: Request) -> HTMLResponse:
-        # Legacy: kept so external bookmarks keep working. The sidebar
-        # surfaces the same content via the home page's "You owe" zone.
         reader = _reader_ctx(request)
         return _render(request, "pending.html", _reader=reader, nav_active="pending")
 
@@ -159,10 +157,10 @@ def create_app() -> FastAPI:
                 _reader=reader,
                 nav_active="tree",
                 snapshot=reader.tree(),
-                trunk_history=reader.trunk_history(limit=20),
-                pending_merge=reader.tree_diffs(applied=False, limit=20),
-                pending_eval=reader.experiments_without_diff(limit=10),
-                recent_diffs=reader.tree_diffs(applied=True, limit=10),
+                current_best_history=reader.current_best_history(limit=20),
+                pending_merge=reader.decisions(applied=False, limit=20),
+                pending_eval=reader.experiments_without_decision(limit=10),
+                recent_decisions=reader.decisions(applied=True, limit=10),
                 pr_by_slug=pr_by_slug,
                 pr_by_instance=pr_by_instance,
             )
@@ -220,7 +218,7 @@ def create_app() -> FastAPI:
                     raise HTTPException(404, f"unknown instance {instance_id}")
             legs = reader.legs(instance_id)
             tasks, leg_ids, cells = reader.task_pass_matrix(instance_id)
-            verdict = next((d for d in reader.tree_diffs() if d.instance_id == instance_id), None)
+            verdict = next((d for d in reader.decisions() if d.instance_id == instance_id), None)
             journal = reader.journal_entry_for_instance(instance_id)
             clusters = reader.task_clusters_for_instance(instance_id)
             comparisons = reader.comparisons_for_instance(instance_id)
@@ -592,9 +590,8 @@ def create_app() -> FastAPI:
         This is the operator's "what is the daemon doing right now"
         feed — orchestrator loop iterations, signal wake-ups, exit-gate
         decisions, ingest summaries, anything the runner logs at INFO
-        or above. Distinct from `_hx/daemon-tail`, which is a stale
-        legacy path that reads `runs/lab/orchestrator.out` (only
-        populated under tmux/nohup).
+        or above. Distinct from `_hx/daemon-tail`, which reads
+        `runs/lab/orchestrator.out` for direct tmux/nohup runs.
 
         The `lines` query param is bounded to a sensible range so a
         rogue caller can't request 10 M lines and OOM the page render.
@@ -685,9 +682,7 @@ def create_app() -> FastAPI:
 
         Replaces the previous split between the bottom-of-page
         ``/_hx/daemon-status`` panel and the top-of-page
-        ``/_hx/daemon-mode`` toggle. The legacy endpoints stay
-        registered so external dashboards / tests that target them
-        keep working; the cockpit just doesn't use them anymore.
+        ``/_hx/daemon-mode`` toggle.
         """
         reader = _reader_ctx(request)
         try:
@@ -927,13 +922,13 @@ def create_app() -> FastAPI:
         # is about to do before clicking through.
         reader = _reader_ctx(request)
         try:
-            diff = reader.preview_diff(slug)
+            decision = reader.preview_decision(slug)
             return _render(
                 request,
-                "_tree_diff.html",
+                "_decision_preview.html",
                 _reader=reader,
                 slug=slug,
-                diff=diff,
+                decision=decision,
             )
         except Exception:
             _close_reader(request, reader)
@@ -975,8 +970,10 @@ def create_app() -> FastAPI:
         with labdata.LabReader() as r:
             t = r.tree()
             return {
-                "trunk": {"id": t.trunk_id, "anchor": t.trunk_anchor},
-                "branches": [asdict(b) for b in t.branches],
+                "current_best": {
+                    "id": t.current_best_id,
+                    "anchor": t.current_best_anchor,
+                },
                 "rejected": [asdict(b) for b in t.rejected],
                 "proposed": [asdict(b) for b in t.proposed],
             }
@@ -1097,7 +1094,7 @@ def create_app() -> FastAPI:
             legs = reader.legs(instance_id)
             tasks, leg_ids, cells = reader.task_pass_matrix(instance_id)
             verdict = next(
-                (d for d in reader.tree_diffs() if d.instance_id == instance_id),
+                (d for d in reader.decisions() if d.instance_id == instance_id),
                 None,
             )
             journal = reader.journal_entry_for_instance(instance_id)

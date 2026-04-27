@@ -6,27 +6,22 @@ import json
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
 
 from openharness.lab import components_doc as cdoc
 from openharness.lab import db as labdb
 from openharness.lab import lab_docs
 from openharness.lab.paths import REPO_ROOT
-from openharness.lab.tree_ops import ExperimentDecision, upsert_tree_diff
+from openharness.lab.tree_ops import ExperimentDecision, upsert_decision
 
 
 @dataclass(slots=True)
 class ApplyResult:
     slug: str
-    diff: ExperimentDecision
+    decision: ExperimentDecision
     applied: bool
     applied_by: str
     journal_block_written: bool
     notes: list[str]
-
-    @property
-    def decision(self) -> ExperimentDecision:
-        return self.diff
 
 
 def apply_decision(
@@ -43,7 +38,7 @@ def apply_decision(
     branch_applied = True
     lr = {"lab_root": lab_root} if lab_root is not None else {}
 
-    if decision.kind == "accept":
+    if decision.verdict == "accept":
         journal_link = f"[`{slug}`](experiments.md#{slug})"
         lab_docs.set_current_best(
             agent_id=decision.target_id,
@@ -52,7 +47,7 @@ def apply_decision(
             **lr,
         )
         notes.append(f"configs.md > ## Current best now points at `{decision.target_id}`")
-    elif decision.kind == "reject":
+    elif decision.verdict == "reject":
         evidence = ", ".join(str(p) for p in decision.evidence_paths[:2]) or "(see journal)"
         lab_docs.add_rejected(
             branch_id=decision.target_id,
@@ -77,10 +72,10 @@ def apply_decision(
     applied_at = datetime.now(timezone.utc) if mark_applied else None
     try:
         with labdb.writer() as conn:
-            upsert_tree_diff(
+            upsert_decision(
                 conn,
                 slug=slug,
-                diff=decision,
+                decision=decision,
                 applied=mark_applied,
                 applied_by=applied_by if mark_applied else "pending_finalize",
                 applied_at=applied_at,
@@ -90,7 +85,7 @@ def apply_decision(
 
     return ApplyResult(
         slug=slug,
-        diff=decision,
+        decision=decision,
         applied=branch_applied,
         applied_by=applied_by,
         journal_block_written=journal_written,
@@ -98,33 +93,20 @@ def apply_decision(
     )
 
 
-def apply_diff(**kwargs: Any) -> ApplyResult:
-    """Backward-compatible wrapper for callers still using `diff=`."""
-    if "decision" not in kwargs and "diff" in kwargs:
-        kwargs["decision"] = kwargs.pop("diff")
-    return apply_decision(**kwargs)
-
-
-def mark_diff_merged(
+def mark_decision_merged(
     *,
-    slug: str,
     instance_id: str,
-    kind: str,
-    target_id: str,
     applied_by: str,
-    rationale: str | None = None,
-    from_id: str | None = None,
     pr_url: str | None = None,
     branch_sha: str | None = None,
     applied_at: datetime | None = None,
 ) -> None:
     """Flip a branch-applied decision to `applied=true` after PR merge."""
-    _ = (slug, kind, target_id, rationale, from_id)
     applied_at = applied_at or datetime.now(timezone.utc)
     with labdb.writer() as conn:
         conn.execute(
             """
-            UPDATE tree_diffs
+            UPDATE decisions
                SET applied = TRUE,
                    applied_by = ?,
                    applied_at = ?,
@@ -143,7 +125,7 @@ def render_decision_block(decision: ExperimentDecision, *, slug: str) -> str:
         "accept": "**Accept** — experiment outcome supports making this the current best",
         "reject": "**Reject** — experiment outcome argues against this variant",
         "no_op": "**No-op** — recorded for trend analysis",
-    }[decision.kind]
+    }[decision.verdict]
 
     lines: list[str] = [
         f"-   **Verdict:** {badge}",
@@ -173,18 +155,6 @@ def render_decision_block(decision: ExperimentDecision, *, slug: str) -> str:
             detail = row.get("summary") or row.get("evidence") or json.dumps(row, sort_keys=True)
             lines.append(f"| `{cluster}` | {detail} |")
     return "\n".join(lines)
-
-
-def render_tree_effect_block(
-    diff: ExperimentDecision,
-    *,
-    slug: str,
-    applied: bool = True,
-) -> str:
-    """Backward-compatible wrapper for the old render name."""
-    _ = applied
-    return render_decision_block(diff, slug=slug)
-
 
 def _journal_relpath(path: Path) -> str:
     """Render a repo-relative link suitable for `lab/experiments.md`."""
@@ -216,11 +186,11 @@ def _bump_components_for_decision(
     if target_components is None:
         return notes
 
-    if decision.kind == "accept":
+    if decision.verdict == "accept":
         bumped = _safe_bump(target_components, "validated", lab_root=lab_root)
         if bumped:
             notes.append(f"components.md: bumped {sorted(bumped)} → validated")
-    elif decision.kind == "no_op":
+    elif decision.verdict == "no_op":
         bumped = _safe_bump(target_components, "experimental", lab_root=lab_root)
         if bumped:
             notes.append(f"components.md: bumped {sorted(bumped)} → experimental")

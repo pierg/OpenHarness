@@ -48,7 +48,7 @@ from openharness.lab.web.markdown import render, rewrite_href
         ("components.md", "/components"),
         ("components.md#loop-guard", "/components#loop-guard"),
         ("configs.md", "/tree"),
-        ("configs.md#trunk", "/tree#trunk"),
+        ("configs.md#current-best", "/tree#current-best"),
         # ``./`` prefix is stripped before matching.
         ("./ideas.md#loop-guard", "/ideas#loop-guard"),
         # Run-dir shortcut (with and without ``../`` prefix, and

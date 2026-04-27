@@ -16,10 +16,10 @@ Two audiences, one entry point:
   …) are derived caches; refresh them with
   `uv run lab ingest-critiques`.
 
-- **The five existing lab/* skills** call deterministic markdown helpers:
+- **Lab phase skills** call deterministic markdown helpers:
   `uv run lab idea move <id> trying`
   `uv run lab idea append <id> --theme runtime --motivation ... --sketch ...`
-  `uv run lab experiments stub <slug> --hypothesis ... --variant ...`
+  `uv run lab experiments append-entry <slug> --current-best ...`
   `uv run lab experiments fill <slug> --run-path ... --from-summary ...`
   `uv run lab roadmap add <slug> ...`
   `uv run lab roadmap done <slug> --ran ... --outcome ...`
@@ -27,12 +27,6 @@ Two audiences, one entry point:
 The orchestrator (`runner.py`) calls this same CLI rather than
 importing the package directly, so the contract is identical for
 skills, humans, and the daemon.
-
-Back-compat: the old `insert-critique <trial_id>` /
-`insert-comparison <instance> <task>` / `insert-task-features` /
-`upsert-component-perf` aliases still work — they look up the
-on-disk path from the DB and forward to the new file-writing
-helper.
 """
 
 from __future__ import annotations
@@ -77,7 +71,7 @@ roadmap_app = typer.Typer(no_args_is_help=True, help="Edit lab/roadmap.md.")
 daemon_app = typer.Typer(no_args_is_help=True, help="Orchestrator daemon and phase loop.")
 tree_app = typer.Typer(no_args_is_help=True, help="Inspect / mutate the configuration tree (lab/configs.md).")
 decision_app = typer.Typer(no_args_is_help=True, help="Apply experiment-critic decisions.")
-trunk_app = typer.Typer(no_args_is_help=True, help="Show / set the current-best pointer.")
+current_best_app = typer.Typer(no_args_is_help=True, help="Show / set the current-best pointer.")
 components_app = typer.Typer(no_args_is_help=True, help="Inspect / mutate the components catalog (lab/components.md).")
 runs_app = typer.Typer(no_args_is_help=True, help="Manage runs/experiments/<id>/ directories on disk.")
 preflight_app = typer.Typer(
@@ -95,7 +89,7 @@ app.add_typer(roadmap_app, name="roadmap")
 app.add_typer(daemon_app, name="daemon")
 app.add_typer(tree_app, name="tree")
 app.add_typer(decision_app, name="decision")
-app.add_typer(trunk_app, name="trunk")
+app.add_typer(current_best_app, name="current-best")
 app.add_typer(components_app, name="components")
 app.add_typer(runs_app, name="runs")
 app.add_typer(preflight_app, name="preflight")
@@ -545,78 +539,6 @@ def write_auto_proposed_cmd(
     typer.echo(f"write-auto-proposed ok: {path}")
 
 
-# ----- back-compat aliases ------------------------------------------------
-#
-# Old skill prompts (and older docs) used `insert-critique <trial_id>` /
-# `insert-comparison <instance_id> <task>` / `insert-task-features`
-# / `upsert-component-perf`. Keep these working by looking up the
-# on-disk path from the DB and forwarding to the file-writing
-# commands above.
-
-
-@app.command("insert-critique")
-def insert_critique_alias(
-    trial_id: str = typer.Argument(...),
-    json_in: str = typer.Option("-", "--json"),
-    critic_model: Optional[str] = typer.Option(None, "--critic-model"),
-) -> None:
-    """[deprecated alias] Forwards to write-trial-critique using DB lookup."""
-    trial_dir = critic_io.trial_dir_from_id(trial_id)
-    if trial_dir is None:
-        err_console.print(
-            f"[red]No trials row for trial_id={trial_id!r}; cannot resolve trial_dir."
-            " Run `uv run lab ingest <run_dir>` first, or call write-trial-critique"
-            " directly with an absolute path.[/red]"
-        )
-        raise typer.Exit(2)
-    write_trial_critique_cmd(
-        trial_dir=trial_dir, json_in=json_in, critic_model=critic_model,
-    )
-
-
-@app.command("insert-comparison")
-def insert_comparison_alias(
-    instance_id: str = typer.Argument(...),
-    task_name: str = typer.Argument(...),
-    json_in: str = typer.Option("-", "--json"),
-    critic_model: Optional[str] = typer.Option(None, "--critic-model"),
-) -> None:
-    """[deprecated alias] Forwards to write-comparison using DB lookup."""
-    run_dir = critic_io.run_dir_from_instance(instance_id)
-    if run_dir is None:
-        err_console.print(
-            f"[red]No experiments row for instance_id={instance_id!r}.[/red]"
-        )
-        raise typer.Exit(2)
-    write_comparison_cmd(
-        run_dir=run_dir, task_name=task_name, json_in=json_in, critic_model=critic_model,
-    )
-
-
-@app.command("insert-task-features")
-def insert_task_features_alias(
-    task_checksum: str = typer.Argument(...),
-    json_in: str = typer.Option("-", "--json"),
-    extracted_by: Optional[str] = typer.Option(None, "--extracted-by"),
-) -> None:
-    """[deprecated alias] Forwards to write-task-features."""
-    write_task_features_cmd(
-        task_checksum=task_checksum, json_in=json_in, extracted_by=extracted_by,
-    )
-
-
-@app.command("upsert-component-perf")
-def upsert_component_perf_alias(
-    component_id: str = typer.Argument(...),
-    task_cluster: str = typer.Argument(...),
-    json_in: str = typer.Option("-", "--json"),
-) -> None:
-    """[deprecated alias] Forwards to write-component-perf."""
-    write_component_perf_cmd(
-        component_id=component_id, task_cluster=task_cluster, json_in=json_in,
-    )
-
-
 # ===== ingest-critiques + dump-critiques-to-files ==========================
 
 
@@ -665,8 +587,7 @@ def dump_critiques_to_files_cmd(
     """One-shot migration: dump existing DB rows to the file scheme.
 
     Use this once after the file-based refactor lands to materialize
-    historical critiques (which were inserted into DuckDB by the old
-    `insert-critique` path) onto the new on-disk layout. After this
+    historical critiques from DuckDB onto the current on-disk layout. After this
     runs, every trial / task feature / comparison has a JSON file
     next to its evidence and the DB rows can be regenerated from
     them at any time.
@@ -742,21 +663,6 @@ def cmd_append_followup_idea(
     typer.echo(f"appended auto-proposed {idea_id!r}")
 
 
-@exp_app.command("stub")
-def cmd_exp_stub(
-    slug: str,
-    hypothesis: str = typer.Option(..., "--hypothesis"),
-    variant: str = typer.Option(..., "--variant"),
-) -> None:
-    """Legacy stub (Variant/Results/Notes/Decision shape).
-
-    Kept for back-compat with old experiments. New entries should use
-    `lab experiments append-entry` (tree+journal shape).
-    """
-    lab_docs.stub_experiment(slug=slug, hypothesis=hypothesis, variant=variant)
-    typer.echo(f"stubbed experiment {slug!r}")
-
-
 @exp_app.command("append-entry")
 def cmd_exp_append_entry(
     slug: str,
@@ -765,16 +671,16 @@ def cmd_exp_append_entry(
         "--type",
         help="paired-ablation | broad-sweep | smoke",
     ),
-    trunk: str = typer.Option(
+    current_best: str = typer.Option(
         "",
-        "--trunk",
-        help="Trunk agent id at run-time (e.g. 'basic'). "
-             "Defaults to `uv run lab trunk show`.",
+        "--current-best",
+        help="Current-best agent id at run-time (e.g. 'basic'). "
+             "Defaults to `uv run lab current-best show`.",
     ),
     mutation: Optional[str] = typer.Option(
         None,
         "--mutation",
-        help="One-line description of what differs from trunk. "
+        help="One-line description of what differs from the current best. "
              "Omit for --type broad-sweep.",
     ),
     hypothesis: str = typer.Option(..., "--hypothesis"),
@@ -798,18 +704,18 @@ def cmd_exp_append_entry(
     are stubbed empty and populated later by `experiments synthesize`
     and `decision apply`.
     """
-    if not trunk:
+    if not current_best:
         snap = lab_docs.tree_snapshot()
-        trunk = snap.trunk_id or "unknown"
-    trunk_md = (
-        f"[`{trunk}`](../src/openharness/agents/configs/{trunk}.yaml)"
-        if not trunk.startswith("[")
-        else trunk
+        current_best = snap.current_best_id or "unknown"
+    current_best_md = (
+        f"[`{current_best}`](../src/openharness/agents/configs/{current_best}.yaml)"
+        if not current_best.startswith("[")
+        else current_best
     )
     lab_docs.append_journal_entry(
         slug=slug,
         type_=type_,
-        trunk_at_runtime=trunk_md,
+        current_best_at_runtime=current_best_md,
         mutation=mutation,
         hypothesis=hypothesis,
         run_path=run_path,
@@ -826,7 +732,7 @@ def cmd_exp_set_branch(
         None,
         "--pr-url",
         help="Open PR URL. Renders as `Branch: [<branch>](<pr-url>)` and "
-             "mirrors into `tree_diffs.pr_url` so the web UI can render "
+             "mirrors into `decisions.pr_url` so the web UI can render "
              "the link without re-parsing markdown.",
     ),
     rejected_reason: Optional[str] = typer.Option(
@@ -842,7 +748,7 @@ def cmd_exp_set_branch(
         "--discarded-sha",
         help="HEAD SHA of the discarded branch (Reject/NoOp paths). "
              "Recorded in the markdown bullet AND in "
-             "`tree_diffs.branch_sha` so the deleted branch can be "
+             "`decisions.branch_sha` so the deleted branch can be "
              "resurrected later via `git fetch origin <sha>:retro/<slug>`.",
     ),
 ) -> None:
@@ -851,7 +757,7 @@ def cmd_exp_set_branch(
     Called from the `lab-finalize-pr` skill after deciding whether to
     push the experiment branch and open a PR (`accept`) or to discard
     the worktree (`reject` / `no_op`).
-    Also writes the PR URL / discarded SHA into the `tree_diffs`
+    Also writes the PR URL / discarded SHA into the `decisions`
     cache so downstream tooling (web UI, audit queries, finalize
     recovery) can find them with a SQL query.
     Idempotent — safe to re-run with the same arguments.
@@ -866,12 +772,12 @@ def cmd_exp_set_branch(
         rejected_reason=rejected_reason,
         discarded_sha=discarded_sha,
     )
-    # Mirror into the tree_diffs cache so the web UI / merge-gate /
+    # Mirror into the decisions cache so the web UI / merge-gate /
     # daemon checks don't have to re-parse markdown.
     if pr_url or discarded_sha:
         with labdb.writer() as conn:
             row = conn.execute(
-                "SELECT instance_id FROM tree_diffs WHERE slug = ? "
+                "SELECT instance_id FROM decisions WHERE slug = ? "
                 "ORDER BY applied_at DESC NULLS LAST LIMIT 1",
                 [slug],
             ).fetchone()
@@ -879,12 +785,12 @@ def cmd_exp_set_branch(
                 instance_id = row[0]
                 if pr_url:
                     conn.execute(
-                        "UPDATE tree_diffs SET pr_url = ? WHERE instance_id = ?",
+                        "UPDATE decisions SET pr_url = ? WHERE instance_id = ?",
                         [pr_url, instance_id],
                     )
                 if discarded_sha:
                     conn.execute(
-                        "UPDATE tree_diffs SET branch_sha = ? WHERE instance_id = ?",
+                        "UPDATE decisions SET branch_sha = ? WHERE instance_id = ?",
                         [discarded_sha, instance_id],
                     )
     if pr_url and rejected_reason:
@@ -1341,7 +1247,7 @@ def analyze(
 #
 #   lab experiments synthesize <slug>      # write Aggregate / Mutation impact
 #   lab decision apply <slug>              # experiment-critic decision apply
-#   lab roadmap suggest <new_slug> ...     # legacy suggestion stream
+#   lab roadmap suggest <new_slug> ...     # daemon suggestion stream
 
 
 def _lookup_instance_for_slug(conn: object, slug: str) -> str | None:
@@ -1349,7 +1255,7 @@ def _lookup_instance_for_slug(conn: object, slug: str) -> str | None:
 
     Resolution order (each rejects to the next on miss):
       1. exact: instance_id == slug
-      2. cached: tree_diffs.slug == slug
+      2. cached: decisions.slug == slug
       3. prefix: instance_id LIKE slug || '-%'
       4. experiment_id == slug
       5. slug starts with `<experiment_id>-` for some row
@@ -1361,7 +1267,7 @@ def _lookup_instance_for_slug(conn: object, slug: str) -> str | None:
     if exact:
         return exact[0]
     cached = conn.execute(  # type: ignore[attr-defined]
-        "SELECT instance_id FROM tree_diffs WHERE slug = ?", [slug],
+        "SELECT instance_id FROM decisions WHERE slug = ?", [slug],
     ).fetchone()
     if cached and cached[0]:
         return cached[0]
@@ -1391,11 +1297,11 @@ def _lookup_instance_for_slug(conn: object, slug: str) -> str | None:
     return None
 
 
-def _resolve_diff_for_slug(slug: str):
+def _resolve_decision_for_slug(slug: str):
     # -> tuple[str, tree_ops.ExperimentDecision]; lazy import to avoid cycles.
     """Look up the experiment instance for a slug and load its decision.
 
-    Falls back to the cached row in `tree_diffs` if the slug isn't in
+    Falls back to the cached row in `decisions` if the slug isn't in
     `experiments`.
     """
     from openharness.lab import tree_ops as _tree_ops
@@ -1410,8 +1316,8 @@ def _resolve_diff_for_slug(slug: str):
         )
         raise typer.Exit(2)
 
-    diff = _tree_ops.load_decision(instance_id)
-    return instance_id, diff
+    decision = _tree_ops.load_decision(instance_id)
+    return instance_id, decision
 
 
 @tree_app.command("show")
@@ -1463,12 +1369,12 @@ def decision_apply(
     from openharness.lab import preflight as _preflight
 
     if instance:
-        diff = _tree_ops.load_decision(instance)
+        decision = _tree_ops.load_decision(instance)
     else:
-        _, diff = _resolve_diff_for_slug(slug)
+        _, decision = _resolve_decision_for_slug(slug)
 
     console.print(f"[bold]Decision for {slug}:[/bold]")
-    console.print(json.dumps(diff.to_dict(), indent=2, default=str))
+    console.print(json.dumps(decision.to_dict(), indent=2, default=str))
 
     if dry_run:
         typer.echo("(dry-run; no edits)")
@@ -1489,7 +1395,7 @@ def decision_apply(
 
     result = _tree.apply_decision(
         slug=slug,
-        decision=diff,
+        decision=decision,
         applied_by=applied_by,
         mark_applied=mark_applied,
     )
@@ -1502,18 +1408,18 @@ def decision_apply(
         typer.echo(f"  - {note}")
 
 
-@trunk_app.command("show")
-def trunk_show() -> None:
+@current_best_app.command("show")
+def current_best_show() -> None:
     """Print the current-best id."""
     from openharness.lab import tree_ops as _tree_ops
 
-    tid = _tree_ops.current_best_id()
-    typer.echo(tid)
+    agent_id = _tree_ops.current_best_id()
+    typer.echo(agent_id)
 
 
-@trunk_app.command("set")
-def trunk_set(
-    trunk_id: str = typer.Argument(...),
+@current_best_app.command("set")
+def current_best_set(
+    agent_id: str = typer.Argument(...),
     reason: str = typer.Option(..., "--reason"),
     journal_link: Optional[str] = typer.Option(
         None, "--journal-link",
@@ -1521,22 +1427,22 @@ def trunk_set(
     ),
     audit: bool = typer.Option(
         True, "--audit/--no-audit",
-        help="Also append a `trunk_changes` row.",
+        help="Also append a current-best history row.",
     ),
 ) -> None:
     """Manually set the `## Current best` pointer in configs.md."""
     from openharness.lab.tree_ops import current_best_id, insert_current_best_change
 
     prev = current_best_id()
-    lab_docs.set_current_best(agent_id=trunk_id, reason=reason, journal_link=journal_link)
-    msg = f"current best set to {trunk_id!r}"
+    lab_docs.set_current_best(agent_id=agent_id, reason=reason, journal_link=journal_link)
+    msg = f"current best set to {agent_id!r}"
     if audit:
         with labdb.writer() as conn:
             insert_current_best_change(
                 conn,
                 at_ts=datetime.now(timezone.utc),
-                from_id=prev if prev != trunk_id else None,
-                to_id=trunk_id,
+                from_id=prev if prev != agent_id else None,
+                to_id=agent_id,
                 reason=reason,
                 applied_by="human:cli",
             )
@@ -1682,7 +1588,7 @@ def cmd_idea_auto_propose(
         help="e.g. 'cross-experiment-critic@2026-04-18'.",
     ),
 ) -> None:
-    """Append a follow-up to `## Auto-proposed` (alias for the legacy command)."""
+    """Append a follow-up to `## Auto-proposed`."""
     lab_docs.append_auto_proposed_idea(
         idea_id=idea_id, motivation=motivation, sketch=sketch, source=source,
     )
@@ -1747,7 +1653,6 @@ def _status_badge(status: str) -> str:
     return {
         "proposed":     "[dim]proposed[/dim]",
         "experimental": "[yellow]experimental[/yellow]",
-        "branch":       "[cyan]branch[/cyan]",
         "validated":    "[green]validated[/green]",
         "rejected":     "[red]rejected[/red]",
         "superseded":   "[magenta]superseded[/magenta]",
@@ -1761,7 +1666,7 @@ def components_upsert(
     description: Optional[str] = typer.Option(None, "--description"),
     status: Optional[str] = typer.Option(
         None, "--status",
-        help="proposed/experimental/branch/validated/rejected/superseded "
+        help="proposed/experimental/validated/rejected/superseded "
              "(forward-only via this command).",
     ),
     used_by: Optional[str] = typer.Option(
@@ -1792,7 +1697,7 @@ def components_upsert(
 @components_app.command("set-status")
 def components_set_status(
     component_id: str = typer.Argument(...),
-    status: str = typer.Argument(..., help="One of proposed/experimental/branch/validated/rejected/superseded."),
+    status: str = typer.Argument(..., help="One of proposed/experimental/validated/rejected/superseded."),
     evidence: Optional[str] = typer.Option(
         None, "--evidence",
         help="Markdown link or short string to append to the Evidence column.",
@@ -1941,8 +1846,8 @@ def daemon_mode(
     - **paused**: daemon process keeps running but processes nothing.
     - **manual**: only runs roadmap entries you explicitly approve
       via `lab daemon approve <slug>`. Approvals are one-shot.
-    - **autonomous**: walks the queue automatically (legacy
-      behaviour). The exit gate (auto-demote after N consecutive
+    - **autonomous**: walks the queue automatically. The exit gate
+      (auto-demote after N consecutive
       failures) is always on regardless of mode.
     """
     from openharness.lab import daemon_state as _ds

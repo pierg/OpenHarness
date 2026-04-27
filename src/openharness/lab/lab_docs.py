@@ -770,7 +770,7 @@ def append_journal_entry(
     *,
     slug: str,
     type_: str,
-    trunk_at_runtime: str,
+    current_best_at_runtime: str,
     mutation: str | None,
     hypothesis: str,
     run_path: str | None,
@@ -798,7 +798,7 @@ def append_journal_entry(
 
     bullets = [
         f"-   **Type:** {type_.strip()}",
-        f"-   **Trunk at run-time:** {trunk_at_runtime.strip()}",
+        f"-   **Current best at run-time:** {current_best_at_runtime.strip()}",
     ]
     if mutation:
         bullets.append(f"-   **Mutation:** {mutation.strip()}")
@@ -963,21 +963,6 @@ class TreeSnapshot:
     rejected: list[TreeRejected]
     proposed: list[TreeProposed]
 
-    @property
-    def trunk_id(self) -> str:
-        """Backward-compatible alias while callers move to `current_best_id`."""
-        return self.current_best_id
-
-    @property
-    def trunk_anchor(self) -> str | None:
-        """Backward-compatible alias while callers move to `current_best_anchor`."""
-        return self.current_best_anchor
-
-    @property
-    def branches(self) -> list[object]:
-        """Branches were removed from the simplified lab state."""
-        return []
-
 
 def _ensure_configs_skeleton(text: str) -> str:
     """If configs.md is missing any state section, add an empty one."""
@@ -995,7 +980,7 @@ def tree_snapshot(*, lab_root: Path = LAB_ROOT) -> TreeSnapshot:
     text = _ensure_configs_skeleton(text)
     parts = dict(_split_top_sections(text, level=2))
 
-    current_body = parts.get("Current best", "") or parts.get("Trunk", "")
+    current_body = parts.get("Current best", "")
     current_best_id = "basic"
     current_best_anchor: str | None = None
     m_id = re.search(r"\*\*Agent:\*\*\s*\[`([^`]+)`\]", current_body)
@@ -1090,22 +1075,6 @@ def set_current_best(
     new_text = _replace_top_section(text, "Current best", new_body)
     _write(path, new_text)
     return new_text
-
-
-def set_trunk(
-    *,
-    trunk_id: str,
-    reason: str,
-    journal_link: str | None = None,
-    lab_root: Path = LAB_ROOT,
-) -> str:
-    """Backward-compatible wrapper for `set_current_best`."""
-    return set_current_best(
-        agent_id=trunk_id,
-        reason=reason,
-        journal_link=journal_link,
-        lab_root=lab_root,
-    )
 
 
 def add_rejected(

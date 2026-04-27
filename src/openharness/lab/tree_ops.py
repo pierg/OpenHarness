@@ -2,9 +2,9 @@
 
 The simplified lab no longer derives verdicts from deterministic
 thresholds. `experiment-critic` owns the judgment call and writes a
-structured recommendation to `critic/experiment-critic.json`; this
-module validates that payload and mirrors it into the existing
-`tree_diffs` cache table for compatibility with older UI/query code.
+structured recommendation to `critic/experiment-critic.json`. This
+module validates that payload and mirrors it into the `decisions`
+query cache.
 """
 
 from __future__ import annotations
@@ -18,7 +18,7 @@ from openharness.lab import critic_io
 from openharness.lab import db as labdb
 from openharness.lab import lab_docs
 
-DecisionKind = Literal["accept", "reject", "no_op"]
+DecisionVerdict = Literal["accept", "reject", "no_op"]
 
 
 @dataclass(slots=True)
@@ -42,7 +42,7 @@ class LegStats:
 class ExperimentDecision:
     """The experiment-critic recommendation for one experiment instance."""
 
-    kind: DecisionKind
+    verdict: DecisionVerdict
     target_id: str
     rationale: str
     evidence_paths: list[Path] = field(default_factory=list)
@@ -53,36 +53,16 @@ class ExperimentDecision:
     promotability_notes: str | None = None
     cluster_evidence: list[dict[str, Any]] = field(default_factory=list)
 
-    # Compatibility aliases while the cache table keeps its historical
-    # `tree_diffs` name.
-    @property
-    def trunk_leg(self) -> str | None:
-        return self.baseline_leg
-
-    @property
-    def mutation_leg(self) -> str | None:
-        return self.candidate_leg
-
-    @property
-    def use_when(self) -> None:
-        return None
-
     def to_dict(self) -> dict[str, Any]:
         return {
-            "kind": self.kind,
-            "decision": self.kind,
+            "verdict": self.verdict,
             "target_id": self.target_id,
             "rationale": self.rationale,
             "evidence_paths": [str(p) for p in self.evidence_paths],
-            "use_when": None,
             "confidence": self.confidence,
             "instance_id": self.instance_id,
             "baseline_leg": self.baseline_leg,
             "candidate_leg": self.candidate_leg,
-            "trunk_leg": self.baseline_leg,
-            "mutation_leg": self.candidate_leg,
-            "pass_rate_delta_pp": None,
-            "cost_per_pass_delta_pct": None,
             "promotability_notes": self.promotability_notes,
             "cluster_evidence": self.cluster_evidence,
         }
@@ -115,13 +95,8 @@ def _leg_stats(conn: Any, instance_id: str) -> list[LegStats]:
     ]
 
 
-def current_best_id(*, db_conn: Any | None = None) -> str:
-    """Return the current best agent id from `lab/configs.md`.
-
-    `db_conn` is accepted for backward compatibility with older callers
-    that resolved through `trunk_changes`.
-    """
-    _ = db_conn
+def current_best_id() -> str:
+    """Return the current best agent id from `lab/configs.md`."""
     return lab_docs.tree_snapshot().current_best_id
 
 
@@ -174,30 +149,30 @@ def _decision_from_payload(
     run_dir: Path,
     legs: list[LegStats],
 ) -> ExperimentDecision:
-    raw_kind = _first_str(payload, "verdict", "decision", "recommendation")
-    kind = _normalize_kind(raw_kind)
-    if kind is None:
+    raw_verdict = _first_str(payload, "verdict")
+    verdict = _normalize_verdict(raw_verdict)
+    if verdict is None:
         raise ValueError(
-            "experiment-critic output must include verdict/decision "
+            "experiment-critic output must include verdict "
             "with one of: accept, reject, no_op"
         )
 
-    baseline_leg = _first_str(payload, "baseline_leg", "control_leg", "trunk_leg")
-    candidate_leg = _first_str(payload, "candidate_leg", "mutation_leg", "winning_leg")
-    target_id = _first_str(payload, "target_id", "target", "recommended_agent")
+    baseline_leg = _first_str(payload, "baseline_leg")
+    candidate_leg = _first_str(payload, "candidate_leg")
+    target_id = _first_str(payload, "target_id")
     if target_id is None:
         target_id = _target_from_legs(legs, candidate_leg=candidate_leg)
 
-    rationale = _first_str(payload, "rationale", "verdict_rationale", "summary")
+    rationale = _first_str(payload, "rationale")
     if rationale is None:
         rationale = "(experiment-critic did not provide a rationale)"
 
     confidence = _coerce_confidence(payload.get("confidence"))
-    promotability_notes = _first_str(payload, "promotability_notes", "promotion_notes")
+    promotability_notes = _first_str(payload, "promotability_notes")
     cluster_evidence = _cluster_evidence_from_payload(payload)
 
     return ExperimentDecision(
-        kind=kind,
+        verdict=verdict,
         target_id=target_id,
         rationale=rationale,
         evidence_paths=list(_evidence_paths_for_instance(instance_id, run_dir=run_dir)),
@@ -210,22 +185,16 @@ def _decision_from_payload(
     )
 
 
-def _normalize_kind(raw: str | None) -> DecisionKind | None:
+def _normalize_verdict(raw: str | None) -> DecisionVerdict | None:
     if raw is None:
         return None
     value = raw.strip().lower().replace("-", "_")
-    aliases: dict[str, DecisionKind] = {
+    allowed: dict[str, DecisionVerdict] = {
         "accept": "accept",
-        "accepted": "accept",
         "reject": "reject",
-        "rejected": "reject",
         "no_op": "no_op",
-        "noop": "no_op",
-        "none": "no_op",
-        "inconclusive": "no_op",
-        "diagnostic_only": "no_op",
     }
-    return aliases.get(value)
+    return allowed.get(value)
 
 
 def _first_str(payload: dict[str, Any], *keys: str) -> str | None:
@@ -288,51 +257,47 @@ def _evidence_paths_for_instance(
         yield summary
 
 
-def upsert_tree_diff(
+def upsert_decision(
     conn: Any,
     *,
     slug: str,
-    diff: ExperimentDecision,
+    decision: ExperimentDecision,
     applied: bool,
     applied_by: str,
     applied_at: Any,
 ) -> None:
-    """Mirror a decision into the historical `tree_diffs` cache table."""
+    """Mirror a decision into the `decisions` query cache."""
     conn.execute(
         """
-        INSERT INTO tree_diffs (
-            instance_id, slug, kind, target_id, rationale,
-            use_when, confidence, evidence_paths,
-            applied, applied_by, applied_at, decision, promotability_notes
-        ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
+        INSERT INTO decisions (
+            instance_id, slug, verdict, target_id, rationale,
+            confidence, evidence_paths, applied, applied_by, applied_at,
+            promotability_notes
+        ) VALUES (?,?,?,?,?,?,?,?,?,?,?)
         ON CONFLICT (instance_id) DO UPDATE SET
             slug = EXCLUDED.slug,
-            kind = EXCLUDED.kind,
+            verdict = EXCLUDED.verdict,
             target_id = EXCLUDED.target_id,
             rationale = EXCLUDED.rationale,
-            use_when = EXCLUDED.use_when,
             confidence = EXCLUDED.confidence,
             evidence_paths = EXCLUDED.evidence_paths,
             applied = EXCLUDED.applied,
             applied_by = EXCLUDED.applied_by,
             applied_at = EXCLUDED.applied_at,
-            decision = EXCLUDED.decision,
             promotability_notes = EXCLUDED.promotability_notes
         """,
         [
-            diff.instance_id or "",
+            decision.instance_id or "",
             slug,
-            diff.kind,
-            diff.target_id,
-            diff.rationale,
-            None,
-            diff.confidence,
-            json.dumps([str(p) for p in diff.evidence_paths]),
+            decision.verdict,
+            decision.target_id,
+            decision.rationale,
+            decision.confidence,
+            json.dumps([str(p) for p in decision.evidence_paths]),
             bool(applied),
             applied_by,
             applied_at,
-            diff.kind,
-            diff.promotability_notes,
+            decision.promotability_notes,
         ],
     )
 
@@ -347,10 +312,10 @@ def insert_current_best_change(
     applied_by: str,
     instance_id: str | None = None,
 ) -> None:
-    """Write a current-best history row into the legacy cache table."""
+    """Write a current-best history row."""
     conn.execute(
         """
-        INSERT INTO trunk_changes (
+        INSERT INTO current_best_changes (
             at_ts, from_id, to_id, reason, applied_by, instance_id
         ) VALUES (?,?,?,?,?,?)
         ON CONFLICT (at_ts, to_id) DO UPDATE SET

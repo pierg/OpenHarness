@@ -34,8 +34,8 @@
           <td class="text-right text-xs font-mono">{{ fmt_money(e.cost_usd) }}</td>
           <td class="text-xs">
             {% if e.verdict %}
-              <span class="px-1.5 py-0.5 border rounded {{ verdict_color(e.verdict.kind, e.verdict.applied) }}">
-                {{ e.verdict.kind }}{% if not e.verdict.applied %} · pending merge{% endif %}
+              <span class="px-1.5 py-0.5 border rounded {{ verdict_color(e.verdict.verdict, e.verdict.applied) }}">
+                {{ e.verdict.verdict }}{% if not e.verdict.applied %} · pending merge{% endif %}
               </span>
             {% else %}—{% endif %}
           </td>

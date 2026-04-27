@@ -81,7 +81,7 @@ _IDEA_THEME = re.compile(
 )
 _COMPONENT_KIND = re.compile(r"^(?:Architecture|Runtime|Tools|Prompt|Model)$")
 _COMPONENT_STATUS = re.compile(
-    r"^(?:proposed|experimental|branch|validated|rejected|superseded)$"
+    r"^(?:proposed|experimental|validated|rejected|superseded)$"
 )
 # Comma-separated list of agent ids; each entry is a SAFE_TOKEN.
 _USED_BY = re.compile(
@@ -247,8 +247,7 @@ COMMANDS: dict[str, CommandSpec] = {
         description=(
             "Start the ``openharness-daemon`` systemd --user unit. "
             "systemd owns the process tree, captures stdout/stderr to "
-            "journald, and restarts on crash. Replaces the older "
-            "tmux/nohup backgrounding."
+            "journald, and restarts on crash."
         ),
         argv_prefix=["systemctl", "--user"],
         argv_template=["start", "openharness-daemon.service"],
@@ -578,7 +577,7 @@ COMMANDS: dict[str, CommandSpec] = {
                 name="status",
                 pattern=_COMPONENT_STATUS,
                 label="Status",
-                placeholder="proposed | experimental | branch | validated | rejected | superseded",
+                placeholder="proposed | experimental | validated | rejected | superseded",
             ),
             ParamSpec(
                 name="evidence",
@@ -629,7 +628,7 @@ COMMANDS: dict[str, CommandSpec] = {
                 pattern=_COMPONENT_STATUS,
                 label="Status (optional)",
                 required=False,
-                placeholder="proposed | experimental | branch | validated | rejected | superseded",
+                placeholder="proposed | experimental | validated | rejected | superseded",
                 help_text="Forward-only bump; reject is the only sideways move.",
             ),
             ParamSpec(

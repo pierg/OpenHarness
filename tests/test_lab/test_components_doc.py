@@ -16,7 +16,7 @@ SEED = """# Components
 | ID | Status | Description | Used by | Evidence |
 |----|--------|-------------|---------|----------|
 | `single-loop` | validated | one model, no subagent | `basic` | [tb2](experiments.md#tb2) |
-| `react-loop` | branch | thought / action / observation | `react` | [tb2](experiments.md#tb2) |
+| `react-loop` | experimental | thought / action / observation | `react` | [tb2](experiments.md#tb2) |
 
 ## Runtime
 
@@ -53,7 +53,7 @@ def test_read_catalog_parses_seed(lab_root: Path) -> None:
     assert arch["single-loop"].status == "validated"
     assert arch["single-loop"].used_by == ["basic"]
     assert "tb2" in arch["single-loop"].evidence[0]
-    assert arch["react-loop"].status == "branch"
+    assert arch["react-loop"].status == "experimental"
     runtime = {e.component_id: e for e in cat.by_kind["Runtime"]}
     assert runtime["loop-guard"].status == "proposed"
     assert runtime["loop-guard"].used_by == []
@@ -125,7 +125,7 @@ def test_bump_status_terminal_is_sticky(lab_root: Path) -> None:
     )
     cdoc.bump_status(
         component_id="reflection-loop",
-        target="branch",
+        target="validated",
         lab_root=lab_root,
     )
     e = cdoc.read_catalog(lab_root=lab_root).find("reflection-loop")
@@ -147,17 +147,17 @@ def test_set_status_overrides(lab_root: Path) -> None:
 def test_add_used_by_dedupes(lab_root: Path) -> None:
     cdoc.add_used_by(
         component_id="single-loop",
-        agent_ids=["basic", "trunk"],
+        agent_ids=["basic", "control"],
         lab_root=lab_root,
     )
     cdoc.add_used_by(
         component_id="single-loop",
-        agent_ids=["basic", "trunk-prime"],
+        agent_ids=["basic", "control-prime"],
         lab_root=lab_root,
     )
     e = cdoc.read_catalog(lab_root=lab_root).find("single-loop")
     assert e is not None
-    assert e.used_by == ["basic", "trunk", "trunk-prime"]
+    assert e.used_by == ["basic", "control", "control-prime"]
 
 
 def test_unknown_status_rejected(lab_root: Path) -> None:

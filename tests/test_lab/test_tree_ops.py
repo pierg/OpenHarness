@@ -91,7 +91,7 @@ def test_load_decision_accept_from_experiment_critic(
 
     decision = tree_ops.load_decision("accept-1", db_conn=conn, run_dir=run_dir)
 
-    assert decision.kind == "accept"
+    assert decision.verdict == "accept"
     assert decision.target_id == "artifact_first"
     assert decision.baseline_leg == "control"
     assert decision.candidate_leg == "candidate"
@@ -99,25 +99,24 @@ def test_load_decision_accept_from_experiment_critic(
     assert decision.evidence_paths == [run_dir / "critic" / "experiment-critic.json"]
 
 
-def test_load_decision_normalizes_legacy_labels(
+def test_load_decision_rejects_non_schema_verdicts(
     tmp_path: Path,
     db_path: Path,
 ) -> None:
     conn = labdb.connect(db_path=db_path, read_only=False)
-    _seed_legs(conn, instance_id="legacy-1", legs={"basic": "basic"})
+    _seed_legs(conn, instance_id="bad-label-1", legs={"basic": "basic"})
     run_dir = tmp_path / "run"
     _write_experiment_critic(
         run_dir,
         {
-            "verdict": "diagnostic_only",
+            "verdict": "maybe",
             "rationale": "Useful measurement, not a candidate to promote.",
             "confidence": 0.4,
         },
     )
 
-    decision = tree_ops.load_decision("legacy-1", db_conn=conn, run_dir=run_dir)
-
-    assert decision.kind == "no_op"
+    with pytest.raises(ValueError, match="accept, reject, no_op"):
+        tree_ops.load_decision("bad-label-1", db_conn=conn, run_dir=run_dir)
 
 
 def test_load_decision_requires_verdict(

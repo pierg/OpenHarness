@@ -46,7 +46,6 @@ from typing import Any, Iterator
 from openharness.lab.paths import (
     EXPERIMENTS_RUNS_ROOT,
     LAB_RUNS_ROOT,
-    REPO_ROOT,
 )
 
 # ---------------------------------------------------------------------------
@@ -302,9 +301,8 @@ def write_task_features(
         kind="task_features",
         task_checksum=task_checksum,
     )
-    # task-features uses `extracted_by` rather than `critic_model` in
-    # its DB schema; keep both keys at the top level for back-compat
-    # with any downstream consumer that grew an opinion.
+    # task-features exposes `extracted_by` at top level because the DB
+    # cache uses that name.
     body["extracted_by"] = body["provenance"]["critic_model"]
     return _atomic_write_json(path, body)
 
@@ -482,36 +480,10 @@ def _wrap(
     return body
 
 
-# ---------------------------------------------------------------------------
-# Trial dir lookup (shared with CLI to avoid a circular import)
-# ---------------------------------------------------------------------------
-
-
-def trial_dir_from_id(trial_id: str) -> Path | None:
-    """Look up a trial's on-disk dir from the DB.
-
-    Used by the back-compat `insert-critique <trial_id>` alias so the
-    old skill prompts still resolve to the new file scheme.
-    """
-    from openharness.lab import db as labdb  # local import: db pulls duckdb
-
-    with labdb.reader() as conn:
-        row = conn.execute(
-            "SELECT trial_dir FROM trials WHERE trial_id = ?",
-            [trial_id],
-        ).fetchone()
-    if not row:
-        return None
-    p = Path(row[0])
-    if not p.is_absolute():
-        p = REPO_ROOT / p
-    return p
-
-
 def run_dir_from_instance(
     instance_id: str, *, db_conn: Any | None = None
 ) -> Path | None:
-    """Look up a run dir from the DB (back-compat for insert-comparison)."""
+    """Look up a run directory from the experiments table."""
     from openharness.lab import db as labdb
 
     if db_conn is not None:

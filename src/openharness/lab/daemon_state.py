@@ -14,7 +14,7 @@ Three orthogonal pieces live here:
 1. ``mode`` — ``paused`` / ``manual`` / ``autonomous``.
    The daemon defaults to ``manual``: it only picks roadmap entries
    the operator has explicitly approved. ``autonomous`` falls back
-   to the legacy "top of the queue" behaviour, but with the failure
+   to top-of-queue scheduling, but with the failure
    gate (#3 below) always on. ``paused`` is a hard stop — the
    daemon process keeps running but does no work.
 
@@ -128,7 +128,7 @@ TickOutcome = Literal[
     "timeout",             # results/summary.md never landed
     "error",               # unhandled exception in the pipeline
     "cancelled",           # operator pressed Cancel
-    "auto-demoted",        # legacy: exit gate pushed entry to Suggested
+    "auto-demoted",        # exit gate pushed entry to Suggested
     "blocked",             # exit gate fired — skipped until failures reset
 ]
 """How a tick ended. Drives both the failure counter and the history

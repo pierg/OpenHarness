@@ -2,14 +2,13 @@
 {% block title %}Activity log · OpenHarness lab{% endblock %}
 {% block crumbs %}<a href="/" class="hover:underline">Home</a> / Activity log{% endblock %}
 {% block content %}
-{# Unified activity timeline. Replaces the old /spawns + /audit
-   surfaces. Rows come from five sources merged in
+{# Unified activity timeline. Rows come from five sources merged in
    ``LabReader.activity_log()``:
 
       cmd        — POST /api/cmd execution (web_commands.jsonl)
       tick       — daemon tick finished
       spawn      — model skill spawn finished
-      verdict    — tree_diffs row appeared
+      verdict    — decision row appeared
       current-best — current-best history row appeared
 #}
 

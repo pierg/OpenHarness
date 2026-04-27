@@ -44,7 +44,7 @@ def test_append_journal_entry_creates_canonical_shell(lab_root: Path) -> None:
     lab_docs.append_journal_entry(
         slug="foo-bar",
         type_="paired ablation",
-        trunk_at_runtime="basic",
+        current_best_at_runtime="basic",
         mutation="planner_executor",
         hypothesis="planner helps on multi-file tasks.",
         run_path="runs/experiments/foo-bar-2026",
@@ -61,7 +61,7 @@ def test_append_journal_entry_rejects_duplicate(lab_root: Path) -> None:
     lab_docs.append_journal_entry(
         slug="foo-bar",
         type_="paired",
-        trunk_at_runtime="basic",
+        current_best_at_runtime="basic",
         mutation=None,
         hypothesis="x",
         run_path=None,
@@ -72,7 +72,7 @@ def test_append_journal_entry_rejects_duplicate(lab_root: Path) -> None:
         lab_docs.append_journal_entry(
             slug="foo-bar",
             type_="paired",
-            trunk_at_runtime="basic",
+            current_best_at_runtime="basic",
             mutation=None,
             hypothesis="x",
             run_path=None,
@@ -83,7 +83,7 @@ def test_append_journal_entry_rejects_duplicate(lab_root: Path) -> None:
 
 def test_set_section_inserts_in_canonical_order(lab_root: Path) -> None:
     lab_docs.append_journal_entry(
-        slug="x", type_="paired", trunk_at_runtime="basic",
+        slug="x", type_="paired", current_best_at_runtime="basic",
         mutation=None, hypothesis="h", run_path=None,
         on_date=date(2026, 4, 18), lab_root=lab_root,
     )
@@ -101,7 +101,7 @@ def test_set_section_inserts_in_canonical_order(lab_root: Path) -> None:
 
 def test_set_section_replaces_existing(lab_root: Path) -> None:
     lab_docs.append_journal_entry(
-        slug="x", type_="paired", trunk_at_runtime="basic",
+        slug="x", type_="paired", current_best_at_runtime="basic",
         mutation=None, hypothesis="h", run_path=None,
         on_date=date(2026, 4, 18), lab_root=lab_root,
     )
@@ -131,7 +131,7 @@ def test_set_section_missing_entry_raises(lab_root: Path) -> None:
 def test_tree_snapshot_bootstraps_empty_skeleton(lab_root: Path) -> None:
     snap = lab_docs.tree_snapshot(lab_root=lab_root)
     assert snap.current_best_id == "basic"
-    assert snap.branches == []
+    assert snap.proposed == []
     assert snap.rejected == []
 
 

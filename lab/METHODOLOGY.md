@@ -70,7 +70,7 @@ are:
 - `reject` — the candidate is worse, invalid, too costly, or otherwise
   not worth keeping as implemented. The lab should keep the evidence
   and discard the implementation branch.
-- `no_op` — the run was inconclusive, diagnostic-only, underpowered, or
+- `no_op` — the run was inconclusive, measurement-only, underpowered, or
   useful mainly as trend data. The lab should keep the metadata and
   decide in replan whether a clearer follow-up is worth running.
 

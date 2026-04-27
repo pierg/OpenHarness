@@ -10,8 +10,8 @@
     {% if experiment.git_sha %}<span class="text-xs font-mono text-slate-400">git {{ experiment.git_sha[:8] }}</span>{% endif %}
   {% endif %}
   {% if verdict %}
-    <span class="ml-auto px-2 py-1 border rounded text-xs {{ verdict_color(verdict.kind, verdict.applied) }}">
-      Verdict: {{ verdict.kind }}{% if not verdict.applied %} · pending merge{% endif %}
+    <span class="ml-auto px-2 py-1 border rounded text-xs {{ verdict_color(verdict.verdict, verdict.applied) }}">
+      Verdict: {{ verdict.verdict }}{% if not verdict.applied %} · pending merge{% endif %}
       {% if verdict.target_id %} · <span class="font-mono">{{ verdict.target_id }}</span>{% endif %}
     </span>
   {% endif %}
@@ -37,7 +37,7 @@
 {% endif %}
 
 {# Verdict preview / re-evaluation. Always present (even for already-
-   applied diffs and no-ops) so an operator can re-compute the verdict
+   applied decisions and no-ops) so an operator can re-compute the verdict
    after editing the journal / critic and decide whether to re-apply. #}
 <section id="experiment-verdict-panel" class="bg-white border border-slate-200 rounded-lg p-5 mb-6"
          hx-get="/experiments/{{ instance_id }}" hx-trigger="lab-tree-changed from:body"
@@ -45,7 +45,7 @@
   <div class="flex items-baseline justify-between gap-3 flex-wrap mb-2">
     <h2 class="font-semibold">Verdict workflow</h2>
     <button hx-get="/_hx/decision-preview?slug={{ instance_id }}"
-            hx-target="#experiment-diff-preview" hx-swap="innerHTML"
+            hx-target="#experiment-decision-preview" hx-swap="innerHTML"
             class="text-xs bg-white border border-slate-300 hover:border-slate-500 rounded px-2.5 py-1">
       {% if verdict %}Re-evaluate verdict{% else %}Preview verdict{% endif %}
     </button>
@@ -61,7 +61,7 @@
       to compute what <code>decision apply</code> would do.
     {% endif %}
   </p>
-  <div id="experiment-diff-preview" class="mt-3 empty:hidden"></div>
+  <div id="experiment-decision-preview" class="mt-3 empty:hidden"></div>
 </section>
 
 <div id="cmd-result" class="mb-4"></div>
@@ -87,7 +87,7 @@
       <h2 class="font-semibold mb-3">Journal entry · {{ journal.slug }}</h2>
       <dl class="grid grid-cols-3 gap-y-1 text-sm">
         {% if journal.type_ %}<dt class="text-slate-500">Type</dt><dd class="col-span-2">{{ journal.type_ }}</dd>{% endif %}
-        {% if journal.trunk_at_runtime %}<dt class="text-slate-500">Trunk at run-time</dt><dd class="col-span-2 font-mono text-xs">{{ journal.trunk_at_runtime }}</dd>{% endif %}
+        {% if journal.current_best_at_runtime %}<dt class="text-slate-500">Current best at run-time</dt><dd class="col-span-2 font-mono text-xs">{{ journal.current_best_at_runtime }}</dd>{% endif %}
         {% if journal.mutation %}<dt class="text-slate-500">Mutation</dt><dd class="col-span-2">{{ journal.mutation }}</dd>{% endif %}
         {% if journal.hypothesis %}<dt class="text-slate-500">Hypothesis</dt><dd class="col-span-2">{{ journal.hypothesis }}</dd>{% endif %}
       </dl>

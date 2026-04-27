@@ -4,21 +4,21 @@
 
 #### loop-guard-on-planner-executor
 
--   **Motivation:** Once loop-guard lands as a runtime atom on trunk, the same mechanism is more likely to help on planner_executor (which adds a planning hop that can also stall) than on basic alone. Composition test, not yet runnable.
+-   **Motivation:** Once loop-guard lands as a runtime atom on current best, the same mechanism is more likely to help on planner_executor (which adds a planning hop that can also stall) than on basic alone. Composition test, not yet runnable.
 -   **Sketch:** Paired ablation on planner_executor only: leg A current YAML; leg B same YAML with loop-guard runtime atom enabled. Run on the three positive clusters from the planner_executor branch (security_certificates, system_administration, python_data) plus a same-size negative-cluster control.
--   **Auto-proposed by:** legacy-reflect-and-plan@2026-04-18
+-   **Auto-proposed by:** archived-reflect-and-plan@2026-04-18
 
 #### tool-result-summariser-paired
 
 -   **Motivation:** Sibling of context-compaction but cheaper to test in isolation: rather than truncating raw tool stdout, inject an LLM-generated short summary of any tool result above K tokens before the next turn. Could rescue reflection (currently rejected) without the brittle line-count heuristic of context-compaction.
 -   **Sketch:** Implement behind an AgentConfig flag (off by default). Paired ablation on basic (cheapest harness) with the flag on/off on a slice biased toward tasks where tool stdout exceeded 50 lines in tb2-baseline-full-sweep. Re-test on reflection only if the basic ablation is positive.
--   **Auto-proposed by:** legacy-reflect-and-plan@2026-04-18
+-   **Auto-proposed by:** archived-reflect-and-plan@2026-04-18
 
 #### artifact-first-output-policy
 
 -   **Motivation:** 15 trials in extended-budget-paired-on-trunk made partial progress but never wrote the required output artifact, so the run spent budget without producing the thing the verifier actually scores.
 -   **Sketch:** Add a runtime or prompt policy that creates or updates the required output artifact early and forces a verifier-aware recheck before more analysis. Test it first with a paired ablation on file-output-heavy tasks such as db-wal-recovery, password-recovery, and write-compressor.
--   **Auto-proposed by:** legacy-reflect-and-plan@2026-04-23
+-   **Auto-proposed by:** archived-reflect-and-plan@2026-04-23
 
 #### loop-guard-on-creates-new-file
 
@@ -34,7 +34,7 @@
 
 #### verifier-completion-gate-on-long-budget
 
--   **Motivation:** In extended-budget-paired-on-trunk, the 120-turn/32k leg matched the 60-turn/16k leg on passes, cost 3.1x more, and showed 4x as many `hallucinated_success` tags as the trunk budget, so more search mostly amplified false completion rather than finding new wins.
+-   **Motivation:** In extended-budget-paired-on-trunk, the 120-turn/32k leg matched the 60-turn/16k leg on passes, cost 3.1x more, and showed 4x as many `hallucinated_success` tags as the current best budget, so more search mostly amplified false completion rather than finding new wins.
 -   **Sketch:** Add a verifier-completion gate that blocks success claims until the required output paths or end-to-end checks have been revalidated, then replay the extended-budget slice with the gate enabled on the long-budget leg. The comparison should answer whether the remaining long-budget spend is rescuing real work or just prolonging premature success states.
 -   **Auto-proposed by:** cross-experiment-critic@2026-04-23
 
@@ -71,19 +71,19 @@
 #### model-escalation-router-hard-clusters
 
 -   **Motivation:** The Gemini 3 model baseline improved the full-suite control floor, but pro gained accuracy at a much higher cost while flash/lite stayed cheaper on many easy or tied tasks.
--   **Sketch:** Diagnostic-only as originally written if it uses known benchmark clusters. A promotable version must classify task type from the instruction/workspace at runtime, start on the cheap trunk model, and escalate only on verifier failure or runtime-observed task signals such as build-system complexity, model-artifact requirements, or parser/toolchain failures.
+-   **Sketch:** measurement-only as originally written if it uses known benchmark clusters. A generalizable version must classify task type from the instruction/workspace at runtime, start on the cheap current-best model, and escalate only on verifier failure or runtime-observed task signals such as build-system complexity, model-artifact requirements, or parser/toolchain failures.
 -   **Auto-proposed by:** cross-experiment-critic@2026-04-25
 
 #### runtime-guards-on-gemini3-floor
 
 -   **Motivation:** [medium confidence; structural gap, 0 component trials on flash/pro] The measured runtime and planner guard rows all come from flash-lite component ablations, while the Gemini 3 model baseline raised the no-component control floor, so the zero-win guard conclusion may be model-floor dependent.
--   **Sketch:** Run a small paired confirmation on the selected Gemini 3 trunk model with current basic/planner controls versus loop-guard and planner-schema-guard on their strongest historical slices. Treat this as a model-floor interaction test, not a new component graduation attempt.
+-   **Sketch:** Run a small paired confirmation on the selected Gemini 3 current-best model with current basic/planner controls versus loop-guard and planner-schema-guard on their strongest historical slices. Treat this as a model-floor interaction test, not a new component graduation attempt.
 -   **Auto-proposed by:** cross-experiment-critic@2026-04-25
 
 #### targeted-router-score-win-confirmation
 
 -   **Motivation:** [low confidence: 3 score-decided router wins] The hard-cluster router lost the aggregate but uniquely won extract-elf, mteb-retrieve, and regex-log, suggesting a narrow route surface may exist.
--   **Sketch:** Diagnostic-only if keyed by known task ids or offline labels. A promotable router must infer binary/retrieval/regex-like work from the instruction/workspace at runtime and then escalate conservatively while leaving flash as the default elsewhere.
+-   **Sketch:** measurement-only if keyed by known task ids or offline labels. A generalizable router must infer binary/retrieval/regex-like work from the instruction/workspace at runtime and then escalate conservatively while leaving flash as the default elsewhere.
 -   **Auto-proposed by:** cross-experiment-critic@2026-04-25
 
 #### router-cheap-baseline-preservation-gate

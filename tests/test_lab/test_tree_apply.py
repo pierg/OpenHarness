@@ -32,9 +32,9 @@ def lab_root(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     return tmp_path
 
 
-def _make_decision(kind: str, **overrides: object) -> ExperimentDecision:
+def _make_decision(verdict: str, **overrides: object) -> ExperimentDecision:
     base = dict(
-        kind=kind,
+        verdict=verdict,
         target_id="planner_executor",
         rationale="positive on multi_file tasks",
         evidence_paths=[Path("/tmp/x.json")],
@@ -62,7 +62,7 @@ def test_apply_accept_updates_current_best_and_journal(lab_root: Path) -> None:
     lab_docs.append_journal_entry(
         slug="accept-planner",
         type_="paired ablation",
-        trunk_at_runtime="basic",
+        current_best_at_runtime="basic",
         mutation="planner_executor",
         hypothesis="planner helps",
         run_path=None,
@@ -92,7 +92,7 @@ def test_apply_reject_appends_to_rejected(lab_root: Path) -> None:
     lab_docs.append_journal_entry(
         slug="rej-x",
         type_="paired",
-        trunk_at_runtime="basic",
+        current_best_at_runtime="basic",
         mutation="bad_thing",
         hypothesis="x",
         run_path=None,
@@ -114,7 +114,7 @@ def test_apply_no_op_writes_journal_only(lab_root: Path) -> None:
     lab_docs.append_journal_entry(
         slug="noop-x",
         type_="paired",
-        trunk_at_runtime="basic",
+        current_best_at_runtime="basic",
         mutation="planner_executor",
         hypothesis="no signal",
         run_path=None,

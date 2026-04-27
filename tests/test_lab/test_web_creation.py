@@ -173,7 +173,7 @@ def test_idea_theme_vocabulary_locked() -> None:
 
 
 def test_component_status_vocabulary_locked() -> None:
-    for ok in ["proposed", "experimental", "branch", "validated", "rejected", "superseded"]:
+    for ok in ["proposed", "experimental", "validated", "rejected", "superseded"]:
         assert labcmd._COMPONENT_STATUS.fullmatch(ok)
     for bad in ["Proposed", "done", "promoted", ""]:
         assert not labcmd._COMPONENT_STATUS.fullmatch(bad)

@@ -9,7 +9,7 @@
 
      Catalogs    /components, /components-perf, /ideas, /roadmap
      Operations  /daemon, /pending, /spawns, /usage
-     Legacy      /experiments  (alias of /runs, kept for bookmarks)
+     Records     /experiments
 
    The disclosure stays open whenever the active page lives inside
    it (so users land on a non-primary page and immediately see where
@@ -90,14 +90,13 @@
         </a>
       {% endfor %}
 
-      <div class="px-2 pt-3 pb-1 text-[10px] uppercase tracking-wider text-slate-400">Legacy</div>
+      <div class="px-2 pt-3 pb-1 text-[10px] uppercase tracking-wider text-slate-400">Records</div>
       <a href="/experiments"
          onclick="var t=document.getElementById('nav-toggle'); if(t)t.checked=false;"
          class="block px-3 py-1 rounded hover:bg-slate-100 text-slate-500
                 {% if nav_active == 'experiments' %}bg-slate-100 font-medium border-l-2 border-emerald-500{% endif %}"
-         title="Same data as /runs — kept so external bookmarks keep working.">
+         title="Experiment journal and run summaries.">
         Experiments
-        <span class="text-[10px] text-slate-400">(alias of /runs)</span>
       </a>
     </div>
   </details>

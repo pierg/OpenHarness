@@ -158,10 +158,9 @@ class UsageSummaryRow:
 class DecisionRow:
     instance_id: str
     slug: str
-    kind: str  # accept | reject | no_op
+    verdict: str  # accept | reject | no_op
     target_id: str
     rationale: str | None
-    use_when: Json
     confidence: float | None
     applied: bool
     applied_by: str | None
@@ -169,7 +168,7 @@ class DecisionRow:
 
 
 @dataclass(eq=False, slots=True)
-class TrunkChangeRow:
+class CurrentBestChangeRow:
     at_ts: datetime
     from_id: str | None
     to_id: str
@@ -269,7 +268,7 @@ class JournalEntryView:
     slug: str
     date: str  # YYYY-MM-DD as it appears in the heading
     type_: str | None
-    trunk_at_runtime: str | None
+    current_best_at_runtime: str | None
     mutation: str | None
     hypothesis: str | None
     run_link: str | None
@@ -490,19 +489,19 @@ class PRStateRow:
     """Summarised state of one experiment PR.
 
     Built by :meth:`LabReader.pr_states`. Composes
-    ``tree_diffs.pr_url`` (cheap, always present) with optional
+    ``decisions.pr_url`` (cheap, always present) with optional
     ``gh pr view`` data (slow, may be None when ``gh`` is missing or
     the worker host has no GitHub token). When ``state`` is None the
     UI renders a "PR open · CI status unknown" fallback rather than
     pretending the PR doesn't exist.
 
     ``slug`` and ``instance_id`` are duplicated so callers can render
-    a row without re-joining tree_diffs.
+    a row without re-joining decisions.
     """
 
     slug: str
     instance_id: str
-    kind: str
+    verdict: str
     pr_url: str
     pr_number: int | None
     state: str | None  # OPEN | MERGED | CLOSED
@@ -548,15 +547,15 @@ class ActivityLogEntry:
 
     Fold-in of audit-log entries (``runs/lab/web_commands.jsonl``),
     tick history (from daemon_state.history), spawn finishes (from
-    DuckDB ``spawns``), current-best history (``trunk_changes``), and
-    tree verdicts (``tree_diffs``). Lets the operator see "what changed
+    DuckDB ``spawns``), current-best history, and experiment decisions.
+    Lets the operator see "what changed
     in the last hour" without bouncing between four pages.
 
     ``kind`` is one of:
       - ``cmd``            — web /api/cmd execution
       - ``tick``           — daemon tick finished
       - ``spawn``          — codex skill spawn finished
-      - ``verdict``        — tree_diffs row appeared
+      - ``verdict``        — decision row appeared
       - ``current-best``   — current-best history row appeared
     """
 
@@ -575,9 +574,8 @@ class ActivityLogEntry:
 class CellRow:
     """One cell in the per-task × per-leg evidence matrix.
 
-    Rebuilt for the ``/runs/<id> Cells`` tab; the older
-    :class:`TrialRow` only carried per-trial scalars. Here we also
-    expose:
+    Built for the ``/runs/<id> Cells`` tab. In addition to per-trial
+    scalars, this row also exposes:
 
     - ``cluster``          — task-feature category, used for grouping
     - ``trial_dir``        — drawer link target
@@ -626,7 +624,7 @@ class TreeVizNode:
     """One node in the configuration-tree visualisation.
 
     Joined view: ``lab/configs.md`` (current best + rejected +
-    proposed) + ``tree_diffs.pr_url`` + the live PR cache. The
+    proposed) + ``decisions.pr_url`` + the live PR cache. The
     template uses this to render the SVG with per-node badges
     indicating which branch has an open PR (dashed outline), a
     merged PR (solid border), or no PR yet (no badge).
@@ -635,7 +633,7 @@ class TreeVizNode:
     node_id: str
     role: str  # current_best | rejected | proposed
     mutation: str | None = None
-    use_when: str | None = None
+    linked_idea: str | None = None
     sketch: str | None = None
     reason: str | None = None
     last_verified: str | None = None

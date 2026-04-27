@@ -5,7 +5,7 @@ Covers three contracts in one place:
 1. ``LabReader.resolve_slug`` — mirrors the CLI's resolver; not running
    the resolver from the web UI was the original decision-apply UX
    blocker.
-2. ``LabReader.preview_diff`` — returns ``None`` for unknown slugs
+2. ``LabReader.preview_decision`` — returns ``None`` for unknown slugs
    (the only behaviour we depend on without a populated DB), otherwise
    a dict with the canonical decision fields.
 3. ``commands.COMMANDS["decision-apply"]`` — argv template, param specs,
@@ -65,7 +65,7 @@ def test_decision_apply_emits_refresh_events() -> None:
 
 
 # ---------------------------------------------------------------------------
-# data.LabReader.resolve_slug + preview_diff
+# data.LabReader.resolve_slug + preview_decision
 # ---------------------------------------------------------------------------
 
 
@@ -77,26 +77,26 @@ def test_resolve_slug_returns_none_when_db_missing(tmp_path, monkeypatch):  # ty
     with labdata.LabReader() as r:
         assert r.db_available is False
         assert r.resolve_slug("anything") is None
-        assert r.preview_diff("anything") is None
+        assert r.preview_decision("anything") is None
 
 
-def test_preview_diff_unknown_slug_against_real_db() -> None:
+def test_preview_decision_unknown_slug_against_real_db() -> None:
     # The repo's lab DB exists in dev; if not, this test no-ops cleanly
     # so contributors without a populated lab can still run the suite.
     with labdata.LabReader() as r:
         if not r.db_available:
             return
-        out = r.preview_diff("definitely-not-a-real-slug-zzz")
+        out = r.preview_decision("definitely-not-a-real-slug-zzz")
         assert out is None, (
-            "preview_diff must return None for unresolvable slugs so the "
+            "preview_decision must return None for unresolvable slugs so the "
             "template can render a 'no experiment found' message instead "
             "of a confusing empty diff"
         )
 
 
-def test_preview_diff_known_slug_shape() -> None:
+def test_preview_decision_known_slug_shape() -> None:
     # If the DB has at least one experiment with a critic decision,
-    # preview_diff must echo the canonical dict plus slug + instance id.
+    # preview_decision must echo the canonical dict plus slug + instance id.
     with labdata.LabReader() as r:
         if not r.db_available:
             return
@@ -104,18 +104,18 @@ def test_preview_diff_known_slug_shape() -> None:
         if not exps:
             return
         instance_id = exps[0].instance_id
-        out = r.preview_diff(instance_id)
+        out = r.preview_decision(instance_id)
         if out is None:
             return
         # Canonical decision fields.
-        for field in ("kind", "target_id", "rationale", "use_when",
+        for field in ("verdict", "target_id", "rationale",
                       "confidence", "evidence_paths", "cluster_evidence"):
-            assert field in out, f"preview_diff missing decision field {field!r}"
+            assert field in out, f"preview_decision missing decision field {field!r}"
         # Web-only echo fields.
         assert out["slug"] == instance_id
         assert out["resolved_instance_id"] == instance_id
-        # Kind must be one of the documented decision kinds.
-        assert out["kind"] in {"accept", "reject", "no_op"}
+        # Verdict must be one of the documented decision labels.
+        assert out["verdict"] in {"accept", "reject", "no_op"}
 
 
 # ---------------------------------------------------------------------------

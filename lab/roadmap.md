@@ -15,7 +15,7 @@
 -   **Idea:** [`toolchain-fallback-playbooks-on-c-build`](ideas.md#toolchain-fallback-playbooks-on-c-build)
 -   **Hypothesis:** C/build and bootstrap failures are not solved by more turns or generic loop guards; explicit toolchain fallback playbooks should reduce repeated failed commands on build-system and dependency-resolution tasks.
 -   **Slice:** `c_build` plus closely related network/toolchain/bootstrap failures where critiques logged `repeated_failed_command`, `wrong_tool_family`, or `timeout_no_recovery`. Use the prior `c_build` failures first and expand with task-feature matches until there are at least 10 trials per leg.
--   **Legs:** 2-leg paired ablation. Leg A: chosen trunk `basic` after `tb2-gemini3-model-baseline`. Leg B: same trunk plus toolchain fallback playbooks. One axis only: build/toolchain playbook guidance on or off.
+-   **Legs:** 2-leg paired ablation. Leg A: chosen current best `basic` after `tb2-gemini3-model-baseline`. Leg B: same current best plus toolchain fallback playbooks. One axis only: build/toolchain playbook guidance on or off.
 -   **Repetitions:** `paired-double`.
 -   **Control:** `fresh`.
 -   **Why second:** `c_build` is one of the clearest low-pass, repeated-failure clusters across completed runs, and the timeout-recovery hard-cluster run showed bare retry still leaves toolchain loops unresolved.
@@ -27,7 +27,7 @@
 -   **Idea:** [`artifact-first-output-policy`](ideas.md#artifact-first-output-policy)
 -   **Hypothesis:** A prompt/runtime policy that forces early creation or incremental updating of the task's required output artifact will recover file-output failures where the agent made partial progress but never left the verifier-consumable result in place.
 -   **Slice:** file-output-heavy all-leg failures and near-misses from prior runs, prioritizing tasks tagged or inferred as `creates_new_file`, `single_output_file`, or artifact-portability sensitive. Include known failures such as `db-wal-recovery`, `password-recovery`, and `write-compressor` if they still reproduce on the chosen baseline model; aim for at least 10 trials per leg.
--   **Legs:** 2-leg paired ablation. Leg A: chosen trunk `basic` after `tb2-gemini3-model-baseline`. Leg B: same trunk plus artifact-first output policy. One axis only: output-artifact policy on or off.
+-   **Legs:** 2-leg paired ablation. Leg A: chosen current best `basic` after `tb2-gemini3-model-baseline`. Leg B: same current best plus artifact-first output policy. One axis only: output-artifact policy on or off.
 -   **Repetitions:** `paired-double` because the slice is narrow and prior failures include stochastic late-task abandonment.
 -   **Control:** `fresh`.
 -   **Why second:** prior critiques repeatedly show partial progress without a durable answer artifact; this is a direct harness-facing mechanism after the model floor is known.
@@ -39,7 +39,7 @@
 -   **Idea:** [`portable-artifact-clean-env-gate`](ideas.md#portable-artifact-clean-env-gate)
 -   **Hypothesis:** Adding a clean-environment / portable-artifact completion gate will reduce `hallucinated_success`, sample-only validation, and environment-mutation failures without changing the agent architecture.
 -   **Slice:** clean-env-sensitive failures from prior runs, especially tasks where the agent passed a local/sample check but failed the verifier or left non-portable state. Prefer `python_packaging`, `python_data`, and artifact-heavy tasks such as `openssl-selfsigned-cert`, `reshard-c4-data`, and `raman-fitting`; aim for at least 10 trials per leg.
--   **Legs:** 2-leg paired ablation. Leg A: chosen trunk `basic` after `tb2-gemini3-model-baseline`. Leg B: same trunk plus portable artifact / clean verifier gate. One axis only: completion gate on or off.
+-   **Legs:** 2-leg paired ablation. Leg A: chosen current best `basic` after `tb2-gemini3-model-baseline`. Leg B: same current best plus portable artifact / clean verifier gate. One axis only: completion gate on or off.
 -   **Repetitions:** `paired-double`.
 -   **Control:** `fresh`.
 -   **Why third:** `hallucinated_success` and invalid local validation remain high-frequency critic labels; this tests a verifier-aligned guardrail before adding more architecture complexity.
@@ -50,7 +50,7 @@
 
 #### router-cheap-baseline-preservation-gate
 
--   **Hypothesis:** If router work continues, it must use a runtime classifier derived from the task instruction/workspace plus an explicit cheap-baseline preservation gate; the prior task-name router is diagnostic-only because it used benchmark identity, and the broad router cost nearly as much as pro while losing several flash/pro wins.
+-   **Hypothesis:** If router work continues, it must use a runtime classifier derived from the task instruction/workspace plus an explicit cheap-baseline preservation gate; the prior task-name router is measurement-only because it used benchmark identity, and the broad router cost nearly as much as pro while losing several flash/pro wins.
 -   **Source:** lab-replan-roadmap@2026-04-25
 -   **Cost:** ~$8-15
 
@@ -59,10 +59,10 @@
 -   **Idea:** [`timeout-aware-retry-needs-network-confirmation`](ideas.md#timeout-aware-retry-needs-network-confirmation)
 -   **Hypothesis:** The timeout-aware retry branch needs a verdict-bearing rerun on the intended network-dependent, high-env-complexity slice; the smoke run tied control at 2/4 passes per leg and is below the evidence floor, so the needs_network timeout hypothesis remains open.
 -   **Slice:** decision-bearing full slice from `timeout-aware-retry-on-needs-network`: network-dependent / `extra.needs_network = true` tasks with `high_env_complexity` and recent `repeated_failed_command` or `timeout_no_recovery` failures. Prefer the existing 18-task materialized list from the spec; aim for at least 10 trials per leg.
--   **Legs:** 2-leg paired ablation. Leg A: chosen trunk `basic` after `tb2-gemini3-model-baseline`. Leg B: same trunk plus `basic_timeout_aware_retry`. One axis only: executor timeout-aware retry / background polling on or off.
+-   **Legs:** 2-leg paired ablation. Leg A: chosen current best `basic` after `tb2-gemini3-model-baseline`. Leg B: same current best plus `basic_timeout_aware_retry`. One axis only: executor timeout-aware retry / background polling on or off.
 -   **Repetitions:** `paired-double` because the smoke run was under-powered and the recovery path depends on runtime timing.
 -   **Control:** `fresh`.
--   **Why fourth:** the smoke run proved wiring but not value. Keep the confirmation, but run it after the model baseline so timeout recovery is measured against the trunk we actually intend to operate.
+-   **Why fourth:** the smoke run proved wiring but not value. Keep the confirmation, but run it after the model baseline so timeout recovery is measured against the current best we actually intend to operate.
 -   **Depends on:** `tb2-gemini3-model-baseline`, `timeout-aware-retry-on-needs-network`
 -   **Cost:** ~$4-7
 
@@ -70,7 +70,7 @@
 
 -   **Idea:** [`timeout-strategy-switch-checkpoint`](ideas.md#timeout-strategy-switch-checkpoint)
 -   **Hypothesis:** Timeout-aware retry needs a concrete recovery policy, not only background polling; forcing a cluster-specific strategy switch after the first timeout or repeated failed command should recover hard-cluster tasks where bare retry only shortened failures.
--   **Plan:** Slice: the same c_build, regex_programming, and python_ml hard-cluster failure surface from timeout-recovery-hard-cluster-slice, refreshed if needed to clear at least 10 trials per leg. Legs: 2-leg paired ablation, A current basic_flash trunk, B timeout-aware retry plus a strategy-switch checkpoint that routes to toolchain triage, parser or CLI-shape discovery, or ML sampling-loop recovery before max turns. Repetitions: paired-double. Run after runtime-component-label-audit so component attribution is valid.
+-   **Plan:** Slice: the same c_build, regex_programming, and python_ml hard-cluster failure surface from timeout-recovery-hard-cluster-slice, refreshed if needed to clear at least 10 trials per leg. Legs: 2-leg paired ablation, A current basic_flash current best, B timeout-aware retry plus a strategy-switch checkpoint that routes to toolchain triage, parser or CLI-shape discovery, or ML sampling-loop recovery before max turns. Repetitions: paired-double. Run after runtime-component-label-audit so component attribution is valid.
 -   **Depends on:** `timeout-recovery-hard-cluster-slice, runtime-component-label-audit`
 -   **Cost:** ~$5-10
 
@@ -103,7 +103,7 @@
 
 -   **Idea:** [`timeout-recovery-hard-cluster-slice`](ideas.md#timeout-recovery-hard-cluster-slice)
 -   **Hypothesis:** Timeout-aware recovery may be more valuable on the hard clusters exposed by the model-router run than on the original network-only smoke slice, because timeout_no_recovery dominated all-leg failures in c_build, regex_programming, and python_ml.
--   **Plan:** Slice: hard-cluster tasks from model-escalation-router-hard-clusters where all legs failed or timeout_no_recovery / repeated_failed_command dominated, with c_build, regex_programming, and python_ml represented separately; floor section 6 requires at least 10 trials per leg. Legs: 2-leg paired ablation, A chosen basic_flash trunk, B same trunk plus executor timeout-aware retry / background polling. Repetitions: paired-double because timeout recovery is timing-sensitive. Control: fresh. Why second: the newest run found 50 timeout_no_recovery tags and 7 all-leg failures on hard clusters, so test the recovery mechanism on the failure surface that survived model escalation.
+-   **Plan:** Slice: hard-cluster tasks from model-escalation-router-hard-clusters where all legs failed or timeout_no_recovery / repeated_failed_command dominated, with c_build, regex_programming, and python_ml represented separately; floor section 6 requires at least 10 trials per leg. Legs: 2-leg paired ablation, A chosen basic_flash current best, B same current best plus executor timeout-aware retry / background polling. Repetitions: paired-double because timeout recovery is timing-sensitive. Control: fresh. Why second: the newest run found 50 timeout_no_recovery tags and 7 all-leg failures on hard clusters, so test the recovery mechanism on the failure surface that survived model escalation.
 -   **Depends on:** `model-escalation-router-hard-clusters`
 -   **Cost:** ~$5-10
 
@@ -130,17 +130,17 @@
 -   **Cost:** smoke-gated; reserve ~$35-70
 
 -   **Ran:** [runs/experiments/model-escalation-router-hard-clusters-20260425-191501](../runs/experiments/model-escalation-router-hard-clusters-20260425-191501)
--   **Outcome:** diagnostic-only specialization signal: all-Pro basic beat flash by +5.8 pp on the hard-cluster slice, but the task-name router was invalid for acceptance because it used benchmark identity and also lost aggregate accuracy while costing near pro.
+-   **Outcome:** measurement-only specialization signal: all-Pro basic beat flash by +5.8 pp on the hard-cluster slice, but the task-name router was invalid for acceptance because it used benchmark identity and also lost aggregate accuracy while costing near pro.
 
 ### tb2-gemini3-model-baseline
 
--   **Idea:** refresh the trunk model baseline before spending more daemon budget on component ablations.
--   **Hypothesis:** The current trunk score is partly model-bound: replacing `gemini-3.1-flash-lite-preview` with the stronger Gemini 3 Flash / 3.1 Pro coding models on the same `basic` harness will raise full-suite pass rate enough to change which runtime and prompt mechanisms are worth pursuing next.
+-   **Idea:** refresh the current-best model baseline before spending more daemon budget on component ablations.
+-   **Hypothesis:** The current-best score is partly model-bound: replacing `gemini-3.1-flash-lite-preview` with the stronger Gemini 3 Flash / 3.1 Pro coding models on the same `basic` harness will raise full-suite pass rate enough to change which runtime and prompt mechanisms are worth pursuing next.
 -   **Slice:** full `terminal-bench@2.0` task set used by `tb2-baseline-full-sweep` (currently 89 tasks). Keep the same task filter, verifier behavior, timeout budget, and concurrency policy unless the design phase discovers a hard provider quota blocker and records the exact blocker before refusing.
--   **Legs:** 3-leg model-only baseline. Leg A: trunk `basic` with `gemini-3.1-flash-lite-preview`. Leg B: cloned `basic` with `gemini-3-flash-preview` (official Flash preview text model). Leg C: cloned `basic` with `gemini-3.1-pro-preview`. One axis only: model ID.
+-   **Legs:** 3-leg model-only baseline. Leg A: current best `basic` with `gemini-3.1-flash-lite-preview`. Leg B: cloned `basic` with `gemini-3-flash-preview` (official Flash preview text model). Leg C: cloned `basic` with `gemini-3.1-pro-preview`. One axis only: model ID.
 -   **Repetitions:** `single-shot` because the slice is broad and the mechanism is a pure provider/model swap.
 -   **Control:** `fresh`.
--   **Why first:** every completed component experiment is being interpreted against the Lite baseline. If Flash or Pro materially lifts the baseline, the daemon should reprioritize follow-ups around residual failures from the stronger trunk instead of overfitting guardrails to Lite-specific behavior.
+-   **Why first:** every completed component experiment is being interpreted against the Lite baseline. If Flash or Pro materially lifts the baseline, the daemon should reprioritize follow-ups around residual failures from the stronger current best instead of overfitting guardrails to Lite-specific behavior.
 -   **Depends on:** none
 -   **Cost:** smoke-gated; reserve ~$40-120, with Pro expected to dominate spend.
 
@@ -152,10 +152,10 @@
 -   **Idea:** [`executor-bash-timeout-aware-retry`](ideas.md#executor-bash-timeout-aware-retry)
 -   **Hypothesis:** timeout-aware retry / background polling recovers a meaningful share of the `needs_network` + `high_env_complexity` failures that currently collapse into repeated command loops or unrecovered bash timeouts.
 -   **Slice:** derived `needs_network + high_env_complexity` slice from the current bench, restricted to tasks whose recent failed trials skewed toward `repeated_failed_command` or `timeout_no_recovery`. The implement phase MUST resolve the predicate from recorded artefacts and encode the final task list in `task_filter.include_tasks:`; aim for at least 5 tasks.
--   **Legs:** 2-leg paired ablation. Leg A: trunk `basic`. Leg B: `basic` + executor timeout-aware retry / background polling. One axis only: timeout recovery path on/off.
+-   **Legs:** 2-leg paired ablation. Leg A: current best `basic`. Leg B: `basic` + executor timeout-aware retry / background polling. One axis only: timeout recovery path on/off.
 -   **Repetitions:** `paired-double` (n_attempts=2) — the recovery path is runtime-sensitive, and the derived slice is composed of unstable long-running tasks where single-shot noise would be hard to interpret.
 -   **Control:** `fresh`.
--   **Why first:** four completed experiments still concentrate failures in repeated command loops and unrecovered timeouts, while `planner-schema-guard-paired` only reduced spend on the planner slice without recovering score. This is now the strongest trunk-facing mechanism question with cross-experiment support.
+-   **Why first:** four completed experiments still concentrate failures in repeated command loops and unrecovered timeouts, while `planner-schema-guard-paired` only reduced spend on the planner slice without recovering score. This is now the strongest current-best-facing mechanism question with cross-experiment support.
 -   **Cost:** ~$5-8
 
 -   **Ran:** [runs/experiments/timeout-aware-retry-on-needs-network-smoke-20260424-193153](../runs/experiments/timeout-aware-retry-on-needs-network-smoke-20260424-193153)
@@ -174,22 +174,22 @@
 -   **Cost:** ~$4-6.
 
 -   **Ran:** [runs/experiments/planner-schema-guard-paired-20260424-154436](../runs/experiments/planner-schema-guard-paired-20260424-154436)
--   **Outcome:** no_op: schema guard matched control at 8/22 passes and only lowered cost, so the branch stays unpromoted.
+-   **Outcome:** no_op: schema guard matched control at 8/22 passes and only lowered cost, so the variant stays rejected.
 
 ### loop-guard-on-basic-near-miss
 
 -   **Idea:** [`loop-guard`](ideas.md#loop-guard)
--   **Hypothesis:** enabling `LoopGuardConfig.enabled` on trunk `basic` recovers a meaningful share of the loop-heavy near-miss failures from `extended-budget-paired-on-trunk` by breaking repeated command / timeout spirals without the cost blow-up of longer budgets.
+-   **Hypothesis:** enabling `LoopGuardConfig.enabled` on current best `basic` recovers a meaningful share of the loop-heavy near-miss failures from `extended-budget-paired-on-trunk` by breaking repeated command / timeout spirals without the cost blow-up of longer budgets.
 -   **Slice:** `near-miss` — tasks from `extended-budget-paired-on-trunk` where all three budget legs failed and at least one trial logged `repeated_failed_command` or `timeout_no_recovery`. Current evidence suggests `n_tasks ≈ 20-24`; with `n_attempts=2`, expect `n_trials/leg ≈ 40-48`.
--   **Legs:** 2-leg paired ablation. Leg A: trunk `basic`. Leg B: `basic` + loop-guard enabled. One axis only: loop-guard on/off.
+-   **Legs:** 2-leg paired ablation. Leg A: current best `basic`. Leg B: `basic` + loop-guard enabled. One axis only: loop-guard on/off.
 -   **Repetitions:** `paired-double` (n_attempts=2) — the mechanism is stochastic, and the slice is a derived near-miss population where single-shot noise would be hard to read.
 -   **Control:** `fresh`.
--   **Why first:** both completed experiments say "more budget" is not the answer, while no-progress loops are the dominant shared failure shape. This is the cheapest trunk-facing test of the strongest current hypothesis.
+-   **Why first:** both completed experiments say "more budget" is not the answer, while no-progress loops are the dominant shared failure shape. This is the cheapest current-best-facing test of the strongest current hypothesis.
 -   **Depends on:** `extended-budget-paired-on-trunk`
 -   **Cost:** ~$3-5.
 
 -   **Ran:** [runs/experiments/loop-guard-on-basic-near-miss-20260424-021810](../runs/experiments/loop-guard-on-basic-near-miss-20260424-021810)
--   **Outcome:** reject: loop-guard on basic scored 1/46 vs trunk 2/46 on the near-miss slice and did not recover loop-heavy failures.
+-   **Outcome:** reject: loop-guard on basic scored 1/46 vs current best 2/46 on the near-miss slice and did not recover loop-heavy failures.
 
 ### extended-budget-paired-on-trunk
 
@@ -203,7 +203,7 @@
 -   **Cost:** ~$2-3 (3 legs × 15 trials × ~$0.05/trial).
 
 -   **Ran:** [extended-budget-paired-on-trunk](experiments.md#2026-04-23--extended-budget-paired-on-trunk)
--   **Outcome:** Reject: 10.7% trunk pass rate vs 14.3% on both extended-budget legs; budget increases helped one narrow task but did not justify promotion.
+-   **Outcome:** Reject: 10.7% baseline pass rate vs 14.3% on both extended-budget legs; budget increases helped one narrow task but did not justify acceptance.
 
 ### tb2-baseline-full-sweep
 
@@ -223,31 +223,31 @@
 ### stronger-model-baseline
 
 -   **Status:** superseded by [`tb2-gemini3-model-baseline`](roadmap.md#tb2-gemini3-model-baseline).
--   **Hypothesis:** originally proposed swapping trunk basic to `gemini-2.5-pro` on a near-miss slice to test whether failures were capability-bound.
+-   **Hypothesis:** originally proposed swapping current best basic to `gemini-2.5-pro` on a near-miss slice to test whether failures were capability-bound.
 -   **Why deferred:** stale model target and too narrow for the current decision. The daemon now needs a current Gemini 3 full-suite baseline before interpreting more component ablations.
--   **Source:** legacy-reflect-and-plan@2026-04-23, deferred 2026-04-24.
+-   **Source:** archived-reflect-and-plan@2026-04-23, deferred 2026-04-24.
 
 ### planner-executor-cluster-confirmation
 
 -   **Idea:** revisits the historical planner-executor signal from `tb2-baseline-full-sweep`, but only after repairing the planner schema failure mode; still folds in the `grounded-planner-tools` ablation as Leg C for marginal cost.
--   **Hypothesis:** (a) `planner_executor` with the schema guard still beats trunk on `{python_data, system_administration, security_certificates}` with adequate `n`; (b) the planner subagent's read-only tools materially contribute to any recovered win, so removing them on Leg C should hurt.
+-   **Hypothesis:** (a) `planner_executor` with the schema guard still beats current best on `{python_data, system_administration, security_certificates}` with adequate `n`; (b) the planner subagent's read-only tools materially contribute to any recovered win, so removing them on Leg C should hurt.
 -   **Slice:** same `cluster_combined: python_data, system_administration, security_certificates` slice as `planner-schema-guard-paired`. Current counts are 11 tasks total, so with `n_attempts=2`, `n_trials/leg = 22`.
 -   **Legs:** 3-leg multi-arm because two questions share one slice. Leg A: baseline `basic`. Leg B: `planner_executor` + schema guard. Leg C: Leg B plus planner subagent `tools: []`. Each pairwise contrast differs in exactly one axis.
 -   **Repetitions:** `paired-double` (n_attempts=2) — small slice, planner behavior is stochastic, and the original diagnostic evidence rested on n=1/3/7.
 -   **Control:** `fresh`.
--   **Why deferred:** `planner-schema-guard-paired` matched control on score and only lowered cost, so planner confirmation no longer deserves front-of-queue budget before the trunk model floor is refreshed.
+-   **Why deferred:** `planner-schema-guard-paired` matched control on score and only lowered cost, so planner confirmation no longer deserves front-of-queue budget before the current-best model floor is refreshed.
 -   **Depends on:** `planner-schema-guard-paired`
 -   **Cost:** ~$5-8 (3 legs × 22 trials × ~$0.07-0.10/trial).
 
-### trunk-noise-floor-calibration
+### current-best-noise-floor-calibration
 
 -   **Hypothesis:** measures pure stochastic swing on the planner-executor confirmation slice by running `basic` twice on the same 11-task `cluster_combined` slice with `n_attempts=2`.
 -   **Slice:** same 11 tasks as `planner-executor-cluster-confirmation`. `n_tasks/leg=11`, `n_trials/leg=22`.
 -   **Legs:** 2-leg. Leg A: `basic`. Leg B: `basic` (byte-identical). Both run independently.
 -   **Repetitions:** `paired-double` (n_attempts=2).
 -   **Control:** `fresh`.
--   **Why deferred:** useful only if planner-related cluster decisions return to the queue. Larger trunk-facing failure modes are higher-value right now.
--   **Source:** legacy-reflect-and-plan@2026-04-22 (methodology revision), deferred 2026-04-24.
+-   **Why deferred:** useful only if planner-related cluster decisions return to the queue. Larger current-best-facing failure modes are higher-value right now.
+-   **Source:** archived-reflect-and-plan@2026-04-22 (methodology revision), deferred 2026-04-24.
 -   **Cost:** ~$2.
 
 ### react-tentative-cluster-retest
@@ -258,7 +258,7 @@
 -   **Repetitions:** `paired-double`.
 -   **Control:** `fresh`.
 -   **Why deferred:** outcome doesn't unblock anything else on the roadmap. React is already excluded from the current best; the result would mainly decide whether to keep the rejection or restate a new idea. Promote when the queue is otherwise empty.
--   **Source:** legacy-reflect-and-plan@2026-04-18, deferred 2026-04-22 (methodology revision)
+-   **Source:** archived-reflect-and-plan@2026-04-18, deferred 2026-04-22 (methodology revision)
 -   **Cost:** ~$2-3.
 
 ### grounded-planner-tools-ablation (FOLDED into `planner-executor-cluster-confirmation`)

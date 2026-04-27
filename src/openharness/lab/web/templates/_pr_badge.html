@@ -21,7 +21,7 @@
   {%- if pr.is_merged -%}
     {%- set _palette = ("border-emerald-300", "bg-emerald-50", "text-emerald-900") -%}
     {%- set _label = "MERGED" -%}
-  {%- elif pr.state == "OPEN" and pr.kind in ("reject", "no_op") -%}
+  {%- elif pr.state == "OPEN" and pr.verdict in ("reject", "no_op") -%}
     {%- set _palette = ("border-violet-300", "bg-violet-50", "text-violet-900") -%}
     {%- set _label = "OPEN · metadata-only" -%}
   {%- elif pr.state == "OPEN" -%}
