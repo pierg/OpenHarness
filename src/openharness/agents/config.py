@@ -145,7 +145,7 @@ def _validate_no_benchmark_oracle_extras(
             "which routes by exact benchmark task identity. Runtime agent policy "
             "must only use information available on unseen tasks: the instruction, "
             "workspace, tools, and observations. Use an instruction/workspace-derived "
-            "classifier or mark the experiment diagnostic-only instead."
+            "classifier or mark the experiment measurement-only instead."
         )
 
 
