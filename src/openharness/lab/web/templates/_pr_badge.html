@@ -13,7 +13,7 @@
    Color encoding mirrors the lab finalize contract:
      - emerald: merged
      - amber:   open (normal experiment PR)
-     - violet:  open metadata-only PR (reject / no_op)
+     - violet:  open rejected/no-op candidate PR
      - rose:    closed without merge
      - slate:   unknown (gh not installed / api error)
 #}
@@ -23,7 +23,7 @@
     {%- set _label = "MERGED" -%}
   {%- elif pr.state == "OPEN" and pr.verdict in ("reject", "no_op") -%}
     {%- set _palette = ("border-violet-300", "bg-violet-50", "text-violet-900") -%}
-    {%- set _label = "OPEN · metadata-only" -%}
+    {%- set _label = "OPEN · candidate" -%}
   {%- elif pr.state == "OPEN" -%}
     {%- set _palette = ("border-amber-300", "bg-amber-50", "text-amber-900") -%}
     {%- set _label = "OPEN" -%}

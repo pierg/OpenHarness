@@ -24,18 +24,32 @@ One experiment owns one branch.
    `preflight → design → implement → run → critique → replan → finalize`
 4. critique writes the experiment-critic decision on the experiment branch
 5. replan rewrites the queue consequences on that same branch
-6. finalize creates the required PR artifact(s) and merges them back to `main`
+6. finalize opens the canonical experiment PR and syncs the outcome to `main`
 7. only then does the daemon pick the next roadmap entry
 
 Durable experiment state lives on the experiment branch until finalize
 lands it. The parent checkout should not accumulate side commits during
 run/critique/replan.
 
+Every experiment ID has one canonical audit path:
+
+- experiment ID: `runs/experiments/<instance-id>/`
+- branch: `lab/<slug>`
+- PR: the GitHub PR opened from `lab/<slug>`
+
+That PR is the record of what the candidate changed, including the
+config YAML and any source edits. Accepted experiments merge it.
+Rejected and no-op experiments get a final verdict comment and are
+closed unmerged so their implementation diff remains inspectable.
+If lab metadata still needs to land for a rejected/no-op experiment,
+finalize syncs that metadata separately while keeping the decision and
+journal linked to the canonical experiment PR.
+
 ## Decisions
 
-- `accept`: merge accepted code + `lab/` updates
-- `reject`: merge metadata-only `lab/` updates, preserve discarded implementation SHA
-- `no_op`: merge metadata-only `lab/` updates, preserve discarded implementation SHA
+- `accept`: comment on and merge the canonical experiment PR
+- `reject`: comment on and close the canonical experiment PR, preserve discarded SHA
+- `no_op`: comment on and close the canonical experiment PR, preserve discarded SHA
 
 The critic decision is a recommendation backed by evidence and
 confidence. Replan decides what that evidence means for the queue.

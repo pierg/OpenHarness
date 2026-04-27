@@ -884,8 +884,8 @@ def set_journal_branch(
 
     -   ``pr_url`` provided -> "Branch: [<branch>](<pr_url>)".
         When ``rejected_reason`` / ``discarded_sha`` are also passed,
-        append a metadata-only merge note so reject/noop outcomes can
-        link to the merged PR without pretending the discarded code
+        append a closed-experiment-PR note so reject/no_op outcomes can
+        link to the reviewed diff without pretending the discarded code
         landed on ``main``.
     -   ``rejected_reason`` provided without ``pr_url`` -> "Branch:
         <branch> — not opened (<reason>)". When ``discarded_sha`` is
@@ -906,7 +906,7 @@ def set_journal_branch(
     if pr_url:
         suffix = ""
         if rejected_reason:
-            suffix = f" — metadata-only merge ({rejected_reason}"
+            suffix = f" — closed experiment PR ({rejected_reason}"
             if discarded_sha:
                 suffix += f"; discarded=`{discarded_sha[:7]}`"
             suffix += ")"

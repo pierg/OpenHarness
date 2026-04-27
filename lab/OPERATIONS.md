@@ -24,7 +24,7 @@ resumes from the first unfinished phase.
 - all durable experiment edits live on that worktree branch
 - critique writes the structured experiment decision to the branch
 - replan writes the roadmap/idea consequences on the branch
-- finalize creates PR artifact(s) and merges the outcome back to `main`
+- finalize opens the canonical experiment PR and syncs the outcome to `main`
 - only after that merge does the daemon pick the next roadmap entry
 
 There is no separate human promotion gate in the normal autonomous path.
@@ -39,7 +39,7 @@ There is no separate human promotion gate in the normal autonomous path.
 | `run` | deterministic Python | `runs/experiments/<instance-id>/...` + journal stub |
 | `critique` | deterministic Python + Gemini trial critics + Codex aggregate critic | branch-local decision + journal narrative |
 | `replan` | `lab-replan-roadmap` | branch-local roadmap/ideas updates + `replan.json` |
-| `finalize` | `lab-finalize-pr` | merged PR outcome + `finalize.json` |
+| `finalize` | `lab-finalize-pr` | canonical experiment PR + synced outcome + `finalize.json` |
 
 ## Important Commands
 
@@ -92,11 +92,18 @@ uv run lab preflight remove <slug>
 
 ## Finalize Rules
 
-- `accept`: merge accepted code + `lab/` changes
-- `reject` / `no_op`: merge metadata-only `lab/` changes, keep
-  rejected implementation out of `main`, record discarded SHA
+- every experiment ID maps to one branch, `lab/<slug>`, and one
+  canonical experiment PR from that branch
+- `accept`: comment on and merge the canonical experiment PR, landing
+  accepted code + `lab/` changes
+- `reject` / `no_op`: comment on and close the canonical experiment PR,
+  keep rejected implementation out of `main`, record discarded SHA
+- if rejected/no-op lab metadata still needs to land, sync it separately
+  without replacing the canonical experiment PR URL in the journal or
+  decisions table
 
-Finalize must not return success without a merged PR outcome.
+Finalize must not return success without a durable lab outcome on
+`main` and a canonical experiment PR in a terminal state.
 
 ## Portable Runs via GCS
 

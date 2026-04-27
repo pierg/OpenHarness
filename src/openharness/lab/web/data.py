@@ -319,14 +319,13 @@ class LabReader:
             elif name == "replan" and rec.status == "ok":
                 summary = payload.get("summary") or "roadmap updated"
             elif name == "finalize" and payload.get("merged"):
-                pr_urls = payload.get("pr_urls")
-                if isinstance(pr_urls, list) and pr_urls:
-                    summary = "merged 1 PR" if len(pr_urls) == 1 else f"merged {len(pr_urls)} PRs"
-                elif payload.get("pr_url"):
-                    pr = str(payload["pr_url"]).rsplit("/", 1)[-1]
-                    summary = f"merged PR #{pr}"
+                exp_pr_url = payload.get("experiment_pr_url") or payload.get("pr_url")
+                exp_state = str(payload.get("experiment_pr_state") or "synced").lower()
+                if exp_pr_url:
+                    pr = str(exp_pr_url).rsplit("/", 1)[-1]
+                    summary = f"experiment PR #{pr} {exp_state}"
                 else:
-                    summary = "merged to main"
+                    summary = "synced to main"
             elif rec.status == "skipped":
                 summary = str(payload.get("skip_reason") or "skipped")
             phases.append(
@@ -1529,11 +1528,13 @@ class LabReader:
         *,
         kinds: tuple[str, ...] = ("accept", "reject", "no_op"),
     ) -> list[PRStateRow]:
-        """Snapshot of every experiment PR known to the lab.
+        """Snapshot of every canonical experiment PR known to the lab.
 
         Joins ``decisions.pr_url`` (cheap, always present once
         :func:`cli.set_branch` has run) with cached ``gh pr view``
-        output. The cache TTL matches the runner's
+        output. Rejected and no-op outcomes point at the closed
+        implementation PR, not any metadata-only bookkeeping PR. The
+        cache TTL matches the runner's
         ``_PR_MERGE_CACHE_TTL_SEC`` (90 s) so the daemon and the web
         UI see consistent state without each having to spam the
         GitHub API.

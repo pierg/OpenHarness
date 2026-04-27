@@ -530,10 +530,10 @@ class ComponentDetail:
 # Phase 3 — PR-aware redesign view models
 #
 # Surface the methodology dimensions documented in lab/METHODOLOGY.md:
-# every accepted/rejected/no-op decision is bound to a PR landing on
-# `main`. The web UI needs to know, per row, whether that PR is open,
-# merged, or rejected — and the daemon's idle reason needs to surface it
-# when the next tick is parked waiting for CI to go green.
+# every accepted/rejected/no-op decision is bound to the canonical
+# experiment PR. Accepted PRs land on `main`; rejected/no-op PRs are
+# closed unmerged after a verdict comment. The web UI needs to know, per
+# row, whether that PR is open, merged, or rejected.
 # ---------------------------------------------------------------------------
 
 
@@ -677,10 +677,10 @@ class TreeVizNode:
     """One node in the configuration-tree visualisation.
 
     Joined view: ``lab/configs.md`` (current best + rejected +
-    proposed) + ``decisions.pr_url`` + the live PR cache. The
-    template uses this to render the SVG with per-node badges
-    indicating which branch has an open PR (dashed outline), a
-    merged PR (solid border), or no PR yet (no badge).
+    proposed) + the canonical ``decisions.pr_url`` + the live PR
+    cache. The template uses this to render the SVG with per-node
+    badges indicating which branch has an open PR (dashed outline), a
+    merged or closed PR (solid border), or no PR yet (no badge).
     """
 
     node_id: str

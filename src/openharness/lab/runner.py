@@ -59,13 +59,14 @@ Phases, in order:
 
     6. finalize (codex spawn ``lab-finalize-pr``)
         - Workspace-write sandbox. Rebase/resolve against latest
-          ``main`` as needed, create 1 or 2 PR artifacts, and merge
-          the experiment outcome back to ``main`` before the loop
+          ``main`` as needed, open the canonical experiment PR, and
+          sync the experiment outcome back to ``main`` before the loop
           advances.
-        - ``accept`` merges the experiment branch itself. ``reject`` /
-          ``noop`` merge a metadata-only branch
-          while recording the discarded implementation SHA.
-        - After merge, this module fast-forwards the parent repo's
+        - ``accept`` comments on and merges the experiment PR itself.
+          ``reject`` / ``noop`` comment on and close that PR, then sync
+          lab metadata separately while recording the discarded
+          implementation SHA.
+        - After outcome sync, this module fast-forwards the parent repo's
           ``main`` checkout and deletes the worktree.
 
 The daemon is **single-tenant**: it acquires
@@ -597,8 +598,8 @@ def _commit_worktree_changes(
     """Commit tracked lab/tree changes inside the experiment worktree.
 
     The refactored loop keeps all durable experiment state on the
-    experiment branch until finalize merges it back to ``main``.
-    Returning the commit SHA lets finalize cherry-pick metadata-only
+    experiment branch until finalize syncs it back to ``main``.
+    Returning the commit SHA lets finalize cherry-pick lab-only
     history for ``reject`` / ``noop`` verdicts.
     """
     env = _git_env()
@@ -708,7 +709,7 @@ def _collect_lab_commits(
 
 
 def _fast_forward_parent_main() -> None:
-    """Refresh the parent repo after finalize merged the experiment PR."""
+    """Refresh the parent repo after finalize synced the outcome."""
     env = _git_env()
     subprocess.run(
         ["git", "fetch", "origin", "main"],
@@ -751,7 +752,7 @@ def _load_reusable_finalize_json(slug: str, finalize_path: Path) -> dict[str, ob
         return None
     finalize_data = json.loads(finalize_path.read_text())
     if finalize_data.get("merged"):
-        logger.info("merged finalize.json already present for %s; reusing", slug)
+        logger.info("successful finalize.json already present for %s; reusing", slug)
         return finalize_data
     _archive_unmerged_finalize_json(slug, finalize_path)
     return None
@@ -1407,7 +1408,7 @@ def _phase_finalize(
     state: phase_state.SlugPhases,
     cfg: OrchestratorConfig,
 ) -> TickResult | None:
-    """Merge the experiment outcome back to ``main`` and clean up."""
+    """Finalize the canonical experiment PR and sync the outcome."""
     pre = state.get("preflight").payload
     crit = state.get("critique").payload
     run_payload = state.get("run").payload
@@ -1469,8 +1470,37 @@ def _phase_finalize(
 
     if not finalize_data.get("merged"):
         msg = (
-            "finalize did not merge the experiment outcome back to main; "
+            "finalize did not sync the experiment outcome back to main; "
             "refusing to advance the daemon"
+        )
+        phase_state.mark_failed(entry.slug, "finalize", error=msg)
+        return TickResult(ok=False, outcome="error", summary=_summary_truncate(msg))
+
+    canonical_pr_url = (
+        str(
+            finalize_data.get("experiment_pr_url")
+            or finalize_data.get("pr_url")
+            or ""
+        )
+        or None
+    )
+    if not canonical_pr_url:
+        msg = (
+            "finalize did not record the canonical experiment PR URL; "
+            "refusing to advance the daemon"
+        )
+        phase_state.mark_failed(entry.slug, "finalize", error=msg)
+        return TickResult(ok=False, outcome="error", summary=_summary_truncate(msg))
+
+    experiment_pr_state = str(finalize_data.get("experiment_pr_state") or "").lower()
+    expected_pr_state = "merged" if verdict_kind == "accept" else "closed"
+    if (
+        verdict_kind in ("accept", "reject", "no_op")
+        and experiment_pr_state != expected_pr_state
+    ):
+        msg = (
+            f"finalize left canonical experiment PR in state "
+            f"{experiment_pr_state or '(missing)'}; expected {expected_pr_state}"
         )
         phase_state.mark_failed(entry.slug, "finalize", error=msg)
         return TickResult(ok=False, outcome="error", summary=_summary_truncate(msg))
@@ -1479,7 +1509,7 @@ def _phase_finalize(
         try:
             _fast_forward_parent_main()
         except Exception as exc:
-            msg = f"main fast-forward failed after finalize merge: {exc}"
+            msg = f"main fast-forward failed after finalize sync: {exc}"
             phase_state.mark_failed(entry.slug, "finalize", error=msg)
             return TickResult(ok=False, outcome="error", summary=_summary_truncate(msg))
 
@@ -1487,7 +1517,7 @@ def _phase_finalize(
             labtree.mark_decision_merged(
                 instance_id=str(instance_id or ""),
                 applied_by="auto:finalize",
-                pr_url=str(finalize_data.get("pr_url") or "") or None,
+                pr_url=canonical_pr_url,
                 branch_sha=str(finalize_data.get("discarded_sha") or "") or None,
             )
         except Exception:
@@ -1504,7 +1534,7 @@ def _phase_finalize(
     phase_state.mark_ok(entry.slug, "finalize", payload=finalize_data)
     ds.update_tick(
         phase="done",
-        note=f"merged experiment outcome for runs/experiments/{instance_id}",
+        note=f"synced experiment outcome for runs/experiments/{instance_id}",
     )
     return None
 

@@ -381,11 +381,11 @@ SKILL_PROFILES: dict[str, SkillProfile] = {
         notes=(
             "Phase 5 of the lab pipeline. Reads the finished run, the "
             "verdict, and the current queue, then rewrites roadmap/ideas "
-            "on the experiment branch so the merged experiment outcome "
+            "on the experiment branch so the synced experiment outcome "
             "already contains the next queue state."
         ),
     ),
-    # --- phase 6: merge the experiment outcome back to main ---
+    # --- phase 6: finalize the experiment PR and sync the outcome ---
     "lab-finalize-pr": SkillProfile(
         model="gpt-5.5",
         reasoning_effort="xhigh",

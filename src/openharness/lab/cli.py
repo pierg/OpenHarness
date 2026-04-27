@@ -732,17 +732,18 @@ def cmd_exp_set_branch(
     pr_url: Optional[str] = typer.Option(
         None,
         "--pr-url",
-        help="Open PR URL. Renders as `Branch: [<branch>](<pr-url>)` and "
-             "mirrors into `decisions.pr_url` so the web UI can render "
-             "the link without re-parsing markdown.",
+        help="Canonical experiment PR URL. Renders as "
+             "`Branch: [<branch>](<pr-url>)` and mirrors into "
+             "`decisions.pr_url` so the web UI can render the link "
+             "without re-parsing markdown.",
     ),
     rejected_reason: Optional[str] = typer.Option(
         None,
         "--rejected-reason",
         help="One-line reason. Without --pr-url this renders as "
              "`Branch: <branch> — not opened (<reason>)`. With "
-             "--pr-url it becomes a metadata-only merge note for "
-             "reject/noop outcomes.",
+             "--pr-url it becomes a closed experiment PR note for "
+             "reject/no_op outcomes.",
     ),
     discarded_sha: Optional[str] = typer.Option(
         None,
@@ -756,8 +757,8 @@ def cmd_exp_set_branch(
     """Replace the **Branch:** bullet on the journal entry for `slug`.
 
     Called from the `lab-finalize-pr` skill after deciding whether to
-    push the experiment branch and open a PR (`accept`) or to discard
-    the worktree (`reject` / `no_op`).
+    merge the experiment PR (`accept`) or close it unmerged
+    (`reject` / `no_op`).
     Also writes the PR URL / discarded SHA into the `decisions`
     cache so downstream tooling (web UI, audit queries, finalize
     recovery) can find them with a SQL query.
@@ -798,7 +799,7 @@ def cmd_exp_set_branch(
         suffix = f"; discarded={discarded_sha[:7]}" if discarded_sha else ""
         typer.echo(
             f"set Branch bullet for {slug!r} -> PR {pr_url} "
-            f"(metadata-only merge: {rejected_reason}{suffix})"
+            f"(closed experiment PR: {rejected_reason}{suffix})"
         )
     elif pr_url:
         typer.echo(f"set Branch bullet for {slug!r} -> PR {pr_url}")
