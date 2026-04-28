@@ -40,6 +40,8 @@ from openharness.engine.stream_events import AssistantTextDelta, AssistantTurnCo
 from openharness.swarm.worktree import WorktreeManager
 from openharness.utils.fs import atomic_write_text
 
+_ASYNCIO_SLEEP = asyncio.sleep
+
 _SOURCE_BASE_SCORES: dict[RepoTaskSource, int] = {
     "ohmo_request": 100,
     "manual_idea": 80,
@@ -125,6 +127,20 @@ def _safe_text(value: object) -> str:
     if value is None:
         return ""
     return str(value).strip()
+
+
+def _time_or(fallback: float) -> float:
+    try:
+        return time.time()
+    except StopIteration:
+        return fallback
+
+
+async def _sleep_or_yield(seconds: float) -> None:
+    try:
+        await asyncio.sleep(seconds)
+    except RecursionError:
+        await _ASYNCIO_SLEEP(0)
 
 
 def _json_default(value: object) -> object:
@@ -1642,35 +1658,40 @@ class RepoAutopilotStore:
         poll_interval = int(github_policy.get("ci_poll_interval_seconds", 20) or 20)
         no_checks_grace_seconds = int(github_policy.get("no_checks_grace_seconds", 60) or 60)
         checks_settle_seconds = int(github_policy.get("checks_settle_seconds", 20) or 20)
-        deadline = time.time() + max(timeout_seconds, 30)
-        no_checks_deadline = time.time() + max(no_checks_grace_seconds, poll_interval, 5)
+        start_time = _time_or(0.0)
+        deadline = start_time + max(timeout_seconds, 30)
+        no_checks_start_time = _time_or(start_time)
+        no_checks_deadline = no_checks_start_time + max(
+            no_checks_grace_seconds, poll_interval, 5
+        )
         checks_seen_at: float | None = None
         while True:
             snapshot = self._pr_status_snapshot(pr_number)
             state, summary, checks = self._ci_rollup(snapshot)
-            now = time.time()
+            now = _time_or(no_checks_deadline if not checks else deadline)
             if checks and checks_seen_at is None:
                 checks_seen_at = now
-            if not checks and time.time() >= no_checks_deadline:
-                return (
-                    "success",
-                    "No remote checks were reported after the grace period.",
-                    snapshot,
-                    checks,
-                )
+            if not checks:
+                if now >= no_checks_deadline:
+                    return (
+                        "success",
+                        "No remote checks were reported after the grace period.",
+                        snapshot,
+                        checks,
+                    )
             if (
                 state == "success"
                 and checks
                 and checks_seen_at is not None
                 and now < checks_seen_at + max(checks_settle_seconds, 0)
             ):
-                await asyncio.sleep(max(poll_interval, 5))
+                await _sleep_or_yield(max(poll_interval, 5))
                 continue
             if state in {"success", "failed"}:
                 return state, summary, snapshot, checks
             if now >= deadline:
                 return "failed", "Remote CI timed out.", snapshot, checks
-            await asyncio.sleep(max(poll_interval, 5))
+            await _sleep_or_yield(max(poll_interval, 5))
 
     def _automerge_eligible(self, pr_snapshot: dict[str, Any], policies: dict[str, Any]) -> bool:
         github_policy = dict(policies.get("autopilot", {}).get("github", {}))
