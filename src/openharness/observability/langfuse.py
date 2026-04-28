@@ -28,6 +28,13 @@ from pydantic import BaseModel
 log = logging.getLogger(__name__)
 
 
+class _PublicHostUnset:
+    pass
+
+
+_PUBLIC_HOST_UNSET = _PublicHostUnset()
+
+
 def _resolve_public_host_env() -> str | None:
     """Return the externally reachable Langfuse base URL, if configured.
 
@@ -38,7 +45,10 @@ def _resolve_public_host_env() -> str | None:
     return os.environ.get("LANGFUSE_PUBLIC_HOST") or None
 
 
-def rewrite_trace_url_for_public(url: str, public_host: str | None = None) -> str:
+def rewrite_trace_url_for_public(
+    url: str,
+    public_host: str | None | _PublicHostUnset = _PUBLIC_HOST_UNSET,
+) -> str:
     """Rewrite a Langfuse trace URL so its host matches ``public_host``.
 
     Useful when the agent runs inside Docker and must POST traces to a
@@ -46,10 +56,11 @@ def rewrite_trace_url_for_public(url: str, public_host: str | None = None) -> st
     the same trace from their laptop, where the same instance is reachable as
     ``http://localhost:3010`` via SSH port forwarding.
 
-    Returns the URL unchanged when no public host is provided or when the URL
-    is malformed.
+    Omitting ``public_host`` falls back to ``LANGFUSE_PUBLIC_HOST``. Passing
+    ``None`` explicitly disables rewriting. Returns the URL unchanged when no
+    public host is available or when the URL is malformed.
     """
-    target = public_host or _resolve_public_host_env()
+    target = _resolve_public_host_env() if public_host is _PUBLIC_HOST_UNSET else public_host
     if not target or not url:
         return url
     try:

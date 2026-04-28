@@ -70,6 +70,7 @@ def _apply_phase_gemini_key(
 ) -> dict[str, str]:
     phase_key = _dotenv_value(dotenv_path, key_name) or env.get(key_name)
     if phase_key:
+        env[key_name] = phase_key
         env["GOOGLE_API_KEY"] = phase_key
         env["GEMINI_API_KEY"] = phase_key
     return env
